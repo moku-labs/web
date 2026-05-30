@@ -1,9 +1,110 @@
-import { describe, it } from "vitest";
+import type { Root as HastRoot } from "hast";
+import { describe, expect, it } from "vitest";
+import { ensureProcessor } from "../../pipeline/markdown";
+import { createContentState } from "../../state";
+import type { Config } from "../../types";
+
+const baseConfig: Config = {
+  contentDir: "./src/content",
+  trustedContent: false,
+  extraRemarkPlugins: [],
+  extraRehypePlugins: [],
+  shikiTheme: "github-dark"
+};
+
+/** Render markdown through a freshly-built processor for the given config. */
+async function render(md: string, config: Config = baseConfig): Promise<string> {
+  const state = createContentState({ global: {}, config });
+  const processor = ensureProcessor(state, config);
+  return String(await processor.process(md));
+}
 
 describe("content/pipeline/markdown", () => {
-  it.todo("renders headings, code blocks, and tables");
-  it.todo("strips <script>/onerror/javascript: when trustedContent is false (sanitize LAST)");
-  it.todo("passes the same XSS payload through when trustedContent is true");
-  it.todo("preserves pull-quote/section-divider/loading=lazy via the extended schema");
-  it.todo("concatenates extraRemarkPlugins/extraRehypePlugins, NOT replacing defaults");
+  it("renders headings, code blocks, and tables", async () => {
+    const html = await render(
+      [
+        "# Title",
+        "",
+        "| a | b |",
+        "| - | - |",
+        "| 1 | 2 |",
+        "",
+        "```ts",
+        "const x = 1;",
+        "```"
+      ].join("\n")
+    );
+    expect(html).toContain("<h1");
+    expect(html).toContain("Title");
+    expect(html).toContain("<table");
+    // Shiki wraps code in <pre class="shiki"> ... <code>.
+    expect(html).toContain("shiki");
+    expect(html).toContain("<code");
+  });
+
+  it("strips <script>/onerror/javascript: when trustedContent is false (sanitize LAST)", async () => {
+    const md = [
+      "<script>alert(1)</script>",
+      "",
+      '<img src="x" onerror="alert(2)">',
+      "",
+      "[click](javascript:alert(3))"
+    ].join("\n");
+    const html = await render(md, { ...baseConfig, trustedContent: false });
+    expect(html).not.toContain("<script");
+    expect(html).not.toContain("onerror");
+    expect(html.toLowerCase()).not.toContain("javascript:");
+  });
+
+  it("passes the same XSS payload through when trustedContent is true", async () => {
+    const md = "<script>alert(1)</script>";
+    const html = await render(md, { ...baseConfig, trustedContent: true });
+    expect(html).toContain("<script>alert(1)</script>");
+  });
+
+  it("preserves pull-quote/section-divider/loading=lazy via the extended schema", async () => {
+    const md = [
+      ":::pullquote",
+      "An important aside.",
+      ":::",
+      "",
+      "![alt](pic.png)",
+      "",
+      "---"
+    ].join("\n");
+    const html = await render(md, { ...baseConfig, trustedContent: false });
+    expect(html).toContain('class="pull-quote"');
+    expect(html).toContain('loading="lazy"');
+    expect(html).toContain('class="section-divider"');
+    expect(html).toContain("section-divider-ornament");
+  });
+
+  it("concatenates extraRemarkPlugins/extraRehypePlugins, NOT replacing defaults", async () => {
+    const flags = { remarkRan: false, rehypeRan: false };
+    /** Marker remark plugin that flips a flag when run. */
+    function markerRemark() {
+      // eslint-disable-next-line unicorn/consistent-function-scoping -- test marker captures `flags`
+      return (_tree: HastRoot) => {
+        flags.remarkRan = true;
+      };
+    }
+    /** Marker rehype plugin that flips a flag when run. */
+    function markerRehype() {
+      // eslint-disable-next-line unicorn/consistent-function-scoping -- test marker captures `flags`
+      return (_tree: HastRoot) => {
+        flags.rehypeRan = true;
+      };
+    }
+    const html = await render("# Still Works", {
+      ...baseConfig,
+      extraRemarkPlugins: [markerRemark],
+      extraRehypePlugins: [markerRehype]
+    });
+    // The extras ran...
+    expect(flags.remarkRan).toBe(true);
+    expect(flags.rehypeRan).toBe(true);
+    // ...AND the framework default (heading rendering) still produced output.
+    expect(html).toContain("<h1");
+    expect(html).toContain("Still Works");
+  });
 });

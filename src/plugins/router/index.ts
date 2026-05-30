@@ -1,5 +1,5 @@
 /**
- * @file router — Complex Plugin skeleton (wiring only).
+ * @file router — Complex plugin wiring (logic in builders/, api.ts, state.ts).
  * @see README.md
  */
 import { createPlugin } from "../../config";
@@ -11,9 +11,8 @@ import { defineRoutes, route } from "./builders/route-builder";
 import { createState } from "./state";
 import type { RouterConfig } from "./types";
 
-/** Default router config: empty route map, hybrid mode. */
+/** Default router config: empty route map (validated in onInit), hybrid mode. */
 const defaultConfig: RouterConfig = { routes: {}, mode: "hybrid" };
-
 export const routerPlugin = createPlugin("router", {
   depends: [sitePlugin, i18nPlugin],
   helpers: { route, defineRoutes },
@@ -22,15 +21,9 @@ export const routerPlugin = createPlugin("router", {
   api: createApi,
   // eslint-disable-next-line jsdoc/require-jsdoc -- thin wiring; logic in builders/compile.ts
   onInit(ctx) {
-    const site = ctx.require(sitePlugin);
     const i18n = ctx.require(i18nPlugin);
-    ctx.state.table = buildRouterTable(
-      ctx.config,
-      site.url(),
-      i18n.locales(),
-      i18n.defaultLocale()
-    );
+    const baseUrl = ctx.require(sitePlugin).url();
+    ctx.state.table = buildRouterTable(ctx.config, baseUrl, i18n.locales(), i18n.defaultLocale());
   }
 });
-
 export { defineRoutes, route } from "./builders/route-builder";

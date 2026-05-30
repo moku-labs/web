@@ -1,6 +1,23 @@
-import { describe, it } from "vitest";
+import { describe, expect, it } from "vitest";
+import { buildSanitizeSchema } from "../../pipeline/sanitize";
 
 describe("content/pipeline/sanitize", () => {
-  it.todo("allowlists pull-quote and section-divider classes");
-  it.todo("allowlists loading attribute on img");
+  it("allowlists pull-quote and section-divider classes", () => {
+    const schema = buildSanitizeSchema();
+    const attrs = schema.attributes ?? {};
+    // class allowance lives on aside/div/span for our directive output.
+    const asideClasses = attrs.aside ?? [];
+    const divClasses = attrs.div ?? [];
+    const spanClasses = attrs.span ?? [];
+    const flat = JSON.stringify([asideClasses, divClasses, spanClasses]);
+    expect(flat).toContain("pull-quote");
+    expect(flat).toContain("section-divider");
+    expect(flat).toContain("section-divider-ornament");
+  });
+
+  it("allowlists loading attribute on img", () => {
+    const schema = buildSanitizeSchema();
+    const imgAttrs = schema.attributes?.img ?? [];
+    expect(imgAttrs).toContain("loading");
+  });
 });

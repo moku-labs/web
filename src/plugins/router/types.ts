@@ -9,23 +9,36 @@
 import type { ComponentChildren, VNode } from "preact";
 
 /**
- * Template-literal type that extracts path params from a URL pattern.
- * `{name}` / `:name` become required; `{name:?}` becomes optional.
+ * Param contribution of a single path segment. `{name:?}` / `:name?` → optional;
+ * `{name}` / `:name` → required; static segments contribute nothing.
+ *
+ * @example
+ * type S = ExtractSegmentParameter<"{slug}">; // { slug: string }
+ */
+export type ExtractSegmentParameter<Segment extends string> = Segment extends `{${infer Name}:?}`
+  ? { [K in Name]?: string }
+  : Segment extends `{${infer Name}}`
+    ? { [K in Name]: string }
+    : Segment extends `:${infer Name}?`
+      ? { [K in Name]?: string }
+      : Segment extends `:${infer Name}`
+        ? { [K in Name]: string }
+        : Record<never, never>;
+
+/**
+ * Template-literal type that extracts path params from a URL pattern by walking
+ * one `/`-delimited segment at a time (so mixed required/optional patterns infer
+ * correctly). `{name}` / `:name` become required; `{name:?}` becomes optional.
  *
  * @example
  * type P = ExtractRouteParams<"/{lang:?}/{slug}/">; // { lang?: string; slug: string }
  */
-export type ExtractRouteParams<P extends string> =
-  P extends `${string}{${infer Parameter}:?}${infer Rest}`
-    ? { [K in Parameter]?: string } & ExtractRouteParams<Rest>
-    : P extends `${string}{${infer Parameter}}${infer Rest}`
-      ? { [K in Parameter]: string } & ExtractRouteParams<Rest>
-      : P extends `${string}:${infer Parameter}/${infer Rest}`
-        ? { [K in Parameter]: string } & ExtractRouteParams<`/${Rest}`>
-        : Record<never, never>;
+export type ExtractRouteParams<P extends string> = P extends `${infer Head}/${infer Tail}`
+  ? ExtractSegmentParameter<Head> & ExtractRouteParams<Tail>
+  : ExtractSegmentParameter<P>;
 
-/** Flattens an intersection type for readable IntelliSense. */
-export type Prettify<T> = { [K in keyof T]: T[K] } & Record<never, never>;
+/** Flattens an intersection type into a single object literal for readable IntelliSense. */
+export type Prettify<T> = { [K in keyof T]: T[K] };
 
 /**
  * Accumulating generic carried by `RouteBuilder` as the fluent chain grows.
@@ -62,11 +75,14 @@ export interface HeadConfig {
  * Fluent route builder. Each chain method returns the same builder with a
  * (possibly widened) state generic. Only `.load()` widens the data type `D`.
  */
-export interface RouteBuilder<S extends RouteState> {
-  /** Attach a data loader; widens the data generic so `.render()`/`.head()` see its return. */
+export interface RouteBuilder<S extends RouteState> extends RouteDefinition {
+  /**
+   * Attach a data loader; widens the data generic (and ONLY the data generic) so
+   * `.render()`/`.head()` see its return. Path params are preserved unchanged.
+   */
   load<D>(
     loader: (params: S["params"], locale: string) => D | Promise<D>
-  ): RouteBuilder<RouteState<string, Awaited<D>>>;
+  ): RouteBuilder<{ readonly params: S["params"]; readonly data: Awaited<D> }>;
   /** Attach a layout wrapper component. */
   layout(component: (children: ComponentChildren) => VNode): RouteBuilder<S>;
   /** Attach the page render handler. */
@@ -109,8 +125,8 @@ export interface RouteHandlers {
 export interface RouteDefinition {
   /** URL pattern string, e.g. `/{lang:?}/{slug}/`. */
   readonly pattern: string;
-  /** Metadata bag from `.meta()`. */
-  readonly meta: Record<string, unknown>;
+  /** Metadata bag accumulated from `.meta()` (named `_meta` to avoid clashing with the `.meta()` builder method). */
+  readonly _meta: Record<string, unknown>;
   /** Build-time handler bag (load/render/head/generate/toJson/toFile). */
   readonly _handlers: RouteHandlers;
 }
