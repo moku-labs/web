@@ -1,10 +1,10 @@
 # .github/workflows/create-release.yml
 #
-# Manually-triggered release cutter. Runs the reusable parallel check suite first;
-# only if all checks pass does it bump the version, commit + tag it on main, and
-# create a GitHub Release with auto-generated notes. It does NOT publish to npm —
-# publishing is handled by publish.yml, which triggers on the release being
-# published. Actions are SHA-pinned for supply-chain hygiene.
+# Manually-triggered release cutter. Runs the parallel check suite, then (only if
+# green) bumps the version, tags it, creates a GitHub Release with categorized
+# conventional-commit notes, and publishes to npm in the SAME run (inline, via the
+# reusable publish-npm.yml — a workflow-created release cannot trigger a separate
+# publish workflow on its own). Actions are SHA-pinned for supply-chain hygiene.
 
 name: Create Release
 
@@ -24,6 +24,7 @@ on:
 
 permissions:
   contents: write # push the version-bump commit + tag and create the release
+  id-token: write # OIDC for the inline npm publish job
 
 concurrency:
   group: create-release
@@ -36,10 +37,12 @@ jobs:
   create-release:
     needs: checks
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          fetch-depth: 0 # full history so release notes can diff from the last tag
+          fetch-depth: 0 # full history so the changelog can diff from the last tag
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 24
@@ -61,15 +64,49 @@ jobs:
           git tag -a "${VERSION}" -m "${VERSION}"
           git push origin "HEAD:${GITHUB_REF_NAME}" --follow-tags
 
-      - name: Create GitHub Release
+      - name: Create GitHub Release with categorized notes
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.bump.outputs.version }}
         run: |
-          # Flag prerelease versions (semver with a `-` suffix) so the GitHub Release
-          # and the npm `next` dist-tag stay consistent; stable versions become latest.
+          PREV="$(git describe --tags --abbrev=0 "${VERSION}^" 2>/dev/null || true)"
+          RANGE="${PREV:+${PREV}..}${VERSION}"
+
+          # Emit a markdown section for one conventional-commit type group.
+          section() {
+            local title="$1" types="$2" body
+            body="$(git log "$RANGE" --no-merges --pretty=format:'%s||%h' \
+              | grep -vE '^chore\(release\)' \
+              | grep -E "^(${types})(\([^)]+\))?!?: " || true)"
+            [ -z "$body" ] && return 0
+            printf '### %s\n\n' "$title"
+            printf '%s\n' "$body" \
+              | sed -E 's/^[a-z]+\(([^)]+)\)!?: /**\1**: /; s/^[a-z]+!?: //; s/\|\|([0-9a-f]+)$/ (\1)/; s/^/- /'
+            printf '\n'
+          }
+
+          {
+            section "🚀 Features" "feat"
+            section "🐛 Bug Fixes" "fix"
+            section "⚡ Performance" "perf"
+            section "♻️ Refactoring" "refactor"
+            section "📝 Documentation" "docs"
+            section "🧪 Tests" "test"
+            section "🔧 CI & Build" "ci|build|chore"
+            if [ -n "$PREV" ]; then
+              printf '**Full Changelog**: https://github.com/%s/compare/%s...%s\n' \
+                "$GITHUB_REPOSITORY" "$PREV" "$VERSION"
+            fi
+          } > RELEASE_NOTES.md
+
           PRERELEASE_FLAG=""
           case "${VERSION}" in
             *-*) PRERELEASE_FLAG="--prerelease" ;;
           esac
-          gh release create "${VERSION}" --title "${VERSION}" --generate-notes ${PRERELEASE_FLAG}
+          gh release create "${VERSION}" --title "${VERSION}" --notes-file RELEASE_NOTES.md ${PRERELEASE_FLAG}
+
+  publish:
+    needs: create-release
+    uses: ./.github/workflows/publish-npm.yml
+    with:
+      ref: ${{ needs.create-release.outputs.version }}
