@@ -57,12 +57,12 @@ export function resolveSpaConfig(config: SpaConfig): ResolvedSpaConfig {
   const swapSelector = config.swapSelector ?? defaultSpaConfig.swapSelector ?? "main > section";
   if (swapSelector.trim() === "") {
     throw new Error(
-      `${ERROR_PREFIX} spa.swapSelector must be a non-empty string\n  → set a CSS selector for the page region to swap (e.g. "main > section")`
+      `${ERROR_PREFIX} spa.swapSelector must be a non-empty string.\n  Set a CSS selector for the page region to swap (e.g. "main > section").`
     );
   }
   if (!isValidSelector(swapSelector)) {
     throw new Error(
-      `${ERROR_PREFIX} spa.swapSelector is not a valid CSS selector: "${swapSelector}"\n  → provide a syntactically valid selector`
+      `${ERROR_PREFIX} spa.swapSelector is not a valid CSS selector: "${swapSelector}".\n  Provide a syntactically valid selector.`
     );
   }
   return {

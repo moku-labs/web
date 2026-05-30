@@ -163,7 +163,7 @@ export function createSpaKernel(
       if (typeof document === "undefined") return;
       if (state.started) {
         throw new Error(
-          `${ERROR_PREFIX} spa kernel already started\n  → call app.stop() before booting again (single boot per app)`
+          `${ERROR_PREFIX} spa kernel already started.\n  Call app.stop() before booting again (single boot per app).`
         );
       }
       progress = createProgressBar(resolved.progressBar);
