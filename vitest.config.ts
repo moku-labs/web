@@ -1,12 +1,21 @@
 import { defineConfig } from "vitest/config";
 
+// Shiki's first highlight loads its WASM engine + grammars + theme, which can
+// exceed vitest's 5s default on a cold CI runner (the content/build tests hit
+// this). Give that one-time warmup headroom; warm runs finish well under a second.
+// NOTE: must be set per-project — root-level `test.*` options do NOT cascade into
+// the `projects[]` configs (only true globals like `onConsoleLog`/`coverage` do).
+const WARMUP_TIMEOUT = 30_000;
+
 export default defineConfig({
   test: {
     projects: [
       {
         test: {
           name: "unit",
-          include: ["tests/unit/**/*.test.ts", "src/plugins/**/__tests__/unit/**/*.test.ts"]
+          include: ["tests/unit/**/*.test.ts", "src/plugins/**/__tests__/unit/**/*.test.ts"],
+          testTimeout: WARMUP_TIMEOUT,
+          hookTimeout: WARMUP_TIMEOUT
         }
       },
       {
@@ -15,7 +24,9 @@ export default defineConfig({
           include: [
             "tests/integration/**/*.test.ts",
             "src/plugins/**/__tests__/integration/**/*.test.ts"
-          ]
+          ],
+          testTimeout: WARMUP_TIMEOUT,
+          hookTimeout: WARMUP_TIMEOUT
         }
       }
     ],
@@ -28,11 +39,6 @@ export default defineConfig({
     onConsoleLog(_log, type) {
       return type === "stderr";
     },
-    // Shiki's first highlight loads its WASM engine + grammars + theme, which can
-    // exceed the 5s default on a cold CI runner (the content/build tests hit this).
-    // Give that one-time warmup headroom; warm runs finish in well under a second.
-    testTimeout: 30_000,
-    hookTimeout: 30_000,
     coverage: {
       provider: "istanbul",
       include: ["src/**/*.ts"],
