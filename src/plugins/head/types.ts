@@ -139,12 +139,14 @@ export type ArticleMeta = {
  *
  * @example
  * ```ts
- * const route: ResolvedRoute = { path: "/about", params: {} };
+ * const route: ResolvedRoute = { path: "/about", params: {}, name: "about" };
  * ```
  */
 export type ResolvedRoute = {
   /** The resolved path of the route. */
   path: string;
+  /** The route name key (used by `router.toUrl` for canonical/alternate hrefs). */
+  name: string;
   /** Resolved route params. */
   params: Record<string, string>;
   /** The active locale for this route render. */
