@@ -230,7 +230,9 @@ function compileRoute(
       return buildUrl(pattern, params, input.baseUrl);
     },
     /**
-     * Build the output file path for this route from params.
+     * Build the output file path for this route from params. Honors a custom
+     * `.toFile()` override (captured in `_handlers.toFile`) when present, falling
+     * back to the pattern-derived `…/index.html` path otherwise.
      *
      * @param params - Param values to substitute.
      * @returns The output file path.
@@ -240,7 +242,7 @@ function compileRoute(
      * ```
      */
     toFile(params: Record<string, string>): string {
-      return buildFilePath(pattern, params);
+      return definition._handlers.toFile?.(params) ?? buildFilePath(pattern, params);
     },
     definition,
     meta: { ...definition._meta }

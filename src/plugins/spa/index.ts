@@ -1,6 +1,6 @@
 /**
- * @file spa — Complex Plugin skeleton (WIRING ONLY, ≤30 lines).
- * @see README.md
+ * @file spa — Complex Plugin (WIRING ONLY, ≤30 lines). All logic lives in the
+ * domain files (kernel/router/head/progress/components/lifecycle); index wires.
  */
 import { createPlugin } from "../../config";
 import { headPlugin } from "../head";
@@ -8,6 +8,7 @@ import { routerPlugin } from "../router";
 import { createApi } from "./api";
 import { spaEvents } from "./events";
 import { initSpa, kernelRef } from "./kernel";
+import { captureTeardown, disposeSpa } from "./lifecycle";
 import { createState, defaultSpaConfig } from "./state";
 
 export const spaPlugin = createPlugin("spa", {
@@ -17,10 +18,12 @@ export const spaPlugin = createPlugin("spa", {
   events: spaEvents,
   onInit: initSpa,
   api: createApi,
-  // eslint-disable-next-line jsdoc/require-jsdoc -- thin wiring; resource teardown
-  onStop() {
-    kernelRef.current?.dispose();
-  }
+  // eslint-disable-next-line jsdoc/require-jsdoc -- thin wiring; boot lives in kernel.boot()
+  onStart(ctx) {
+    captureTeardown(ctx);
+    kernelRef.current?.boot();
+  },
+  onStop: disposeSpa // disposeSpa runs the captured kernel.dispose() in try/catch/finally
 });
 
 export { createComponent } from "./components";

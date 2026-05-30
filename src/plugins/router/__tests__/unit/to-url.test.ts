@@ -69,4 +69,10 @@ describe("compiled toUrl via byName", () => {
     const table = compileRoutes(makeInput({ post: route("/{slug}/") }));
     expect(table.byName.get("post")?.toFile({ slug: "hi" })).toBe("hi/index.html");
   });
+
+  it("toFile honors a custom .toFile() override over the pattern default", () => {
+    const feed = route("/feed/").toFile(() => "feed.xml");
+    const table = compileRoutes(makeInput({ feed }));
+    expect(table.byName.get("feed")?.toFile({})).toBe("feed.xml");
+  });
 });

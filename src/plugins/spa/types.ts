@@ -3,8 +3,72 @@
  * @see README.md
  */
 
+import type { EmitFn as EmitFunction } from "@moku-labs/core";
 import type { Api as HeadApi } from "../head/types";
+import type { LogApi } from "../log/types";
 import type { RouterApi } from "../router/types";
+
+/** Payload map for the events `spa` emits, used to type the kernel's `emit` closure. */
+export type SpaEvents = {
+  /** A navigation has been intercepted and is starting. */
+  "spa:navigate": { from: string; to: string };
+  /** The swap completed and the new URL is active. */
+  "spa:navigated": { url: string };
+  /** A component instance attached to an element. */
+  "spa:component-mount": { name: string; el: Element };
+  /** A component instance detached from an element. */
+  "spa:component-unmount": { name: string; el: Element };
+};
+
+/** Strictly-typed emit closure for the spa events (kernel overload form). */
+export type SpaEmitFunction = EmitFunction<SpaEvents>;
+
+/**
+ * Structural extraction of a plugin instance's public API from its `_phantom`
+ * carrier (mirrors the kernel's non-exported `ExtractPluginApi`).
+ *
+ * @example
+ * type RApi = ExtractApi<typeof routerPlugin>;
+ */
+export type ExtractApi<PluginCandidate> = PluginCandidate extends {
+  readonly _phantom: { readonly api: infer PluginApi };
+}
+  ? PluginApi
+  : never;
+
+/** Generic `require` closure for pulling dependency plugin APIs at init time. */
+export type SpaRequire = <
+  PluginCandidate extends {
+    readonly name: string;
+    readonly spec: unknown;
+    readonly _phantom: {
+      readonly config: unknown;
+      readonly state: unknown;
+      readonly api: unknown;
+      readonly events: Record<string, unknown>;
+    };
+  }
+>(
+  plugin: PluginCandidate
+) => ExtractApi<PluginCandidate>;
+
+/**
+ * The plugin-context slice the spa wiring consumes in `onInit`/`onStart`:
+ * mutable `state`, resolved `config`, `require`/`emit`/`log`. Structurally
+ * assignable from the framework's generic execution context.
+ */
+export interface SpaContext {
+  /** Mutable spa state (all kernel data lives here). */
+  state: SpaState;
+  /** Resolved, frozen spa config. */
+  readonly config: Readonly<SpaConfig>;
+  /** Resolve a depended-upon plugin instance to its public API. */
+  require: SpaRequire;
+  /** Emit a spa lifecycle event (notification-only). */
+  emit: SpaEmitFunction;
+  /** Structured logger (core `log` API). */
+  readonly log: LogApi;
+}
 
 /** Configuration for the SPA runtime plugin. All fields optional; defaults applied in onInit. */
 export type SpaConfig = {
@@ -156,21 +220,19 @@ export interface SpaKernel {
   /**
    * Validate config, register config.components, seed currentUrl.
    *
-   * @param ctx - The plugin context (read for config/state seeding).
    * @returns void
    * @example
-   * kernel.init(ctx);
+   * kernel.init();
    */
-  init(ctx: unknown): void;
+  init(): void;
   /**
    * Boot the browser runtime (router listeners + initial scan). Throws if started.
    *
-   * @param ctx - The plugin context (read for runtime wiring).
    * @returns void
    * @example
-   * kernel.boot(ctx);
+   * kernel.boot();
    */
-  boot(ctx: unknown): void;
+  boot(): void;
   /**
    * Register a component definition (last-registered-wins).
    *
