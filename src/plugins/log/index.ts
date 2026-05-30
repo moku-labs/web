@@ -1,11 +1,5 @@
 /**
- * Framework structured-logging + workflow-verification core plugin. Records
- * every entry in an always-on in-memory trace and fans out to mode-selected
- * sinks; exposes the `expect()` event-trace DSL. API injected as `ctx.log` on
- * every regular plugin context and surfaced as `app.log`. NO depends / events /
- * hooks (core plugin per spec/03 §5).
- *
- * @file log — Core Plugin skeleton (Standard tier).
+ * @file log — Core Plugin (Standard tier): in-memory trace + expect() DSL.
  * @see README.md
  */
 import { createCorePlugin } from "@moku-labs/core";
@@ -17,6 +11,13 @@ import type { LogConfig } from "./types";
 /** Default config; overridden via the 4-level pluginConfigs.log merge. */
 const defaultLogConfig: LogConfig = { mode: "production" };
 
+/**
+ * Core logging plugin — always-on in-memory trace + `expect()` event-trace DSL.
+ * API injected as `ctx.log` on every regular plugin and surfaced as `app.log`.
+ * No depends / events / hooks (core plugin per spec/03 §5).
+ *
+ * @see README.md
+ */
 export const logPlugin = createCorePlugin("log", {
   config: defaultLogConfig,
   createState: createLogState,
