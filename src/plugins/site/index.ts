@@ -1,5 +1,6 @@
 /**
- * site — Micro Plugin skeleton (multi-file: shared Config/Api types).
+ * site — Micro tier. Multi-file layout (index wiring + api.ts + types.ts) so
+ * index.ts stays within the ≤30-line wiring-only hook; logic lives in api.ts.
  *
  * Holds global, frozen site metadata (name, url, author, description) and
  * constructs canonical URLs. Consumed by router/head/build via

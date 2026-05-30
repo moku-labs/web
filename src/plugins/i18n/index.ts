@@ -1,5 +1,6 @@
 /**
- * i18n — Micro Plugin skeleton (multi-file: shared Config/Api types).
+ * i18n — Micro tier. Multi-file layout (index wiring + api.ts + types.ts) so
+ * index.ts stays within the ≤30-line wiring-only hook; logic lives in api.ts.
  *
  * Locale registry + flat translation helper with default-locale fallback.
  * Pure config-as-data: no state, no events, no lifecycle resources.
