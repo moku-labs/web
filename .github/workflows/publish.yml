@@ -1,8 +1,9 @@
 # .github/workflows/publish.yml
 #
 # Publishes @moku-labs/web to npm when a GitHub Release is published (created by
-# create-release.yml or by hand). Uses npm OIDC "trusted publishing" — no token,
-# provenance attached automatically.
+# create-release.yml or by hand). Runs the reusable parallel check suite first,
+# then publishes via npm OIDC "trusted publishing" — no token, provenance attached
+# automatically.
 #
 # IMPORTANT: the npm trusted-publisher configured on npmjs.com for this package must
 # reference THIS workflow's filename (publish.yml) and this repository, or the OIDC
@@ -23,15 +24,17 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml
+
   publish:
+    needs: checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event.release.tag_name }}
-      # Node 24: the router relies on the global URLPattern, which is only a global
-      # in Node 24+ (vitest spawns its workers under Node, not Bun). registry-url
-      # also wires up npm for the OIDC publish step below.
+      # Node 24 (URLPattern global) + registry-url wires up npm for the OIDC publish.
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 24
@@ -49,12 +52,7 @@ jobs:
             exit 1
           fi
 
-      # Full checks before anything reaches npm.
-      - run: bun run lint
-      - run: bunx tsc --noEmit
-      - run: bun run test
       - run: bun run build
-      - run: bun run validate
 
       # Publish via npm OIDC trusted publishing (tokenless; provenance automatic).
       - name: Upgrade npm to a trusted-publishing-capable version

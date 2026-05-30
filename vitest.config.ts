@@ -28,6 +28,11 @@ export default defineConfig({
     onConsoleLog(_log, type) {
       return type === "stderr";
     },
+    // Shiki's first highlight loads its WASM engine + grammars + theme, which can
+    // exceed the 5s default on a cold CI runner (the content/build tests hit this).
+    // Give that one-time warmup headroom; warm runs finish in well under a second.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     coverage: {
       provider: "istanbul",
       include: ["src/**/*.ts"],
