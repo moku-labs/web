@@ -20,16 +20,16 @@ describe("progress bar (enabled)", () => {
 
     bar.start();
     // Before the delay elapses, the bar has not activated.
-    expect(el.classList.contains("active")).toBe(false);
+    expect("active" in el.dataset).toBe(false);
     vi.advanceTimersByTime(150);
-    expect(el.classList.contains("active")).toBe(true);
+    expect("active" in el.dataset).toBe(true);
     // width has activated (>=15%); the first trickle fires synchronously after the delay.
     expect(Number.parseFloat(el.style.width)).toBeGreaterThanOrEqual(15);
 
     bar.done();
     expect(el.style.width).toBe("100%");
     vi.advanceTimersByTime(200);
-    expect(el.classList.contains("active")).toBe(false);
+    expect("active" in el.dataset).toBe(false);
   });
 
   it("trickles upward while loading but never reaches 100% before done", () => {

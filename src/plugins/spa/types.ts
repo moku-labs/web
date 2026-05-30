@@ -139,7 +139,7 @@ export interface ComponentHooks {
    * @param ctx - The component context for this instance.
    * @returns void
    * @example
-   * onNavStart({ el }) { el.classList.add("loading"); }
+   * onNavStart({ el }) { el.dataset.loading = ""; }
    */
   onNavStart?(ctx: ComponentContext): void;
   /**
@@ -148,7 +148,7 @@ export interface ComponentHooks {
    * @param ctx - The component context for this instance.
    * @returns void
    * @example
-   * onNavEnd({ el }) { el.classList.remove("loading"); }
+   * onNavEnd({ el }) { delete el.dataset.loading; }
    */
   onNavEnd?(ctx: ComponentContext): void;
   /**

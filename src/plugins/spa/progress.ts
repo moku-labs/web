@@ -85,7 +85,7 @@ export function createProgressBar(enabled: boolean): ProgressBar {
     delayTimer = setTimeout(() => {
       width = 15;
       element.style.width = "15%";
-      element.classList.add("active");
+      element.dataset.active = "";
       trickle();
     }, START_DELAY_MS);
   };
@@ -100,9 +100,9 @@ export function createProgressBar(enabled: boolean): ProgressBar {
     clearTimeout(delayTimer);
     clearTimeout(trickleTimer);
     element.style.width = "100%";
-    element.classList.add("active");
+    element.dataset.active = "";
     setTimeout(() => {
-      element.classList.remove("active");
+      delete element.dataset.active;
       element.style.width = "0%";
       width = 0;
     }, DONE_LINGER_MS);

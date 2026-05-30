@@ -3,17 +3,38 @@
  */
 
 /**
- * The subset of Bun.spawn's signature the plugin relies on (argv array + options).
- * Injectable via state so the wrangler subprocess can be mocked in unit tests.
+ * Options passed to the injected spawner — the subset of Bun.spawn's options the
+ * plugin uses (piped stdout/stderr plus an env carrying the API token).
  */
-export type SpawnFunction = (
-  cmd: string[],
-  options: import("bun").SpawnOptions.OptionsObject<
-    import("bun").SpawnOptions.Writable,
-    import("bun").SpawnOptions.Readable,
-    import("bun").SpawnOptions.Readable
-  >
-) => import("bun").Subprocess;
+export interface SpawnOptions {
+  /** Capture stdout as a readable stream. */
+  readonly stdout: "pipe";
+  /** Capture stderr as a readable stream. */
+  readonly stderr: "pipe";
+  /** Subprocess environment — the API token is injected here, never via argv. */
+  readonly env?: Record<string, string | undefined>;
+}
+
+/**
+ * The structural subprocess handle the plugin reads back: stdout/stderr streams
+ * plus the exit-code promise. Streams are typed `unknown` and narrowed at the read
+ * site so this carries no Bun namespace types.
+ */
+export interface SpawnedProcess {
+  /** Standard output stream (narrowed to a ReadableStream at the read site). */
+  readonly stdout: unknown;
+  /** Standard error stream (narrowed to a ReadableStream at the read site). */
+  readonly stderr: unknown;
+  /** Resolves with the subprocess exit code. */
+  readonly exited: Promise<number>;
+}
+
+/**
+ * The subset of Bun.spawn's signature the plugin relies on (argv array + options).
+ * Declared structurally — with NO `import("bun")` namespace types — so it survives
+ * `.d.ts` bundling intact and tests can supply a fake spawn without importing Bun.
+ */
+export type SpawnFunction = (cmd: string[], options: SpawnOptions) => SpawnedProcess;
 
 /**
  * A deploy error `code` from the wrangler error taxonomy and preflight validators.

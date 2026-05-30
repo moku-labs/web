@@ -1,6 +1,8 @@
 /**
- * @file deploy — Standard Plugin skeleton (wiring harness only). Deploys the
- * built dist/ to Cloudflare Pages via the injectable wrangler subprocess.
+ * @file deploy — Standard Plugin (wiring harness only). Deploys the built dist/
+ * to Cloudflare Pages via the injectable wrangler subprocess.
+ *
+ * Depends: site. Emits: deploy:complete.
  * @see README.md
  */
 

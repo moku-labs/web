@@ -1,6 +1,10 @@
 /**
  * @file spa — Complex Plugin (WIRING ONLY, ≤30 lines). All logic lives in the
  * domain files (kernel/router/head/progress/components/lifecycle); index wires.
+ *
+ * Depends: router, head.
+ * Emits: spa:navigate, spa:navigated, spa:component-mount, spa:component-unmount.
+ * @see README.md
  */
 import { createPlugin } from "../../config";
 import { headPlugin } from "../head";
