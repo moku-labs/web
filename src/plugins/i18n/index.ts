@@ -1,0 +1,28 @@
+/**
+ * i18n — Micro Plugin skeleton (multi-file: shared Config/Api types).
+ *
+ * Locale registry + flat translation helper with default-locale fallback.
+ * Pure config-as-data: no state, no events, no lifecycle resources.
+ * Consumed read-only by content/router/head/build via `ctx.require(i18nPlugin)`.
+ *
+ * @file i18n plugin wiring harness.
+ * @see README.md
+ */
+import { createPlugin } from "../../config";
+import { createI18nApi, validateI18nConfig } from "./api";
+import type { Config } from "./types";
+
+/** Typed default config (R6: no inline `as`). Optional maps default to `{}` so every lookup is total. */
+const defaultConfig: Config = {
+  locales: ["en"],
+  defaultLocale: "en",
+  localeNames: {},
+  ogLocaleMap: {},
+  translations: {}
+};
+
+export const i18nPlugin = createPlugin("i18n", {
+  config: defaultConfig,
+  onInit: validateI18nConfig,
+  api: createI18nApi
+});

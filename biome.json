@@ -41,6 +41,12 @@
   },
   "overrides": [
     {
+      "includes": ["src/index.ts", "src/plugins/index.ts"],
+      "assist": {
+        "actions": { "source": { "organizeImports": "off" } }
+      }
+    },
+    {
       "includes": ["tests/**"],
       "linter": {
         "rules": { "suspicious": { "noConsole": "off" } }

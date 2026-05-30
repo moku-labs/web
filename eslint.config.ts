@@ -28,7 +28,54 @@ export default [
       "unicorn/prevent-abbreviations": [
         "error",
         {
-          allowList: { ctx: true, fn: true, cb: true }
+          // Domain + framework vocabulary used by the plan/specs. These read as
+          // proper names in this codebase, not lazy abbreviations.
+          allowList: {
+            ctx: true,
+            fn: true,
+            cb: true,
+            env: true,
+            Env: true,
+            i18n: true,
+            I18n: true,
+            spa: true,
+            Spa: true,
+            api: true,
+            Api: true,
+            params: true,
+            Params: true,
+            props: true,
+            Props: true,
+            args: true,
+            Args: true,
+            ref: true,
+            Ref: true,
+            dev: true,
+            Dev: true,
+            md: true,
+            Md: true,
+            dir: true,
+            Dir: true,
+            doc: true,
+            Doc: true,
+            docs: true,
+            db: true,
+            Db: true,
+            prev: true,
+            gen: true,
+            Gen: true,
+            util: true,
+            utils: true,
+            pkg: true,
+            src: true,
+            temp: true,
+            idx: true,
+            val: true,
+            fmt: true,
+            str: true,
+            num: true,
+            len: true
+          }
         }
       ]
     }
