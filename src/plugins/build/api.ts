@@ -1,10 +1,14 @@
 /**
  * @file build plugin — API factory (run + phases), cross-plugin wiring, and onInit config validation.
  */
-import { contentPlugin } from "../content";
-import { headPlugin } from "../head";
-import { routerPlugin } from "../router";
-import type { Api, Config } from "./types";
+import { existsSync, readdirSync } from "node:fs";
+import { PHASE_ORDER, runPipeline } from "./pipeline";
+import type { Api, Config, OgImageConfig, PhaseContext, PhaseName } from "./types";
+
+/** Error prefix for build config/validation failures (spec/11 Part-3). */
+const ERROR_PREFIX = "[web] build";
+/** Recognized font file extensions for OG-image validation. */
+const FONT_EXTENSIONS = [".ttf", ".otf", ".woff"] as const;
 
 /** Typed default `build` config (R6: no inline `as`). `ogImage: false` disables OG generation. */
 export const defaultConfig: Config = {
@@ -17,37 +21,74 @@ export const defaultConfig: Config = {
 };
 
 /**
- * Minimal context shape for the api factory: exposes `require` for pulling the
- * content/router/head dependency instances during wiring.
+ * Creates the `build` plugin API surface — the pipeline driver (`run`) plus the
+ * `phases` introspection accessor. `run` delegates to the pipeline driver, which
+ * orchestrates the per-phase `ctx.require` pulls (content/router/head/site/i18n);
+ * the API itself stays wiring-thin so `index.ts` remains a harness.
  *
- * @example
- * ```ts
- * const ctx: ApiContext = { require: (plugin) => app[plugin.name] };
- * ```
- */
-interface ApiContext {
-  /** Resolves a dependency plugin instance to its public API. */
-  require(plugin: unknown): unknown;
-}
-
-/**
- * Creates the `build` plugin API surface — the pipeline driver (`run`) plus
- * `phases` introspection. Pulls the content/router/head dependency instances via
- * `ctx.require` here (keeping `index.ts` wiring-only) and delegates per-phase work
- * to the modules in `phases/`.
- *
- * @param ctx - Plugin context exposing `require` for dependency resolution.
+ * @param ctx - Plugin context (provides `require`, `emit`, `state`, `config`, `log`).
+ * @returns The {@link Api} surface mounted at `app.build`.
  * @example
  * ```ts
  * const api = createApi(ctx);
  * await api.run({ outDir: "./preview" });
  * ```
  */
-export function createApi(ctx: ApiContext): Api {
-  ctx.require(contentPlugin);
-  ctx.require(routerPlugin);
-  ctx.require(headPlugin);
-  throw new Error("not implemented");
+export function createApi(ctx: PhaseContext): Api {
+  return {
+    /**
+     * Run the full SSG pipeline and write the site to disk.
+     *
+     * @param options - Optional run overrides.
+     * @param options.outDir - Override the configured output directory for this run.
+     * @returns The build result (outDir, pageCount, durationMs).
+     * @example
+     * ```ts
+     * await api.run({ outDir: "./preview" });
+     * ```
+     */
+    run(options) {
+      return runPipeline(ctx, options);
+    },
+    /**
+     * List the phases in execution order (introspection / tooling).
+     *
+     * @returns A fresh array of the static ordered phase names.
+     * @example
+     * ```ts
+     * api.phases();
+     * ```
+     */
+    phases(): PhaseName[] {
+      return [...PHASE_ORDER];
+    }
+  };
+}
+
+/**
+ * Validate that an OG `fontDir` exists and contains at least one font file.
+ *
+ * @param og - The enabled OG-image config object.
+ * @throws {Error} If `fontDir` is missing or contains no `.ttf`/`.otf`/`.woff`.
+ * @example
+ * ```ts
+ * validateFonts({ fontDir: "./fonts" });
+ * ```
+ */
+function validateFonts(og: OgImageConfig): void {
+  if (typeof og.fontDir !== "string" || og.fontDir.length === 0 || !existsSync(og.fontDir)) {
+    throw new Error(
+      `${ERROR_PREFIX}.ogImage: fontDir "${og.fontDir}" does not exist — provide a directory with at least one font.`
+    );
+  }
+  const hasFont = readdirSync(og.fontDir).some(name =>
+    FONT_EXTENSIONS.some(extension => name.endsWith(extension))
+  );
+  if (!hasFont) {
+    throw new Error(
+      `${ERROR_PREFIX}.ogImage: fontDir "${og.fontDir}" contains no .ttf/.otf/.woff font files.`
+    );
+  }
 }
 
 /**
@@ -55,12 +96,17 @@ export function createApi(ctx: ApiContext): Api {
  * Throws an actionable `[web] build.<field>` error when `outDir` is empty, or
  * when `ogImage` is enabled but `fontDir` is missing / has no `.ttf`/`.otf`/`.woff`.
  *
- * @param _config - The resolved `build` config to validate.
+ * @param config - The resolved `build` config to validate.
  * @example
  * ```ts
  * validateConfig(ctx.config);
  * ```
  */
-export function validateConfig(_config: Config): void {
-  throw new Error("not implemented");
+export function validateConfig(config: Config): void {
+  if (typeof config.outDir !== "string" || config.outDir.trim().length === 0) {
+    throw new Error(`${ERROR_PREFIX}.outDir: must be a non-empty string.`);
+  }
+  if (config.ogImage) {
+    validateFonts(config.ogImage);
+  }
 }
