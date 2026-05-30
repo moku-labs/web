@@ -1,6 +1,31 @@
 {
   "name": "@moku-labs/web",
   "version": "0.1.0",
+  "description": "Content static-site generator + SPA web framework for TypeScript, built on @moku-labs/core.",
+  "author": "Oleksandr Kucherenko",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/moku-labs/web.git"
+  },
+  "bugs": {
+    "url": "https://github.com/moku-labs/web/issues"
+  },
+  "homepage": "https://github.com/moku-labs/web#readme",
+  "keywords": [
+    "web",
+    "framework",
+    "static-site-generator",
+    "ssg",
+    "spa",
+    "preact",
+    "typescript",
+    "moku"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
@@ -28,6 +53,7 @@
     "@shikijs/rehype": "3.22.0",
     "feed": "5.2.0",
     "gray-matter": "4.0.3",
+    "hast-util-sanitize": "5.0.2",
     "p-limit": "6.2.0",
     "preact": "10.29.2",
     "preact-render-to-string": "6.6.0",

@@ -10,6 +10,7 @@
         "@shikijs/rehype": "3.22.0",
         "feed": "5.2.0",
         "gray-matter": "4.0.3",
+        "hast-util-sanitize": "5.0.2",
         "p-limit": "6.2.0",
         "preact": "10.29.2",
         "preact-render-to-string": "6.6.0",
