@@ -12,7 +12,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { h } from "preact";
-import { createApp, defineRoutes, route } from "../../../src";
+import {
+  buildPlugin,
+  contentPlugin,
+  createApp,
+  defineRoutes,
+  deployPlugin,
+  route
+} from "../../../src";
 import type { Article } from "../../../src/plugins/content/types";
 
 /**
@@ -81,6 +88,8 @@ export async function loadFixtureArticles(
   mode: "production" | "development" = "production"
 ): Promise<ArticlesByLocale> {
   const app = createApp({
+    // content is node-only — added explicitly (not a framework default).
+    plugins: [contentPlugin],
     config: { mode },
     pluginConfigs: {
       site: SITE,
@@ -179,6 +188,8 @@ export function buildBlogApp(options: {
   const locales = options.locales ?? ["en"];
   const localized = options.localized ?? locales.length > 1;
   return createApp({
+    // Node-only SSG plugins — composed by the consumer (not framework defaults).
+    plugins: [contentPlugin, buildPlugin, deployPlugin],
     config: { mode: options.mode ?? "production" },
     pluginConfigs: {
       site: SITE,

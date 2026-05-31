@@ -4,8 +4,8 @@
  * Build-emit half of the two-world data pattern. Writes a STABLE route-index +
  * per-route content-hashed JSON sidecars from the framework's own typed data so
  * the SPA consume-half can do JSON-driven navigation. Node-only, build-time.
- * Depends on router + content. NOT a framework default — added by
- * `createHybridApp`/`createSpaApp` via `createApp({ plugins: [clientDataPlugin] })`.
+ * Depends on router + content. NOT a framework default — the consumer composes it
+ * for a Node build via `createApp({ plugins: [clientDataPlugin, contentPlugin] })`.
  * @see README.md
  */
 import { createPlugin } from "../../config";
@@ -24,7 +24,10 @@ import { validateClientDataConfig } from "./validate";
  *
  * @example
  * ```ts
- * const app = createHybridApp({ pluginConfigs: { content: { contentDir: "./content" } } });
+ * const app = createApp({
+ *   plugins: [clientDataPlugin, contentPlugin, buildPlugin],
+ *   pluginConfigs: { content: { contentDir: "./content" } }
+ * });
  * await app.start();
  * await app.build.run();
  * await app.clientData.emit();

@@ -32,10 +32,10 @@ export const coreConfig = createCoreConfig<Config, Events, [typeof logPlugin, ty
     pluginConfigs: {
       // Core-plugin defaults (levels 1–2 of the 4-level core cascade, spec/03 §5).
       // NOTE: env providers are intentionally NOT set here. The Node providers
-      // (`dotenv`, `processEnv`) import `node:fs`, and this module is shared by the
-      // browser `./client` entry. Each entry supplies its own env provider via the
-      // framework-level `createCore` cascade: `src/index.ts` (Node) → `[dotenv(),
-      // processEnv()]`; `src/client.ts` (browser) → `[browserEnv()]` (D1b).
+      // (`dotenv`, `processEnv`) import `node:fs`, so baking them in would block
+      // the isomorphic default app in the browser. The consumer supplies the
+      // provider for its target via `createApp({ pluginConfigs: { env: { providers } } })`
+      // — `[dotenv(), processEnv()]` on Node, `[browserEnv()]` in the browser.
       log: { mode: "production" }
     }
   }
