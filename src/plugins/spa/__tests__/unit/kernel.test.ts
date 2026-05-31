@@ -37,7 +37,9 @@ describe("resolveSpaConfig", () => {
       swapSelector: "main > section",
       viewTransitions: false,
       progressBar: true,
-      components: []
+      components: [],
+      clientData: "off",
+      dataDir: "/_data/"
     });
   });
 

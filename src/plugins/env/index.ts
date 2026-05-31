@@ -26,6 +26,10 @@ export const envPlugin = createCorePlugin("env", {
   api: createEnvApi,
   onInit: validateSchema
 });
-export { cloudflareBindings, dotenv, processEnv } from "./providers";
+// NOTE: the Node providers (`dotenv`, `processEnv`, `cloudflareBindings`) are
+// deliberately NOT re-exported here — they import `node:fs`, and this barrel is
+// reachable from the browser `./client` entry via `coreConfig → envPlugin`.
+// Import them directly from `./providers` at the Node entry (`src/index.ts`).
+// `browserEnv` is `node:*`-free, so it stays on the barrel for the client entry.
 export { browserEnv } from "./providers.browser";
 export type { EnvApi, EnvConfig, EnvProvider, EnvState, EnvVarSpec } from "./types";

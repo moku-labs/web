@@ -20,7 +20,9 @@ export const defaultSpaConfig: SpaConfig = {
   swapSelector: "main > section",
   viewTransitions: false,
   progressBar: true,
-  components: []
+  components: [],
+  clientData: "off",
+  dataDir: "/_data/"
 };
 
 /**
@@ -69,7 +71,9 @@ export function resolveSpaConfig(config: SpaConfig): ResolvedSpaConfig {
     swapSelector,
     viewTransitions: config.viewTransitions ?? false,
     progressBar: config.progressBar ?? true,
-    components: config.components ?? []
+    components: config.components ?? [],
+    clientData: config.clientData ?? "off",
+    dataDir: config.dataDir ?? "/_data/"
   };
 }
 

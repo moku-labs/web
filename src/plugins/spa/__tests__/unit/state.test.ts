@@ -31,7 +31,9 @@ describe("resolveSpaConfig (headless / node — selector check is permissive)", 
       swapSelector: "main > section",
       viewTransitions: false,
       progressBar: true,
-      components: []
+      components: [],
+      clientData: "off",
+      dataDir: "/_data/"
     });
   });
 });

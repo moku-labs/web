@@ -1,6 +1,7 @@
 import { createCoreConfig } from "@moku-labs/core";
 import { afterEach, describe, expect, it } from "vitest";
-import { cloudflareBindings, dotenv, envPlugin, processEnv } from "../../index";
+import { envPlugin } from "../../index";
+import { cloudflareBindings, dotenv, processEnv } from "../../providers";
 import type { EnvApi } from "../../types";
 
 /** Framework config registering only the env core plugin. */
