@@ -72,14 +72,20 @@ from production builds.
 
 `createApp`'s **defaults are the isomorphic plugins** — the ones that run unchanged on
 both Node and the browser: `site`, `i18n`, `router`, `head`, `spa` (plus the `log`/`env`
-core). The **node-only** plugins (`content`, `build`, `deploy`, `data`) are exported but
-not defaults — add them with `createApp({ plugins: [...] })` for a Node build, and omit
-them in a browser app (with `"sideEffects": false`, your bundler tree-shakes them out).
-You also choose the `env` provider per target: `[dotenv(), processEnv()]` on Node,
+core). The **node-only** plugins (`content`, `build`, `deploy`) are exported but not
+defaults — add them with `createApp({ plugins: [...] })` for a Node build, and omit them
+in a browser app (with `"sideEffects": false`, your bundler tree-shakes them out). You
+also choose the `env` provider per target: `[dotenv(), processEnv()]` on Node,
 `[browserEnv()]` in the browser. The framework never hard-blocks either runtime.
 
-A browser entry is just your own `createApp(...).start()` over the defaults — `spa`'s
-`onStart` mounts islands onto the SSR'd DOM and intercepts navigation.
+`data` is a special case — an **optional isomorphic bridge**: composed on Node it
+`emit()`s static JSON (route-index + per-route sidecars); composed in the browser its
+`load()` lets `spa` navigate by fetching that JSON instead of full HTML. Add it on both
+sides when you want JSON-driven navigation; omit it for a plain static site.
+
+A browser entry is just your own `createApp(...).start()` over the defaults (plus
+`dataPlugin` if you want JSON nav) — `spa`'s `onStart` mounts islands onto the SSR'd DOM
+and intercepts navigation.
 
 ## Plugins
 
@@ -93,7 +99,7 @@ A browser entry is just your own `createApp(...).start()` over the defaults — 
 | `content` | ➕ node-only | Markdown pipeline → sanitized HTML, frontmatter, reading time, locale model |
 | `build` | ➕ node-only | SSG orchestrator: pages, feeds (RSS/Atom/JSON), sitemap, OG images |
 | `deploy` | ➕ node-only | Cloudflare Pages: `wrangler.jsonc` scaffolding + deploy |
-| `data` | ➕ node-only | Build-emit half: route-index manifest + per-route JSON sidecars for SPA nav |
+| `data` | ➕ optional bridge | Isomorphic: Node `emit()` writes route-index + JSON sidecars; browser `load()` feeds `spa` JSON-driven nav |
 | `log`, `env` | ✅ core | Structured logging + validated environment access |
 
 SEO primitives are exported for route `.head()` handlers: `meta`, `og`, `twitter`, `jsonLd`,

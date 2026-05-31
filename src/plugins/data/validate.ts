@@ -4,20 +4,26 @@
 import type { DataConfig } from "./types";
 
 /**
- * Validates the resolved data config. The payload discriminant must be a
- * known mode; the full emit pipeline is wired in build wave 3.
+ * Validates the resolved data config: the `payload` discriminant must be a known
+ * mode and the browser `baseUrl` must be a non-empty, slash-wrapped URL path. The
+ * full emit/read pipelines are wired in build waves 3/4.
  *
  * @param config - The resolved plugin configuration.
- * @throws {Error} If `payload` is neither `"fragment"` nor `"data"`.
+ * @throws {Error} If `payload` is invalid, or `baseUrl` is empty / not a rooted URL path.
  * @example
  * ```ts
- * validateDataConfig({ outputDir: "_data", payload: "fragment" });
+ * validateDataConfig({ outputDir: "_data", baseUrl: "/_data/", payload: "fragment" });
  * ```
  */
 export function validateDataConfig(config: DataConfig): void {
   if (config.payload !== "fragment" && config.payload !== "data") {
     throw new Error(
-      `data: invalid payload "${String(config.payload)}" (expected "fragment" or "data")`
+      `[web] data.payload: invalid value "${String(config.payload)}" (expected "fragment" or "data").`
+    );
+  }
+  if (typeof config.baseUrl !== "string" || !config.baseUrl.startsWith("/")) {
+    throw new Error(
+      `[web] data.baseUrl: must be a site-root-relative URL path starting with "/" (e.g. "/_data/").`
     );
   }
 }
