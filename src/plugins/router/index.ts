@@ -13,6 +13,26 @@ import type { RouterConfig } from "./types";
 
 /** Default router config: empty route map (validated in onInit), hybrid mode. */
 const defaultConfig: RouterConfig = { routes: {}, mode: "hybrid" };
+/**
+ * Router plugin — typed, named route definitions with locale-aware URL generation
+ * and matching. Author routes with {@link route} + {@link defineRoutes}. Depends
+ * on site (base URL) and i18n (locales).
+ *
+ * @example Define routes and choose a render mode
+ * ```ts
+ * const app = createApp({
+ *   pluginConfigs: {
+ *     router: {
+ *       routes: defineRoutes({
+ *         home: route("/"),
+ *         article: route("/blog/{slug}/")
+ *       }),
+ *       mode: "hybrid" // "ssg" | "spa" | "hybrid" (default)
+ *     }
+ *   }
+ * });
+ * ```
+ */
 export const routerPlugin = createPlugin("router", {
   depends: [sitePlugin, i18nPlugin],
   helpers: { route, defineRoutes },

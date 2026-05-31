@@ -16,6 +16,25 @@ import type { Config } from "./types";
 /** Typed default config (R6: no inline `as`). Consumers override via `pluginConfigs.site`. */
 const defaultConfig: Config = { name: "", url: "", author: "", description: "" };
 
+/**
+ * Site plugin — holds global, frozen site metadata (name, url, author,
+ * description) and builds canonical URLs. Consumed by router, head, and build.
+ * `name` and `url` must be non-empty (validated at `onInit`).
+ *
+ * @example Set your site identity
+ * ```ts
+ * const app = createApp({
+ *   pluginConfigs: {
+ *     site: {
+ *       name: "My Blog",
+ *       url: "https://blog.dev",
+ *       author: "Ada Lovelace",
+ *       description: "Notes on computing"
+ *     }
+ *   }
+ * });
+ * ```
+ */
 export const sitePlugin = createPlugin("site", {
   config: defaultConfig,
   onInit: validateSiteConfig,
