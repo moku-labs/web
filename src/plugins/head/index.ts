@@ -11,6 +11,25 @@ import { defaultConfig, normalizeHeadConfig } from "./config";
 import { headHelpers } from "./helpers";
 import { createState } from "./state";
 
+/**
+ * Head plugin — composes per-route `<head>` metadata (title template, Open Graph,
+ * Twitter cards, canonical, hreflang). Use the re-exported SEO primitives
+ * ({@link meta}, {@link og}, {@link twitter}, …) inside a route's `.head()`.
+ * Depends on site, i18n, and router.
+ *
+ * @example Set global head defaults
+ * ```ts
+ * const app = createApp({
+ *   pluginConfigs: {
+ *     head: {
+ *       titleTemplate: "%s — My Blog",
+ *       twitterCard: "summary_large_image",
+ *       twitterHandle: "@moku_labs"
+ *     }
+ *   }
+ * });
+ * ```
+ */
 export const headPlugin = createPlugin("head", {
   depends: [sitePlugin, i18nPlugin, routerPlugin],
   helpers: headHelpers,

@@ -22,6 +22,25 @@ const defaultConfig: Config = {
   translations: {}
 };
 
+/**
+ * Internationalization plugin — locale registry plus a flat translation helper
+ * with default-locale fallback. Pure config-as-data (no state or events);
+ * consumed read-only by content, router, head, and build.
+ *
+ * @example Register locales and translations
+ * ```ts
+ * const app = createApp({
+ *   pluginConfigs: {
+ *     i18n: {
+ *       locales: ["en", "uk"],
+ *       defaultLocale: "en",
+ *       localeNames: { en: "English", uk: "Українська" },
+ *       translations: { uk: { "nav.home": "Головна" } }
+ *     }
+ *   }
+ * });
+ * ```
+ */
 export const i18nPlugin = createPlugin("i18n", {
   config: defaultConfig,
   onInit: validateI18nConfig,

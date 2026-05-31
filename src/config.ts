@@ -38,4 +38,25 @@ export const coreConfig = createCoreConfig<Config, Events, [typeof logPlugin, ty
   }
 );
 
-export const { createPlugin, createCore } = coreConfig;
+/**
+ * Create a custom plugin bound to this framework's `Config`/`Events` and the core
+ * plugin APIs (`log`, `env`). Plugin types are fully inferred from the spec
+ * object — never write them explicitly. This is the binding every built-in
+ * plugin is wired with, and the one consumer plugins should use too.
+ *
+ * @example
+ * ```ts
+ * const analytics = createPlugin("analytics", {
+ *   config: { writeKey: "" },
+ *   api: (ctx) => ({ track: (event: string) => ctx.log.info("analytics:track", { event }) })
+ * });
+ * ```
+ */
+export const createPlugin = coreConfig.createPlugin;
+
+/**
+ * Step 2 of the factory chain — captures the framework's default plugin set and
+ * returns the consumer entry points ({@link createApp} + a re-exported
+ * `createPlugin`). Wired once in `src/index.ts`; consumers don't call it directly.
+ */
+export const createCore = coreConfig.createCore;

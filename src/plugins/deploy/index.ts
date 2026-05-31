@@ -13,6 +13,24 @@ import { defaultConfig } from "./defaults";
 import { deployEvents } from "./events";
 import { createState } from "./state";
 
+/**
+ * Deploy plugin — ships the built `outDir` to Cloudflare Pages via the injectable
+ * wrangler subprocess, with entropy-gated secret scrubbing of logged output.
+ * Depends on site; emits `deploy:complete`.
+ *
+ * @example Configure the deploy target
+ * ```ts
+ * const app = createApp({
+ *   pluginConfigs: {
+ *     deploy: {
+ *       target: "cloudflare-pages",
+ *       outDir: "dist",
+ *       productionBranch: "main"
+ *     }
+ *   }
+ * });
+ * ```
+ */
 export const deployPlugin = createPlugin("deploy", {
   config: defaultConfig,
   depends: [sitePlugin],
