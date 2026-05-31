@@ -211,8 +211,13 @@ export type PageData = Record<string, unknown>;
 export interface SpaKernelDeps {
   /** Router plugin API — used for client-side route classification/matching. */
   router: RouterApi;
-  /** Head plugin API — its pure compose is reused for client head-sync. */
-  head: HeadApi;
+  /**
+   * Head plugin API — its pure compose is reused for client head-sync. Optional:
+   * the client reuses the server-rendered `<head>` from each fetched document, so
+   * the browser entry (`@moku-labs/web/client`) can omit it. The framework plugin
+   * path always provides it.
+   */
+  head?: HeadApi;
 }
 
 /** The single shared SPA kernel — pure factory over state/config/emit/deps. */

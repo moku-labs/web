@@ -77,12 +77,12 @@ function replaceAllBySelector(selector: string, doc: Document): void {
  * title/meta/canonical/JSON-LD/hreflang/`<html lang>` once and applies them.
  * The `head` API is accepted to bind the structural dependency (spec/09 deps).
  *
- * @param _head - The head plugin API (dependency binding; composition reused via the fetched doc).
+ * @param _head - The head plugin API (dependency binding; composition reused via the fetched doc). Optional on the browser client path, which has no plugin context.
  * @param doc - The fetched document parsed from the navigated page's HTML.
  * @example
  * syncHead(headApi, parsedDoc);
  */
-export function syncHead(_head: HeadApi, doc: Document): void {
+export function syncHead(_head: HeadApi | undefined, doc: Document): void {
   if (typeof document === "undefined") return;
 
   const newTitle = doc.querySelector("title")?.textContent;
