@@ -1,5 +1,5 @@
 /* eslint-disable unicorn/no-null -- fake `TypedRoute.match` stubs return `null` (the real signature returns `TParams | null`) */
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { h } from "preact";
@@ -145,6 +145,71 @@ describe("build/phases/pages", () => {
     expect(existsSync(path.join(tmp, "world", "index.html"))).toBe(true);
     // Root page HTML captured for the root-index phase.
     expect(result.rootHtml).toContain("root");
+  });
+
+  it("injects bundled CSS/JS asset tags from the typed manifest when injectAssets is on (default)", async () => {
+    const home = makeRoute("/", { render: () => h("h1", {}, "Home") });
+    const ctx = makeCtx({
+      config: { outDir: tmp },
+      requireMap: {
+        router: { manifest: () => [home], entries: makeEntries([{ name: "home", pattern: "/" }]) },
+        i18n: { locales: () => ["en"], defaultLocale: () => "en" },
+        head: { render: () => "" }
+      }
+    });
+    // Seed a typed BuildCacheEntry manifest (as the bundle phase would).
+    ctx.state.buildCache.set("css", { "main.css": "assets/main-abc123.css" });
+    ctx.state.buildCache.set("js", { "main.js": "assets/main-def456.js" });
+
+    await renderPages(ctx);
+
+    const html = readFileSync(path.join(tmp, "index.html"), "utf8");
+    expect(html).toContain('<link rel="stylesheet" href="/assets/main-abc123.css">');
+    expect(html).toContain('<script type="module" src="/assets/main-def456.js"></script>');
+  });
+
+  it("omits asset tags when injectAssets is false", async () => {
+    const home = makeRoute("/", { render: () => h("h1", {}, "Home") });
+    const ctx = makeCtx({
+      config: { outDir: tmp, injectAssets: false },
+      requireMap: {
+        router: { manifest: () => [home], entries: makeEntries([{ name: "home", pattern: "/" }]) },
+        i18n: { locales: () => ["en"], defaultLocale: () => "en" },
+        head: { render: () => "" }
+      }
+    });
+    ctx.state.buildCache.set("css", { "main.css": "assets/main-abc123.css" });
+
+    await renderPages(ctx);
+
+    const html = readFileSync(path.join(tmp, "index.html"), "utf8");
+    expect(html).not.toContain("stylesheet");
+  });
+
+  it("fills <!--moku:head/body/assets--> placeholders when a template is configured", async () => {
+    const templatePath = path.join(tmp, "shell.html");
+    writeFileSync(
+      templatePath,
+      "<!doctype html><html><head><!--moku:head--><!--moku:assets--></head><body><!--moku:body--></body></html>"
+    );
+    const home = makeRoute("/", { render: () => h("h1", {}, "Home") });
+    const ctx = makeCtx({
+      config: { outDir: tmp, template: templatePath },
+      requireMap: {
+        router: { manifest: () => [home], entries: makeEntries([{ name: "home", pattern: "/" }]) },
+        i18n: { locales: () => ["en"], defaultLocale: () => "en" },
+        head: { render: () => "<title>Home</title>" }
+      }
+    });
+    ctx.state.buildCache.set("css", { "main.css": "assets/main-abc.css" });
+
+    await renderPages(ctx);
+
+    const html = readFileSync(path.join(tmp, "index.html"), "utf8");
+    expect(html).toContain("<title>Home</title>");
+    expect(html).toContain("<h1>Home</h1>");
+    expect(html).toContain("/assets/main-abc.css");
+    expect(html).not.toContain("<!--moku:");
   });
 
   it("passes loaded data into head.render and the renderer", async () => {

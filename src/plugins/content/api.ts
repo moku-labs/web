@@ -58,6 +58,27 @@ function articleToUrl(locale: string, slug: string): string {
 }
 
 /**
+ * Build the canonical "article not found" error for {@link createContentApi.load}.
+ * Centralised so the null-resolve path and the production draft-suppression path
+ * throw an IDENTICAL message — drafts must be indistinguishable from missing
+ * articles in production (no new error shape).
+ *
+ * @param slug - Article directory name.
+ * @param locale - Requested locale code.
+ * @returns The not-found Error to throw.
+ * @example
+ * ```ts
+ * throw articleNotFound("intro", "uk");
+ * ```
+ */
+function articleNotFound(slug: string, locale: string): Error {
+  return new Error(
+    `[web] content article "${slug}" not found for locale "${locale}".\n` +
+      `  Looked for ${slug}/${locale}.md and the default-locale fallback.`
+  );
+}
+
+/**
  * Plugin `api` factory: assembles the kernel-free {@link ContentApiContext} from
  * the plugin context (resolving i18n via `ctx.require`) and delegates to
  * {@link createContentApi}. Referenced directly as the plugin's `api` so
@@ -316,11 +337,16 @@ export function createContentApi(ctx: ContentApiContext): Api {
     /**
      * Resolve and render a single article for one locale with locale fallback.
      * Throws a `[web] content` error when neither the requested nor the
-     * default-locale file exists.
+     * default-locale file exists. In production a `draft` article is suppressed
+     * and throws the SAME not-found error (drafts must be indistinguishable from
+     * missing articles so unpublished content is never disclosed); in
+     * development drafts load normally.
      *
      * @param slug - Article directory name.
      * @param locale - Requested locale code.
      * @returns The resolved Article.
+     * @throws {Error} `[web] content` not-found when no file matches, or when the
+     *   resolved article is a draft and `global.mode === "production"`.
      * @example
      * ```ts
      * const article = await api.load("intro", "uk");
@@ -329,10 +355,11 @@ export function createContentApi(ctx: ContentApiContext): Api {
     async load(slug: string, locale: string): Promise<Article> {
       const article = await resolveArticle(ctx, slug, locale);
       if (article === null) {
-        throw new Error(
-          `[web] content article "${slug}" not found for locale "${locale}".\n` +
-            `  Looked for ${slug}/${locale}.md and the default-locale fallback.`
-        );
+        throw articleNotFound(slug, locale);
+      }
+      const isProduction = ctx.global.mode === "production";
+      if (isProduction && article.computed.status === "draft") {
+        throw articleNotFound(slug, locale);
       }
       const cache = ctx.state.articles.get(locale) ?? new Map<string, Article>();
       cache.set(slug, article);

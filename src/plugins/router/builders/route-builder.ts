@@ -127,9 +127,11 @@ export function route<P extends string>(pattern: P): RouteBuilder<RouteState<P>>
       return set("generate", handler);
     },
     /**
-     * Merge an arbitrary metadata bag into the route's `_meta`.
+     * Merge an arbitrary metadata bag into the route's `_meta`. The bag MUST be
+     * JSON-serializable — it is projected verbatim into `clientManifest()` and
+     * shipped to the browser, so functions/symbols/class instances are unsupported.
      *
-     * @param meta - Metadata to merge.
+     * @param meta - JSON-serializable metadata to merge.
      * @returns The same builder for chaining.
      * @example
      * ```ts

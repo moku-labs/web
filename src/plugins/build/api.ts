@@ -106,6 +106,15 @@ export function validateConfig(config: Config): void {
   if (typeof config.outDir !== "string" || config.outDir.trim().length === 0) {
     throw new Error(`${ERROR_PREFIX}.outDir: must be a non-empty string.`);
   }
+  if (config.publicDir !== undefined && typeof config.publicDir !== "string") {
+    throw new Error(`${ERROR_PREFIX}.publicDir: must be a string when set.`);
+  }
+  if (config.template !== undefined && typeof config.template !== "string") {
+    throw new Error(`${ERROR_PREFIX}.template: must be a string path when set.`);
+  }
+  if (config.clientEntry !== undefined && typeof config.clientEntry !== "string") {
+    throw new Error(`${ERROR_PREFIX}.clientEntry: must be a string path when set.`);
+  }
   if (config.ogImage) {
     validateFonts(config.ogImage);
   }

@@ -3,14 +3,18 @@
  * emits `build:phase` boundaries, and runs intra-phase work via `Promise.all`.
  */
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { bundle } from "./phases/bundle";
 import { loadContent } from "./phases/content";
 import { generateFeeds } from "./phases/feeds";
 import { processImages } from "./phases/images";
+import { generateLocaleRedirects } from "./phases/locale-redirects";
+import { generateNotFound } from "./phases/not-found";
 import { generateOgImages } from "./phases/og-images";
 import { renderPages } from "./phases/pages";
+import { copyPublic, DEFAULT_PUBLIC_DIR } from "./phases/public";
 import { generateSitemap } from "./phases/sitemap";
 import type { BuildResult, PhaseContext, PhaseName } from "./types";
 
@@ -30,6 +34,9 @@ export const PHASE_ORDER: readonly PhaseName[] = [
   "feeds",
   "sitemap",
   "og-images",
+  "public",
+  "not-found",
+  "locale-redirects",
   "root-index"
 ] as const;
 
@@ -74,10 +81,11 @@ function resetRun(ctx: Pick<PhaseContext, "state">): void {
 }
 
 /**
- * Phase 4 — run feeds / sitemap / og-images concurrently, each gated by its config
- * flag, isolated with `Promise.allSettled` so one failure does not lose the others.
- * A disabled output is skipped entirely — it emits NO `build:phase` boundary (the
- * `withPhase` wrapper is gated on the config flag, not just the phase body).
+ * Phase 4 — run feeds / sitemap / og-images / public / not-found / locale-redirects
+ * concurrently, each gated by its config flag (or, for `public`, the presence of the
+ * source dir), isolated with `Promise.allSettled` so one failure does not lose the
+ * others. A disabled output is skipped entirely — it emits NO `build:phase` boundary
+ * (the `withPhase` wrapper is gated on the config flag, not just the phase body).
  *
  * @param ctx - The phase context.
  * @example
@@ -90,6 +98,11 @@ async function runOutputs(ctx: PhaseContext): Promise<void> {
   if (ctx.config.feeds) tasks.push(withPhase(ctx, "feeds", () => generateFeeds(ctx)));
   if (ctx.config.sitemap) tasks.push(withPhase(ctx, "sitemap", () => generateSitemap(ctx)));
   if (ctx.config.ogImage) tasks.push(withPhase(ctx, "og-images", () => generateOgImages(ctx)));
+  if (existsSync(ctx.config.publicDir ?? DEFAULT_PUBLIC_DIR))
+    tasks.push(withPhase(ctx, "public", () => copyPublic(ctx)));
+  if (ctx.config.notFound) tasks.push(withPhase(ctx, "not-found", () => generateNotFound(ctx)));
+  if (ctx.config.localeRedirects)
+    tasks.push(withPhase(ctx, "locale-redirects", () => generateLocaleRedirects(ctx)));
   const settled = await Promise.allSettled(tasks);
   for (const outcome of settled) {
     if (outcome.status === "rejected") {

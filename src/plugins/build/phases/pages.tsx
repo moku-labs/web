@@ -3,7 +3,8 @@
  * and SSR-renders each route to static HTML (preact-render-to-string). Appends the
  * build-id meta tag after `head.render()` returns. Does NOT compose `<head>` itself.
  */
-import { mkdir, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { renderToString } from "preact-render-to-string";
 import { headPlugin } from "../../head";
@@ -21,7 +22,14 @@ import type {
   RouteState,
   TypedRoute
 } from "../../router/types";
-import type { PhaseContext } from "../types";
+import type { BuildCacheEntry, PhaseContext } from "../types";
+
+/** Template placeholder for the composed `<head>` inner HTML. */
+const HEAD_PLACEHOLDER = "<!--moku:head-->";
+/** Template placeholder for the SSR-rendered body HTML. */
+const BODY_PLACEHOLDER = "<!--moku:body-->";
+/** Template placeholder for the injected asset `<link>`/`<script>` tags. */
+const ASSETS_PLACEHOLDER = "<!--moku:assets-->";
 
 /** Result of the pages phase: page count + the captured root/default-page HTML. */
 export type PagesResult = {
@@ -50,23 +58,91 @@ type PageInstance = {
   readonly locale: string;
 };
 
+/** The pieces composed into a page document (shared by in-code shell + template fill). */
+type DocumentParts = {
+  /** Composed `<head>` inner HTML from `head.render` + the build-id meta. */
+  head: string;
+  /** SSR-rendered body HTML. */
+  body: string;
+  /** Injected asset `<link>`/`<script>` tags (empty when injection is off). */
+  assets: string;
+  /** Page locale for the `<html lang>` attribute / shell. */
+  locale: string;
+};
+
 /**
- * Compose the full static HTML document, injecting the build-id meta tag into
- * `<head>` AFTER the head plugin's composed HTML (build metadata, not content).
+ * Read the bundle phase's hashed asset manifest for one kind from `state.buildCache`
+ * as a typed {@link BuildCacheEntry} (no `Map<string, unknown>` reads).
  *
- * @param headHtml - The composed `<head>` inner HTML from `head.render`.
- * @param bodyHtml - The SSR-rendered body HTML.
- * @param runId - The per-run build id injected as `<meta name="build-id">`.
- * @param locale - The page locale for the `<html lang>` attribute.
+ * @param ctx - Plugin context (provides `state`).
+ * @param kind - The asset kind key (`"css"` / `"js"`).
+ * @returns The hashed-path manifest entry, or an empty object when absent.
+ * @example
+ * ```ts
+ * readManifest(ctx, "css");
+ * ```
+ */
+function readManifest(ctx: Pick<PhaseContext, "state">, kind: "css" | "js"): BuildCacheEntry {
+  const entry = ctx.state.buildCache.get(kind);
+  return entry && typeof entry === "object" ? (entry as BuildCacheEntry) : {};
+}
+
+/**
+ * Build the asset `<link>`/`<script>` tag block from the hashed manifests. Returns
+ * an empty string when `config.injectAssets === false`. Asset paths are emitted as
+ * absolute (`/`-rooted) URLs.
+ *
+ * @param ctx - Plugin context (provides `state`, `config`).
+ * @returns The injected asset tags, or `""` when injection is disabled.
+ * @example
+ * ```ts
+ * buildAssetTags(ctx);
+ * ```
+ */
+function buildAssetTags(ctx: Pick<PhaseContext, "state" | "config">): string {
+  if (ctx.config.injectAssets === false) return "";
+  const css = Object.values(readManifest(ctx, "css")).map(
+    href => `<link rel="stylesheet" href="/${href}">`
+  );
+  const js = Object.values(readManifest(ctx, "js")).map(
+    src => `<script type="module" src="/${src}"></script>`
+  );
+  return [...css, ...js].join("");
+}
+
+/**
+ * Compose the full static HTML document with the in-code shell, injecting the
+ * build-id meta tag into `<head>` AFTER the head plugin's composed HTML (build
+ * metadata, not content) and the asset tags at the end of `<head>`.
+ *
+ * @param parts - The composed head/body/assets/locale pieces.
  * @returns The complete HTML document string.
  * @example
  * ```ts
- * renderDocument("<title>Hi</title>", "<h1>Hi</h1>", "run-1", "en");
+ * renderDocument({ head: "<title>Hi</title>", body: "<h1>Hi</h1>", assets: "", locale: "en" });
  * ```
  */
-function renderDocument(headHtml: string, bodyHtml: string, runId: string, locale: string): string {
-  const buildIdMeta = `<meta name="build-id" content="${runId}">`;
-  return `<!DOCTYPE html><html lang="${locale}"><head>${headHtml}${buildIdMeta}</head><body>${bodyHtml}</body></html>`;
+function renderDocument(parts: DocumentParts): string {
+  return `<!DOCTYPE html><html lang="${parts.locale}"><head>${parts.head}${parts.assets}</head><body>${parts.body}</body></html>`;
+}
+
+/**
+ * Fill a shell template's `<!--moku:head-->` / `<!--moku:body-->` /
+ * `<!--moku:assets-->` placeholders deterministically at build time.
+ *
+ * @param template - The raw shell template HTML.
+ * @param parts - The composed head/body/assets pieces.
+ * @returns The filled document string.
+ * @example
+ * ```ts
+ * fillTemplate(shell, { head, body, assets, locale: "en" });
+ * ```
+ */
+function fillTemplate(template: string, parts: DocumentParts): string {
+  return template
+    .replaceAll(HEAD_PLACEHOLDER, parts.head)
+    .replaceAll(BODY_PLACEHOLDER, parts.body)
+    .replaceAll(ASSETS_PLACEHOLDER, parts.assets);
 }
 
 /**
@@ -162,19 +238,25 @@ function adaptHeadConfig(config: HeadConfig): ComposedHeadConfig {
 }
 
 /**
- * Render one page instance to its static HTML document and write it to disk.
+ * Render one page instance to its static HTML document and write it to disk. Uses
+ * the configured shell `template` (filled at build time) when supplied, otherwise
+ * the in-code shell; injects the precomputed asset tags + build-id meta.
  *
  * @param ctx - Plugin context (provides `require`, `state`, `config`).
  * @param instance - The concrete page instance to render.
+ * @param shell - Wiring shared across instances (asset tags + optional template).
+ * @param shell.assets - The injected asset `<link>`/`<script>` tags.
+ * @param shell.template - The shell template HTML, or `null` for the in-code shell.
  * @returns The instance's URL and rendered HTML (HTML reused for the root page).
  * @example
  * ```ts
- * await renderInstance(ctx, instance);
+ * await renderInstance(ctx, instance, { assets: "", template: null });
  * ```
  */
 async function renderInstance(
   ctx: Pick<PhaseContext, "require" | "state" | "config">,
-  instance: PageInstance
+  instance: PageInstance,
+  shell: { assets: string; template: string | null }
 ): Promise<{ url: string; html: string }> {
   const { definition, entry, params, locale, name } = instance;
   const data = definition._handlers.load
@@ -188,9 +270,17 @@ async function renderInstance(
     resolved.head = adaptHeadConfig(headConfig);
   }
   const headHtml = ctx.require(headPlugin).render(resolved, data);
+  const buildIdMeta = `<meta name="build-id" content="${ctx.state.runId ?? ""}">`;
   const vnode = definition._handlers.render?.(routeContext);
   const bodyHtml = vnode ? renderToString(vnode) : "";
-  const html = renderDocument(headHtml, bodyHtml, ctx.state.runId ?? "", locale);
+  const parts: DocumentParts = {
+    head: `${headHtml}${buildIdMeta}`,
+    body: bodyHtml,
+    assets: shell.assets,
+    locale
+  };
+  const html =
+    shell.template === null ? renderDocument(parts) : fillTemplate(shell.template, parts);
   const filePath = join(ctx.config.outDir, entry.toFile(params));
   await mkdir(dirname(filePath), { recursive: true });
   await writeFile(filePath, html, "utf8");
@@ -220,11 +310,22 @@ export async function renderPages(
   ctx.state.manifest = [...manifest];
   const byPattern = makeEntryMap(router);
   const locales = ctx.require(i18nPlugin).locales();
+  // Read the shell template ONCE and compute asset tags ONCE (O(1) per page).
+  const templatePath = ctx.config.template;
+  const template =
+    typeof templatePath === "string" && existsSync(templatePath)
+      ? await readFile(templatePath, "utf8")
+      : // eslint-disable-next-line unicorn/no-null -- `null` = use the in-code shell
+        null;
+  const assets = buildAssetTags(ctx);
+  const shell = { assets, template };
   const instanceLists = await Promise.all(
     manifest.map(definition => expandRoute(definition, locales, byPattern))
   );
   const instances = instanceLists.flat();
-  const rendered = await Promise.all(instances.map(instance => renderInstance(ctx, instance)));
+  const rendered = await Promise.all(
+    instances.map(instance => renderInstance(ctx, instance, shell))
+  );
   const root = rendered.find(page => page.url === "/" || page.url === "");
   ctx.log.debug("build:pages", { count: rendered.length });
   return { pageCount: rendered.length, rootHtml: root?.html ?? null };

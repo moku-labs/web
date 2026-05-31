@@ -5,7 +5,14 @@
  * `manifest`. Returns values/copies, never the raw `ctx.state` reference (spec/11 §2.4).
  */
 import { matchRoute } from "./builders/match";
-import type { CompiledRoute, MatcherTable, RouterApi, RouterState, TypedRoute } from "./types";
+import type {
+  ClientRoute,
+  CompiledRoute,
+  MatcherTable,
+  RouterApi,
+  RouterState,
+  TypedRoute
+} from "./types";
 
 /** Error prefix for router API failures. */
 const ERROR_PREFIX = "[web] router";
@@ -54,6 +61,21 @@ function toTypedRoute(entry: CompiledRoute): TypedRoute {
     toFile: entry.toFile,
     match: entry.matchFn
   };
+}
+
+/**
+ * Project a compiled route into the serializable {@link ClientRoute} view: only
+ * `pattern` / `name` / `meta`, with a fresh `meta` copy and NO `_handlers` closures.
+ *
+ * @param entry - The compiled route entry.
+ * @returns A `ClientRoute` carrying only JSON-serializable fields.
+ * @example
+ * ```ts
+ * toClientRoute(compiledEntry); // { pattern, name, meta }
+ * ```
+ */
+function toClientRoute(entry: CompiledRoute): ClientRoute {
+  return { pattern: entry.pattern, name: entry.name, meta: { ...entry.meta } };
 }
 
 /**
@@ -128,6 +150,19 @@ export function createApi(ctx: RouterApiContext): RouterApi {
      */
     manifest() {
       return [...readTable(state).byName.values()].map(entry => entry.definition);
+    },
+    /**
+     * Serializable, specificity-sorted projection of the route table for client
+     * shipping — `{ pattern, name, meta }` entries with NO `_handlers` closures.
+     *
+     * @returns A fresh, frozen, specificity-sorted read-only array of client routes.
+     * @example
+     * ```ts
+     * const json = JSON.stringify(api.clientManifest());
+     * ```
+     */
+    clientManifest() {
+      return Object.freeze(readTable(state).compiled.map(entry => toClientRoute(entry)));
     }
   };
 }

@@ -91,7 +91,10 @@ export interface RouteBuilder<S extends RouteState> extends RouteDefinition {
   head(handler: (ctx: RouteContext<S>) => HeadConfig): RouteBuilder<S>;
   /** Attach a static-generation param producer. */
   generate(handler: (locale: string) => S["params"][] | Promise<S["params"][]>): RouteBuilder<S>;
-  /** Attach an arbitrary metadata bag. */
+  /**
+   * Attach an arbitrary metadata bag. The bag MUST be JSON-serializable: it is
+   * projected verbatim into `clientManifest()` and shipped to the browser.
+   */
   meta(meta: Record<string, unknown>): RouteBuilder<S>;
   /** Attach a JSON serializer for the route's data. */
   toJson(handler: (ctx: RouteContext<S>) => unknown): RouteBuilder<S>;
@@ -231,6 +234,25 @@ export interface CompileInput {
   readonly defaultLocale: string;
 }
 
+/**
+ * Serializable route entry for the client route-index — a projection of the
+ * compiled route table with NO `_handlers` closures, safe to ship to the browser
+ * (the SPA recompiles matchers lazily from `pattern`).
+ *
+ * @remarks
+ * `meta` MUST be JSON-serializable: `clientManifest()` is intended to survive a
+ * `JSON.stringify`/`JSON.parse` round-trip, so a route's `.meta()` bag must contain
+ * only JSON-safe values (no functions, symbols, or class instances).
+ */
+export interface ClientRoute {
+  /** URL pattern string, e.g. `/{lang:?}/{slug}/`. */
+  readonly pattern: string;
+  /** Route name key from the route map. */
+  readonly name: string;
+  /** Route metadata bag from `.meta()`. MUST be JSON-serializable. */
+  readonly meta: Record<string, unknown>;
+}
+
 /** Public API exposed via `ctx.require(routerPlugin)`. */
 export type RouterApi = {
   /**
@@ -270,6 +292,17 @@ export type RouterApi = {
    * for (const def of ctx.require(routerPlugin).manifest()) { def._handlers.load?.({}, "en"); }
    */
   manifest(): readonly RouteDefinition[];
+  /**
+   * Serializable, specificity-sorted projection of the route table for client
+   * shipping. Maps the compiled table to `{ pattern, name, meta }` entries with NO
+   * `_handlers` closures, returned as a fresh frozen array. JSON-serializable so the
+   * SPA can embed it and recompile matchers lazily in the browser.
+   *
+   * @returns A fresh, frozen, specificity-sorted read-only array of {@link ClientRoute}.
+   * @example
+   * const json = JSON.stringify(ctx.require(routerPlugin).clientManifest());
+   */
+  clientManifest(): readonly ClientRoute[];
 };
 
 /** Re-export under the canonical `Config` name for the plugin-types barrel. */

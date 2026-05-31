@@ -27,4 +27,5 @@ export const envPlugin = createCorePlugin("env", {
   onInit: validateSchema
 });
 export { cloudflareBindings, dotenv, processEnv } from "./providers";
+export { browserEnv } from "./providers.browser";
 export type { EnvApi, EnvConfig, EnvProvider, EnvState, EnvVarSpec } from "./types";
