@@ -91,22 +91,6 @@ export type SpaConfig = {
    * Defaults to an empty array.
    */
   components?: ComponentDef[];
-  /**
-   * Client-data consumption mode for JSON-driven navigation. `"off"` = HTML-over-
-   * fetch only (static); `"fragment"` = fetch pre-rendered HTML-in-JSON sidecars
-   * (hybrid); `"data"` = fetch data-only sidecars and render on the client (pure-
-   * SPA). The consumer sets this to match the `clientData` plugin it composed; the
-   * consume-half navigation behaviour ships in web-parity wave 4. Defaults to `"off"`.
-   */
-  clientData?: "off" | "fragment" | "data";
-  /**
-   * Site-root-relative URL the client fetches the client-data route manifest from
-   * (e.g. `"/_data/"`). This is a URL PATH — a different domain from
-   * `clientData.outputDir`, which is a build-time filesystem path relative to the
-   * build `outDir`. Keep the two consistent: `dataDir` is normally
-   * `"/" + trim(clientData.outputDir, "/") + "/"`. Defaults to `"/_data/"`.
-   */
-  dataDir?: string;
 };
 
 /** Resolved SPA config after defaults are applied. */
@@ -119,10 +103,6 @@ export interface ResolvedSpaConfig {
   progressBar: boolean;
   /** Pre-registered components. */
   components: ComponentDef[];
-  /** Resolved client-data consumption mode (`"off"` | `"fragment"` | `"data"`). */
-  clientData: "off" | "fragment" | "data";
-  /** Resolved site-root-relative URL the client fetches the data manifest from. */
-  dataDir: string;
 }
 
 /** Context handed to every component lifecycle hook. */

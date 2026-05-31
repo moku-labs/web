@@ -6,6 +6,7 @@
 // ─── Plugin Instances (alphabetical) ─────────────────────────
 export { buildPlugin } from "./build";
 export { contentPlugin } from "./content";
+export { dataPlugin } from "./data";
 export { deployPlugin } from "./deploy";
 export { envPlugin } from "./env";
 export { headPlugin } from "./head";
@@ -20,6 +21,7 @@ export { spaPlugin } from "./spa";
 // site + i18n (Micro) keep types inline and have no namespace entry.
 export * as Build from "./build/types";
 export * as Content from "./content/types";
+export * as Data from "./data/types";
 export * as Deploy from "./deploy/types";
 export * as Env from "./env/types";
 export * as Head from "./head/types";

@@ -4,7 +4,7 @@
  * `createApp`'s defaults are the **isomorphic** plugins that run unchanged on both
  * Node and the browser (`site`, `i18n`, `router`, `head`, `spa`, plus the
  * `log`/`env` core). The Node-only plugins (`content`, `build`, `deploy`,
- * `clientData`) are exported for Layer-3 composition: add them with
+ * `data`) are exported for Layer-3 composition: add them with
  * `createApp({ plugins: [...] })` in a Node build; omit them in a browser app.
  * The framework never hard-blocks either runtime — the consumer composes the
  * variant it needs and supplies the matching `env` provider.
@@ -16,14 +16,16 @@ import { headPlugin, i18nPlugin, routerPlugin, sitePlugin, spaPlugin } from "./p
 const framework = createCore(coreConfig, {
   // Isomorphic defaults — each runs on Node AND in the browser; every `depends`
   // edge points backward (spec/11 §1.3/§1.5). Node-only plugins (content, build,
-  // deploy, clientData) are added per-target by the consumer (Layer 3, spec/01 §10).
+  // deploy, data) are added per-target by the consumer (Layer 3, spec/01 §10).
   plugins: [sitePlugin, i18nPlugin, routerPlugin, headPlugin, spaPlugin],
   pluginConfigs: {}
 });
 
 // ─── Plugins + type namespaces (Layer-3 composition surface) ──────────────────
+// `export *` includes every built-in (incl. the node-only data/content/build/
+// deploy plugins + the `Data` type namespace); `"sideEffects": false` lets a
+// browser bundle tree-shake the ones it does not compose.
 export * from "./plugins";
-export { clientDataPlugin } from "./plugins/clientData";
 
 // ─── env providers (compose per target: dotenv/processEnv on Node, browserEnv in the browser) ──
 export { cloudflareBindings, dotenv, processEnv } from "./plugins/env/providers";

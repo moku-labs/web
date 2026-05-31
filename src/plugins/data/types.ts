@@ -1,5 +1,5 @@
 /**
- * @file clientData plugin — type definitions (Standard tier).
+ * @file data plugin — type definitions (Standard tier).
  *
  * Build-emit half of the two-world data pattern: a STABLE route-index manifest
  * plus per-route content-hashed JSON sidecars, written from the framework's own
@@ -7,15 +7,15 @@
  */
 
 /**
- * Configuration for {@link clientDataPlugin}. Both fields have defaults (see
+ * Configuration for {@link dataPlugin}. Both fields have defaults (see
  * `./config`), so the config is optional at `createApp`.
  *
  * @example
  * ```ts
- * const cfg: ClientDataConfig = { outputDir: "_data", payload: "fragment" };
+ * const cfg: DataConfig = { outputDir: "_data", payload: "fragment" };
  * ```
  */
-export type ClientDataConfig = {
+export type DataConfig = {
   /** Output root relative to the build `outDir`. Default `"_data"`. */
   outputDir: string;
   /**
@@ -25,7 +25,7 @@ export type ClientDataConfig = {
   payload: "fragment" | "data";
 };
 
-/** Summary returned by {@link ClientDataApi.emit} and cached in state. */
+/** Summary returned by {@link DataApi.emit} and cached in state. */
 export interface EmitSummary {
   /** Path of the written STABLE route-index manifest. */
   manifestPath: string;
@@ -36,25 +36,25 @@ export interface EmitSummary {
 }
 
 /**
- * Internal clientData state: the most recent emit summary, or `null` before the
- * first {@link ClientDataApi.emit} call.
+ * Internal data state: the most recent emit summary, or `null` before the
+ * first {@link DataApi.emit} call.
  */
-export interface ClientDataState {
+export interface DataState {
   /** Result of the last `emit()`, or `null` if it has not run yet. */
   lastEmit: EmitSummary | null;
 }
 
 /**
- * Public API mounted at `ctx.clientData`. A single awaited `emit()` method —
+ * Public API mounted at `ctx.data`. A single awaited `emit()` method —
  * Node-only, build-time.
  *
  * @example
  * ```ts
  * await app.build.run();
- * await app.clientData.emit();
+ * await app.data.emit();
  * ```
  */
-export type ClientDataApi = {
+export type DataApi = {
   /**
    * Emit the route-index manifest + per-route sidecars. AWAITED — call after
    * `await app.build.run()` so the on-disk SSR fragments exist.

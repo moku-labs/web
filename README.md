@@ -24,7 +24,17 @@ The consumer surface is one `createApp` call plus a typed routing DSL — you ne
 ## Quick start
 
 ```ts
-import { createApp, defineRoutes, route } from "@moku-labs/web";
+// A Node SSG build — compose the node-only plugins explicitly:
+import {
+  createApp,
+  defineRoutes,
+  route,
+  contentPlugin,
+  buildPlugin,
+  deployPlugin,
+  dotenv,
+  processEnv
+} from "@moku-labs/web";
 
 const routes = defineRoutes({
   home: route("/")
@@ -38,8 +48,10 @@ const routes = defineRoutes({
 });
 
 const app = createApp({
+  plugins: [contentPlugin, buildPlugin, deployPlugin], // node-only — added per target
   config: { mode: "production" },
   pluginConfigs: {
+    env: { providers: [dotenv(), processEnv()] },
     site: { name: "My Blog", url: "https://blog.dev", author: "Me", description: "A personal blog." },
     i18n: { locales: ["en", "uk"], defaultLocale: "en" },
     content: { contentDir: "./content" },
@@ -56,19 +68,33 @@ Content lives on disk as `content/{slug}/{locale}.md` with YAML frontmatter
 (`title`, `date`, `description`, `tags`, `language`, optional `draft`/`author`). Drafts are excluded
 from production builds.
 
+## Composition model
+
+`createApp`'s **defaults are the isomorphic plugins** — the ones that run unchanged on
+both Node and the browser: `site`, `i18n`, `router`, `head`, `spa` (plus the `log`/`env`
+core). The **node-only** plugins (`content`, `build`, `deploy`, `data`) are exported but
+not defaults — add them with `createApp({ plugins: [...] })` for a Node build, and omit
+them in a browser app (with `"sideEffects": false`, your bundler tree-shakes them out).
+You also choose the `env` provider per target: `[dotenv(), processEnv()]` on Node,
+`[browserEnv()]` in the browser. The framework never hard-blocks either runtime.
+
+A browser entry is just your own `createApp(...).start()` over the defaults — `spa`'s
+`onStart` mounts islands onto the SSR'd DOM and intercepts navigation.
+
 ## Plugins
 
-| Plugin | Responsibility |
-|---|---|
-| `site` | Site identity (name, URL, author) + canonical URL helper |
-| `i18n` | Locales, default-locale fallback, translations, hreflang/ogLocale maps |
-| `router` | Type-safe route DSL (`route`/`defineRoutes`), matching, URL/file derivation |
-| `content` | Markdown pipeline → sanitized HTML, frontmatter, reading time, locale model |
-| `head` | SEO `<head>` composition: title template, canonical, OG/Twitter, JSON-LD, hreflang |
-| `build` | SSG orchestrator: pages, feeds (RSS/Atom/JSON), sitemap, OG images |
-| `spa` | Client runtime: island hydration + intercepted navigation |
-| `deploy` | Cloudflare Pages: `wrangler.jsonc` scaffolding + deploy |
-| `log`, `env` | Core plugins: structured logging + validated environment access |
+| Plugin | Default? | Responsibility |
+|---|---|---|
+| `site` | ✅ isomorphic | Site identity (name, URL, author) + canonical URL helper |
+| `i18n` | ✅ isomorphic | Locales, default-locale fallback, translations, hreflang/ogLocale maps |
+| `router` | ✅ isomorphic | Type-safe route DSL (`route`/`defineRoutes`), matching, URL/file derivation |
+| `head` | ✅ isomorphic | SEO `<head>` composition: title template, canonical, OG/Twitter, JSON-LD, hreflang |
+| `spa` | ✅ isomorphic | Client runtime: island hydration + intercepted navigation (inert on Node) |
+| `content` | ➕ node-only | Markdown pipeline → sanitized HTML, frontmatter, reading time, locale model |
+| `build` | ➕ node-only | SSG orchestrator: pages, feeds (RSS/Atom/JSON), sitemap, OG images |
+| `deploy` | ➕ node-only | Cloudflare Pages: `wrangler.jsonc` scaffolding + deploy |
+| `data` | ➕ node-only | Build-emit half: route-index manifest + per-route JSON sidecars for SPA nav |
+| `log`, `env` | ✅ core | Structured logging + validated environment access |
 
 SEO primitives are exported for route `.head()` handlers: `meta`, `og`, `twitter`, `jsonLd`,
 `canonical`, `hreflang`, `feedLink`, `buildArticleHead`.

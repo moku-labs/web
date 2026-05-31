@@ -10,16 +10,19 @@ built once in `onInit` and stored in `ctx.state.kernel`; `api`, `onStart`, and `
 reuse that one instance. `index.ts` is wiring only (≤30 lines) — all logic lives in the
 domain files (`kernel`, `router`, `head`, `progress`, `components`, `lifecycle`).
 
-The plugin is **browser-only**: `onStart` is a no-op when `typeof document === "undefined"`,
-so `spa` is safe to register in the SSR/build pipeline. Live DOM-bound navigation also ships
-via a separate browser entry (`client.ts`, the `./spa` subpath export) that imports only pure
-domain functions and never touches `ctx` or Moku kernel code.
+`spa` is an **isomorphic framework default**: `onStart` is a no-op when
+`typeof document === "undefined"`, so it is inert in the Node SSG/build pipeline and boots the
+browser runtime only in a browser. There is no separate browser entry or subpath export — a
+browser app is just your own `createApp(...).start()` over the defaults (with
+`env.providers: [browserEnv()]`); `spa`'s `onStart` boots navigation listeners and mounts
+islands onto the SSR'd DOM.
 
 ## API
 
-The public surface mounted at `app.spa` is the **registration / control** side. The DOM-bound
-client runtime (`boot`, live `navigate`) ships through the `./spa` browser entry, not `app.spa`.
-All methods delegate to the single shared kernel in `ctx.state.kernel`.
+The public surface mounted at `app.spa` is the **registration / control** side
+(`register`/`navigate`/`current`). The DOM-bound runtime (navigation interception, island
+mounting) boots from `onStart`; all methods delegate to the single shared kernel in
+`ctx.state.kernel`.
 
 ### `register(component: ComponentDef): void`
 

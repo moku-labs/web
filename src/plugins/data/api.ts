@@ -1,39 +1,39 @@
 /**
- * @file clientData plugin — API factory (emit-half of the two-world pattern).
+ * @file data plugin — API factory (emit-half of the two-world pattern).
  */
-import type { ClientDataApi, ClientDataConfig, ClientDataState, EmitSummary } from "./types";
+import type { DataApi, DataConfig, DataState, EmitSummary } from "./types";
 
 /**
- * Minimal structural shape of the plugin context that {@link clientDataApi}
+ * Minimal structural shape of the plugin context that {@link dataApi}
  * consumes. Typed loosely on purpose so api.ts stays free of the kernel's full
  * plugin-context generic machinery. The emit pipeline (`router.clientManifest()`
  * + `content.loadAll()` → manifest + hashed sidecars) is wired in build wave 3.
  *
  * @example
  * ```ts
- * const api = clientDataApi(ctx);
+ * const api = dataApi(ctx);
  * ```
  */
-export type ClientDataPluginContext = {
+export type DataPluginContext = {
   /** Mutable plugin state (last emit summary). */
-  state: ClientDataState;
+  state: DataState;
   /** Resolved plugin configuration. */
-  config: ClientDataConfig;
+  config: DataConfig;
 };
 
 /**
- * Builds the clientData API. Exposes a single awaited `emit()` method; no
+ * Builds the data API. Exposes a single awaited `emit()` method; no
  * `onStart`/`onStop` (one-shot, build-time, holds no resource).
  *
- * @param _ctx - The clientData plugin context.
- * @returns The {@link ClientDataApi} mounted at `ctx.clientData`.
+ * @param _ctx - The data plugin context.
+ * @returns The {@link DataApi} mounted at `ctx.data`.
  * @example
  * ```ts
  * await app.build.run();
- * await app.clientData.emit();
+ * await app.data.emit();
  * ```
  */
-export function clientDataApi(_ctx: ClientDataPluginContext): ClientDataApi {
+export function dataApi(_ctx: DataPluginContext): DataApi {
   return {
     /**
      * Emits the route-index manifest + per-route sidecars.
@@ -47,7 +47,7 @@ export function clientDataApi(_ctx: ClientDataPluginContext): ClientDataApi {
      * ```
      */
     emit(_options?: { outDir?: string }): Promise<EmitSummary> {
-      throw new Error("clientData.emit: not implemented (build wave 3)");
+      throw new Error("data.emit: not implemented (build wave 3)");
     }
   };
 }
