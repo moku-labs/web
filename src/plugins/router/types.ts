@@ -61,6 +61,23 @@ export interface RouteContext<S extends RouteState> {
   readonly locale: string;
 }
 
+/**
+ * Context handed to a route's `.layout()` wrapper: the render-time
+ * {@link RouteContext} plus the route's `.meta()` bag, so persistent chrome (e.g. a
+ * TopBar/TabNav) can read `locale` and `meta.activeTab`. Distinct from
+ * `RouteContext` because the layout is the only handler that needs `meta`; keeping
+ * it on its own type leaves `.render()`/`.head()` contexts unchanged.
+ *
+ * @remarks
+ * The layout is applied in the SSG render path ONLY. On client (SPA) navigation the
+ * chrome is persistent and the layout is intentionally NOT re-applied — only the
+ * inner swap region is replaced. See `build`'s pages phase and `spa`'s kernel.
+ */
+export interface LayoutContext<S extends RouteState> extends RouteContext<S> {
+  /** The route's `.meta()` bag (e.g. `{ activeTab: "home" }`). */
+  readonly meta: Record<string, unknown>;
+}
+
 /** Head metadata produced by a route's `.head()` handler. */
 export interface HeadConfig {
   /** Document title. */
@@ -83,8 +100,14 @@ export interface RouteBuilder<S extends RouteState> extends RouteDefinition {
   load<D>(
     loader: (params: S["params"], locale: string) => D | Promise<D>
   ): RouteBuilder<{ readonly params: S["params"]; readonly data: Awaited<D> }>;
-  /** Attach a layout wrapper component. */
-  layout(component: (children: ComponentChildren) => VNode): RouteBuilder<S>;
+  /**
+   * Attach a ctx-aware layout wrapper that frames this route's rendered page in
+   * persistent chrome. Receives the route's {@link LayoutContext} (render context +
+   * `meta`) and the page `children`. Applied in the SSG render path ONLY — on client
+   * navigation the chrome persists and only the inner swap region is replaced, so the
+   * layout is not re-run.
+   */
+  layout(component: (ctx: LayoutContext<S>, children: ComponentChildren) => VNode): RouteBuilder<S>;
   /** Attach the page render handler. */
   render(handler: (ctx: RouteContext<S>) => VNode): RouteBuilder<S>;
   /**
@@ -115,8 +138,8 @@ export interface RouteBuilder<S extends RouteState> extends RouteDefinition {
 export interface RouteHandlers {
   /** Data loader. */
   readonly load?: (params: Record<string, string>, locale: string) => unknown;
-  /** Layout wrapper. */
-  readonly layout?: (children: ComponentChildren) => VNode;
+  /** Layout wrapper (ctx-aware): frames the page in persistent chrome. SSG-only. */
+  readonly layout?: (ctx: LayoutContext<RouteState>, children: ComponentChildren) => VNode;
   /** Page renderer. */
   readonly render?: (ctx: RouteContext<RouteState>) => VNode;
   /** Client-side validation gate: `unknown` (fetched JSON) → the route's data type, or throw. */

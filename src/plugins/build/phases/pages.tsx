@@ -19,6 +19,7 @@ import { i18nPlugin } from "../../i18n";
 import { routerPlugin } from "../../router";
 import type {
   HeadConfig,
+  LayoutContext,
   RouteContext,
   RouteDefinition,
   RouteState,
@@ -275,7 +276,14 @@ async function renderInstance(
   const headHtml = ctx.require(headPlugin).render(resolved, data);
   const buildIdMeta = `<meta name="build-id" content="${ctx.state.runId ?? ""}">`;
   const vnode = definition._handlers.render?.(routeContext);
-  const bodyHtml = vnode ? renderToString(vnode) : "";
+  // Apply the route's layout wrapper (persistent chrome) around the page VNode.
+  // SSG-only: the client (spa) keeps the chrome and swaps just the inner region,
+  // so the layout is NOT re-applied on navigation. The layout reads `.meta()` (e.g.
+  // activeTab) and `locale` via its LayoutContext.
+  const layoutCtx: LayoutContext<RouteState> = { ...routeContext, meta: definition._meta };
+  const page =
+    vnode && definition._handlers.layout ? definition._handlers.layout(layoutCtx, vnode) : vnode;
+  const bodyHtml = page ? renderToString(page) : "";
   const parts: DocumentParts = {
     head: `${headHtml}${buildIdMeta}`,
     body: bodyHtml,

@@ -192,6 +192,11 @@ export function createSpaKernel(
       const data = hit.route._handlers.parse ? hit.route._handlers.parse(raw) : raw;
       const locale = hit.params.lang ?? document.documentElement.lang ?? "";
       const routeContext: RouteContext<RouteState> = { params: hit.params, data, locale };
+      // NB: the route's `.layout()` is intentionally NOT applied here. The layout
+      // chrome (TopBar/TabNav/Footer) is persistent — rendered once by SSG and left
+      // in place across navigations. Client nav replaces ONLY the inner swap region
+      // (`resolved.swapSelector`); re-running the layout would destroy and recreate
+      // the chrome. The layout is therefore an SSG-only concern (see build/pages).
       const vnode = hit.route._handlers.render(routeContext);
       const region = document.querySelector(resolved.swapSelector);
       if (!region) return false;
