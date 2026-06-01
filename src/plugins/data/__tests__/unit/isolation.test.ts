@@ -26,9 +26,9 @@ function hasStaticNodeImport(src: string): boolean {
 }
 
 describe("data plugin — build-time gates", () => {
-  it("isolates node:* behind the lazy emit.ts (no static node import outside emit.ts)", () => {
+  it("isolates node:* behind the lazy writer.ts (no static node import elsewhere)", () => {
     for (const file of SOURCE_FILES) {
-      if (file === "emit.ts") continue; // emit.ts is the node-only writer (allowed)
+      if (file === "writer.ts") continue; // writer.ts is the node-only writer (allowed)
       expect(
         hasStaticNodeImport(readSource(file)),
         `${file} must not statically import node:*`
@@ -38,23 +38,28 @@ describe("data plugin — build-time gates", () => {
 
   it("reaches the node-only writer only via a lazy dynamic import in api.ts", () => {
     const api = readSource("api.ts");
-    // No STATIC import of ./emit (would defeat the node-free read-side bundle)...
-    const hasStaticEmitImport = api
+    // No STATIC import of ./writer (would defeat the node-free read-side bundle)...
+    const hasStaticWriterImport = api
       .split("\n")
-      .some(line => line.trimStart().startsWith("import") && line.includes('"./emit"'));
-    expect(hasStaticEmitImport).toBe(false);
+      .some(line => line.trimStart().startsWith("import") && line.includes('"./writer"'));
+    expect(hasStaticWriterImport).toBe(false);
     // ...only a lazy dynamic import.
-    expect(api.includes('await import("./emit")')).toBe(true);
+    expect(api.includes('await import("./writer")')).toBe(true);
   });
 
-  it("draft-safety lint-ban: never calls content's per-slug loader in the plugin", () => {
+  it("is domain-agnostic: no source file IMPORTS the content plugin or its types", () => {
     for (const file of SOURCE_FILES) {
       const src = readSource(file);
-      expect(src.includes("content.load("), `${file} must not call content.load(`).toBe(false);
-      expect(
-        src.includes("contentPlugin).load("),
-        `${file} must not call require(contentPlugin).load(`
-      ).toBe(false);
+      const importsContent = src
+        .split("\n")
+        .some(
+          line =>
+            line.trimStart().startsWith("import") &&
+            (line.includes('"../content') || line.includes("'../content"))
+        );
+      expect(importsContent, `${file} must not import the content plugin (stay agnostic)`).toBe(
+        false
+      );
     }
   });
 });

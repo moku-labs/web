@@ -1,170 +1,125 @@
 /**
  * @file data plugin — type definitions (Standard tier).
  *
- * The `data` plugin is the isomorphic BRIDGE for the two-world data pattern. It
- * owns the build↔runtime data contract on BOTH sides:
- *  - **Node (build):** `emit()` writes a STABLE route-index manifest + per-route
- *    content-hashed JSON sidecars from the framework's own typed data.
- *  - **Browser (runtime):** `manifest()` / `load(path)` fetch + parse those same
- *    files and hand the route's data to `spa` for JSON-driven navigation.
+ * The `data` plugin is the **agnostic data provider** for the SSG→DATA→SPA pattern.
+ * It owns ONE thing: the contract `page path → persisted JSON file`. It knows
+ * NOTHING about what the data *is* — no domain types appear here. A route decides
+ * its own data shape (`load`'s return) and its own validation (`route.parse`).
  *
- * Because one module owns both the write and read ends, the on-disk format cannot
- * drift. The Node-only file-writing code (`node:fs`/`node:crypto`) is isolated
- * behind a lazy `import()` inside `emit()`, so composing `data` in a browser app
- * keeps the bundle free of `node:*`.
+ *  - **Node (build):** `write(entries)` persists one JSON file per page, keyed by
+ *    the page's URL via {@link DataProvider.fileFor}. `build` supplies the entries
+ *    (it already expanded the routes), so there is no duplicate expansion here.
+ *  - **Browser (runtime):** `at(path)` fetches + caches that file as `unknown`; the
+ *    route's `parse` validates it into the route's data type before `render`.
+ *
+ * The Node-only file-writing code (`node:fs`) is isolated behind a lazy `import()`
+ * inside `write()`, so composing `data` in a browser app keeps the bundle free of
+ * `node:*`.
  */
 
 /**
- * Configuration for {@link dataPlugin}. All fields have defaults (see `./config`),
- * so the config is optional at `createApp`.
+ * Configuration for {@link dataPlugin}. All fields have defaults (see `./config`).
  *
  * @example
  * ```ts
- * const cfg: DataConfig = { outputDir: "_data", baseUrl: "/_data/", payload: "fragment" };
+ * const cfg: DataConfig = { outputDir: "_data", baseUrl: "/_data/" };
  * ```
  */
 export type DataConfig = {
   /**
-   * WRITE side (Node) — output root relative to the build `outDir`, a filesystem
-   * path where `emit()` writes the manifest + sidecars. Default `"_data"`.
+   * WRITE side (Node): output subdir relative to the build `outDir`, a filesystem
+   * path where `write()` persists the per-page JSON. Default `"_data"`.
    */
   outputDir: string;
   /**
-   * READ side (browser) — site-root-relative URL the client fetches the manifest +
-   * sidecars from. A different domain from {@link DataConfig.outputDir} (a
-   * filesystem path); keep them consistent (normally `"/" + trim(outputDir) + "/"`).
-   * Default `"/_data/"`.
+   * READ side (browser): site-root-relative URL the client fetches the per-page
+   * JSON from. A different domain from {@link DataConfig.outputDir} (a filesystem
+   * path); keep consistent (`"/" + trim(outputDir) + "/"`). Default `"/_data/"`.
    */
   baseUrl: string;
-  /**
-   * `"fragment"` = HTML-in-JSON (hybrid: `load()` returns pre-rendered HTML, no
-   * client render layer); `"data"` = data-only (pure-SPA: `load()` returns raw
-   * data the client renders). Default `"fragment"`.
-   */
-  payload: "fragment" | "data";
 };
 
-/** Summary returned by {@link DataApi.emit} and cached in state. */
-export interface EmitSummary {
-  /** Path of the written STABLE route-index manifest. */
-  manifestPath: string;
-  /** Number of per-route sidecar files written. */
-  sidecarCount: number;
-  /** Resolved build output directory the emit wrote under. */
-  outDir: string;
+/** One page's data to persist — `build` produces these from its route expansion. */
+export interface DataEntry {
+  /** The page's URL path (e.g. `/en/hello/`); maps to a file via {@link DataProvider.fileFor}. */
+  path: string;
+  /** The serializable data for this page (the route's `load`/projection output). */
+  data: unknown;
+}
+
+/** Summary returned by {@link DataProvider.write} and cached in state. */
+export interface DataWriteSummary {
+  /** Number of per-page JSON files written. */
+  fileCount: number;
+  /** Total bytes written across all files. */
+  bytes: number;
+  /** The written file paths, relative to the build `outDir`. */
+  files: string[];
 }
 
 /**
- * Result of {@link DataApi.load} — a discriminated union the `spa` consume-half
- * switches on. `"fragment"` carries pre-rendered HTML to swap directly; `"data"`
- * carries raw data the client renders.
- */
-export type RouteData =
-  | {
-      /** Hybrid payload: swap `html` into the region, no client render. */
-      kind: "fragment";
-      /** SSR HTML fragment for the swap region. */
-      html: string;
-      /** Route metadata projected for the client. */
-      meta: Record<string, unknown>;
-    }
-  | {
-      /** Pure-SPA payload: client renders from `data`. */
-      kind: "data";
-      /** Serializable route data (e.g. an Article projection). */
-      data: unknown;
-      /** Route metadata projected for the client. */
-      meta: Record<string, unknown>;
-    };
-
-/**
- * Internal data state. `lastEmit` records the most recent `emit()` (Node);
- * `manifest` caches the fetched route-index (browser, lazy). Both `null` until
- * their respective side first runs.
+ * Internal data state. `lastWrite` records the most recent `write()` (Node);
+ * `cache` memoizes fetched per-path data (browser, lazy). Both empty until their
+ * respective side first runs.
  */
 export interface DataState {
-  /** Result of the last `emit()`, or `null` if it has not run yet (Node). */
-  lastEmit: EmitSummary | null;
-  /** Lazily-fetched route-index, cached after the first `load()`/`manifest()` (browser). */
-  manifest: RouteIndexFile | null;
+  /** Result of the last `write()`, or `null` if it has not run yet (Node). */
+  lastWrite: DataWriteSummary | null;
+  /** Per-path fetched data, cached after the first `at(path)` (browser). */
+  cache: Map<string, unknown>;
 }
 
 /**
- * Public API mounted at `app.data` — the isomorphic bridge. `emit()` is the Node
- * write side; `manifest()`/`load()` are the browser read side. Composing `data`
- * never forces either side: a Node build calls `emit()`, a browser app calls
- * `load()`, and unused code paths stay out of the respective bundle.
+ * Public API mounted at `app.data` — the agnostic data provider. `write()` is the
+ * Node persist side; `at()` is the browser read side; `urlFor`/`fileFor` are the
+ * pure URL convention shared by both so the written file and fetched URL can never
+ * drift.
  *
  * @example
  * ```ts
- * // Node build:
- * await app.build.run();
- * await app.data.emit();
+ * // Node build (build supplies the entries it already expanded):
+ * await app.data.write([{ path: "/en/hello/", data: article }]);
  *
- * // Browser (inside spa nav): fetch the route's data through the bridge:
- * const routeData = await app.data.load("/blog/hello/");
+ * // Browser (inside spa nav): fetch the page's data, then route.parse validates it:
+ * const raw = await app.data.at("/en/hello/"); // unknown | null
  * ```
  */
-export type DataApi = {
+export type DataProvider = {
   /**
-   * WRITE (Node) — emit the route-index manifest + per-route sidecars. AWAITED;
-   * call after `await app.build.run()` so the on-disk SSR fragments exist. Lazily
-   * loads its `node:fs` writer and `require`s `router`/`content` at call time, so
-   * it never contaminates a browser bundle. Throws `[web]` if those plugins are
-   * absent (i.e. not a Node build).
+   * READ (browser) — fetch (and cache) the persisted data for a page path from
+   * `config.baseUrl`. Returns the raw parsed JSON as `unknown` (the caller's
+   * `route.parse` validates it), or `null` if the fetch/parse fails.
    *
+   * @param path - The page URL path (e.g. `/en/hello/`).
+   * @returns The page's raw data, or `null` on failure.
+   */
+  at(path: string): Promise<unknown | null>;
+  /**
+   * WRITE (Node) — persist one JSON file per entry, keyed by page path via
+   * {@link DataProvider.fileFor}. Called by `build` after it expands routes (no
+   * duplicate expansion). Lazily loads its `node:fs` writer, so it never
+   * contaminates a browser bundle.
+   *
+   * @param entries - The per-page data to persist.
    * @param options - Optional overrides.
-   * @param options.outDir - Build output directory the emit writes under.
-   * @returns A summary of the emitted manifest path, sidecar count, and outDir.
+   * @param options.outDir - Build output directory to write under (default `./dist`).
+   * @returns A summary of the written files.
    */
-  emit(options?: { outDir?: string }): Promise<EmitSummary>;
+  write(entries: readonly DataEntry[], options?: { outDir?: string }): Promise<DataWriteSummary>;
   /**
-   * READ (browser) — fetch (and cache) the STABLE route-index manifest from
-   * `config.baseUrl`. Returns `null` if it cannot be fetched/parsed.
+   * PURE — the browser fetch URL for a page path (e.g. `/en/hello/` →
+   * `/_data/en/hello/index.json`). Shared with {@link DataProvider.fileFor}.
    *
-   * @returns The parsed route-index, or `null` on failure.
+   * @param path - The page URL path.
+   * @returns The site-root-relative data URL.
    */
-  manifest(): Promise<RouteIndexFile | null>;
+  urlFor(path: string): string;
   /**
-   * READ (browser) — resolve `path` against the manifest, fetch the matching
-   * route's content-hashed sidecar, and return its {@link RouteData}. Returns
-   * `null` when there is no match or the fetch/parse fails (the caller — `spa` —
-   * then falls back to HTML-over-fetch).
+   * PURE — the `outDir`-relative file path for a page path (e.g. `/en/hello/` →
+   * `_data/en/hello/index.json`). Shared with {@link DataProvider.urlFor}.
    *
-   * @param path - The pathname (optionally with search) to resolve.
-   * @returns The route's data, or `null` to signal "fall back".
+   * @param path - The page URL path.
+   * @returns The output-relative file path.
    */
-  load(path: string): Promise<RouteData | null>;
+  fileFor(path: string): string;
 };
-
-/**
- * Shape of the STABLE `routes-manifest.json` route-index. Un-hashed filename
- * (short cache); each `dataUrl` points at a content-hashed sidecar (long cache).
- */
-export interface RouteIndexFile {
-  /** Build identifier, used for client-side cache busting. */
-  buildId: string;
-  /** Serializable route entries, each pointing at its hashed sidecar URL. */
-  routes: ReadonlyArray<{
-    pattern: string;
-    name: string;
-    meta: Record<string, unknown>;
-    dataUrl: string;
-  }>;
-}
-
-/** `"fragment"` sidecar payload — pre-rendered SSR HTML for the swap region. */
-export interface SidecarFragment {
-  /** SSR HTML fragment for the swap region (reused, never re-rendered). */
-  html: string;
-  /** Route metadata projected for the client. */
-  meta: Record<string, unknown>;
-}
-
-/** `"data"` sidecar payload — data-only projection for pure-SPA client render. */
-export interface SidecarData {
-  /** Serializable route data (e.g. an Article projection). */
-  data: unknown;
-  /** Route metadata projected for the client. */
-  meta: Record<string, unknown>;
-}

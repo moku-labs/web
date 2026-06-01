@@ -25,5 +25,5 @@ export function createState(_ctx: {
   readonly config: Readonly<RouterConfig>;
 }): RouterState {
   // eslint-disable-next-line unicorn/no-null -- `table` is `MatcherTable | null` until onInit compiles it
-  return { table: null };
+  return { table: null, mode: _ctx.config.mode ?? "hybrid" };
 }

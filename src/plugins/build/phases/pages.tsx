@@ -7,6 +7,8 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { renderToString } from "preact-render-to-string";
+import { dataPlugin } from "../../data";
+import type { DataEntry } from "../../data/types";
 import { headPlugin } from "../../head";
 import type {
   HeadConfig as ComposedHeadConfig,
@@ -257,8 +259,9 @@ async function renderInstance(
   ctx: Pick<PhaseContext, "require" | "state" | "config">,
   instance: PageInstance,
   shell: { assets: string; template: string | null }
-): Promise<{ url: string; html: string }> {
+): Promise<{ url: string; html: string; data: unknown; hasData: boolean }> {
   const { definition, entry, params, locale, name } = instance;
+  const hasData = definition._handlers.load !== undefined;
   const data = definition._handlers.load
     ? await definition._handlers.load(params, locale)
     : undefined;
@@ -284,7 +287,7 @@ async function renderInstance(
   const filePath = join(ctx.config.outDir, entry.toFile(params));
   await mkdir(dirname(filePath), { recursive: true });
   await writeFile(filePath, html, "utf8");
-  return { url, html };
+  return { url, html, data, hasData };
 }
 
 /**
@@ -302,12 +305,46 @@ async function renderInstance(
  * const { pageCount, rootHtml } = await renderPages(ctx);
  * ```
  */
+/**
+ * Enforce the data-validation contract: in `hybrid`/`spa` mode, any route that
+ * has BOTH a `render` and a `load` (so it will be client-data-navigated) MUST
+ * declare a `.parse()` validator — otherwise fetched JSON would reach `render`
+ * unvalidated. Converts a runtime safety hole into a build error.
+ *
+ * @param manifest - The route definitions from `router.manifest()`.
+ * @param mode - The resolved render mode.
+ * @throws {Error} If a data-navigable route is missing `.parse()` in hybrid/spa mode.
+ * @example
+ * ```ts
+ * assertDataValidators(router.manifest(), router.mode());
+ * ```
+ */
+function assertDataValidators(
+  manifest: readonly RouteDefinition[],
+  mode: "ssg" | "spa" | "hybrid"
+): void {
+  if (mode === "ssg") return;
+  for (const definition of manifest) {
+    const { render, load, parse } = definition._handlers;
+    if (render && load && !parse) {
+      throw new Error(
+        `[web] build: route "${definition.pattern}" enables client data navigation ` +
+          `(router mode "${mode}") but has no .parse() validator. Add ` +
+          `.parse(raw => /* validate → data */) so fetched JSON is validated before render, ` +
+          `or set router mode "ssg" to disable data navigation.`
+      );
+    }
+  }
+}
+
 export async function renderPages(
-  ctx: Pick<PhaseContext, "require" | "state" | "config" | "log">
+  ctx: Pick<PhaseContext, "require" | "state" | "config" | "log" | "has">
 ): Promise<PagesResult> {
   const router = ctx.require(routerPlugin);
   const manifest = router.manifest();
   ctx.state.manifest = [...manifest];
+  const mode = router.mode();
+  assertDataValidators(manifest, mode);
   const byPattern = makeEntryMap(router);
   const locales = ctx.require(i18nPlugin).locales();
   // Read the shell template ONCE and compute asset tags ONCE (O(1) per page).
@@ -326,6 +363,17 @@ export async function renderPages(
   const rendered = await Promise.all(
     instances.map(instance => renderInstance(ctx, instance, shell))
   );
+  // Persist per-page client data when the app opts into hybrid/spa navigation.
+  // ONE expansion (above) feeds both the HTML and the data sidecars — no duplication.
+  if (mode !== "ssg" && ctx.has("data")) {
+    const entries: DataEntry[] = rendered
+      .filter(page => page.hasData)
+      .map(page => ({ path: page.url, data: page.data }));
+    if (entries.length > 0) {
+      const summary = await ctx.require(dataPlugin).write(entries, { outDir: ctx.config.outDir });
+      ctx.log.debug("build:data", { files: summary.fileCount, bytes: summary.bytes });
+    }
+  }
   const root = rendered.find(page => page.url === "/" || page.url === "");
   ctx.log.debug("build:pages", { count: rendered.length });
   return { pageCount: rendered.length, rootHtml: root?.html ?? null };

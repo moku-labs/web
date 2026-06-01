@@ -64,6 +64,11 @@ export interface SpaContext {
   readonly config: Readonly<SpaConfig>;
   /** Resolve a depended-upon plugin instance to its public API. */
   require: SpaRequire;
+  /**
+   * Whether a plugin is registered (by name). Used to detect the OPTIONAL `data`
+   * plugin at init — `spa` enables client DATA navigation only when `has("data")`.
+   */
+  has: (name: string) => boolean;
   /** Emit a spa lifecycle event (notification-only). */
   emit: SpaEmitFunction;
   /** Structured logger (core `log` API). */
@@ -207,12 +212,27 @@ export interface ComponentInstance {
 /** Page data payload parsed from the inline `script#__DATA__` element. */
 export type PageData = Record<string, unknown>;
 
-/** Resolved dependency APIs the kernel reuses (router match/manifest, head compose). */
+/**
+ * The OPTIONAL `data` provider reader the kernel uses for client DATA navigation —
+ * a structural slice of the `data` plugin's API (fetch the persisted JSON for a
+ * page path). Captured at init via `ctx.has("data")`/`ctx.require` so `spa` never
+ * imports the `data` plugin or its types.
+ */
+export type SpaDataReader = (path: string) => Promise<unknown | null>;
+
+/** Resolved dependency APIs the kernel reuses (router match/mode, head compose, optional data). */
 export interface SpaKernelDeps {
-  /** Router plugin API — used for client-side route classification/matching. */
+  /** Router plugin API — used for client-side route matching (`match`) + the resolved `mode`. */
   router: RouterApi;
   /** Head plugin API — its pure compose is reused for client head-sync. */
   head: HeadApi;
+  /**
+   * The OPTIONAL `data` reader. Present only when the `data` plugin is composed.
+   * When present (and `router.mode() !== "ssg"`), navigation first tries the client
+   * DATA path (match → `dataAt(path)` → `route.parse` → `route.render`); otherwise
+   * it always uses HTML-over-fetch.
+   */
+  dataAt?: SpaDataReader;
 }
 
 /** The single shared SPA kernel — pure factory over state/config/emit/deps. */

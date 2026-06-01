@@ -41,6 +41,26 @@ kernel's `processNav` — a no-op without a DOM or before the runtime has booted
 Read the current resolved URL (`pathname + search`). Returns a string copy of
 `ctx.state.currentUrl`; no raw state is exposed.
 
+### Navigation: HTML-over-fetch, or client DATA render
+
+Every navigation entry point (Navigation API, History fallback, `navigate()`) funnels
+through one strategy:
+
+1. **Client DATA path** — *only* when `router.mode() !== "ssg"` and the optional
+   [`data`](../data/README.md) plugin is composed. `spa` runs `router.match(path)` →
+   `data.at(path)` (fetch the page's PERSISTED data as `unknown`) → the route's own
+   `parse(raw)` (validate → `D`) → `render(ctx)` (the SAME component the build used for
+   SSG) → Preact-render into the swap region, then re-mounts islands. `route.load` does
+   NOT run on the client. The Preact `render` layer is lazy-loaded (`./render`) in its own
+   chunk, so an app without `data` ships zero render layer.
+2. **HTML-over-fetch** (the default + fallback) — fetch the page, swap `swapSelector`,
+   head-sync from the fetched `<head>`. Any DATA-path miss/throw falls back here.
+3. **`location.href`** — a failed fetch falls back to a full browser navigation.
+
+`spa` stays `depends: [router, head]` and imports neither `data` nor its types — it
+captures the `data` reader at init via a structural by-name `ctx.require` (only when
+`ctx.has("data")`) and drives the matched route's handlers structurally.
+
 ### Usage
 
 ```ts

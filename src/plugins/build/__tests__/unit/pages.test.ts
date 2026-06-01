@@ -74,6 +74,7 @@ describe("build/phases/pages", () => {
       config: { outDir: tmp },
       requireMap: {
         router: {
+          mode: () => "ssg",
           manifest,
           entries: makeEntries([
             { name: "home", pattern: "/" },
@@ -101,7 +102,11 @@ describe("build/phases/pages", () => {
       config: { outDir: tmp },
       runId: "RUNID-123",
       requireMap: {
-        router: { manifest: () => [home], entries: makeEntries([{ name: "home", pattern: "/" }]) },
+        router: {
+          mode: () => "ssg",
+          manifest: () => [home],
+          entries: makeEntries([{ name: "home", pattern: "/" }])
+        },
         i18n: { locales: () => ["en"], defaultLocale: () => "en" },
         head: { render: () => "<title>Home</title>" }
       }
@@ -126,6 +131,7 @@ describe("build/phases/pages", () => {
       config: { outDir: tmp },
       requireMap: {
         router: {
+          mode: () => "ssg",
           manifest: () => [home, article],
           entries: makeEntries([
             { name: "home", pattern: "/" },
@@ -152,7 +158,11 @@ describe("build/phases/pages", () => {
     const ctx = makeCtx({
       config: { outDir: tmp },
       requireMap: {
-        router: { manifest: () => [home], entries: makeEntries([{ name: "home", pattern: "/" }]) },
+        router: {
+          mode: () => "ssg",
+          manifest: () => [home],
+          entries: makeEntries([{ name: "home", pattern: "/" }])
+        },
         i18n: { locales: () => ["en"], defaultLocale: () => "en" },
         head: { render: () => "" }
       }
@@ -173,7 +183,11 @@ describe("build/phases/pages", () => {
     const ctx = makeCtx({
       config: { outDir: tmp, injectAssets: false },
       requireMap: {
-        router: { manifest: () => [home], entries: makeEntries([{ name: "home", pattern: "/" }]) },
+        router: {
+          mode: () => "ssg",
+          manifest: () => [home],
+          entries: makeEntries([{ name: "home", pattern: "/" }])
+        },
         i18n: { locales: () => ["en"], defaultLocale: () => "en" },
         head: { render: () => "" }
       }
@@ -196,7 +210,11 @@ describe("build/phases/pages", () => {
     const ctx = makeCtx({
       config: { outDir: tmp, template: templatePath },
       requireMap: {
-        router: { manifest: () => [home], entries: makeEntries([{ name: "home", pattern: "/" }]) },
+        router: {
+          mode: () => "ssg",
+          manifest: () => [home],
+          entries: makeEntries([{ name: "home", pattern: "/" }])
+        },
         i18n: { locales: () => ["en"], defaultLocale: () => "en" },
         head: { render: () => "<title>Home</title>" }
       }
@@ -226,6 +244,7 @@ describe("build/phases/pages", () => {
       config: { outDir: tmp },
       requireMap: {
         router: {
+          mode: () => "ssg",
           manifest: () => [route],
           entries: makeEntries([{ name: "post", pattern: "/post/" }])
         },

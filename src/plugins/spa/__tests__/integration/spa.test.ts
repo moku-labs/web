@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import { createCoreConfig } from "@moku-labs/core";
+import { h } from "preact";
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
+import { dataPlugin } from "../../../data";
 import { headPlugin } from "../../../head";
 import { i18nPlugin } from "../../../i18n";
 import { logPlugin } from "../../../log";
@@ -145,6 +147,52 @@ describe("spa integration", () => {
     link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("client DATA path: composing dataPlugin fetches the page data, validates via parse, and renders", async () => {
+    const { createApp } = makeCore();
+    const routes = defineRoutes({
+      home: route("/")
+        .render(() => undefined as never)
+        .head(() => ({ title: "Home" })),
+      doc: route("/doc/")
+        .load(() => ({ body: "from-data" }))
+        .parse(raw => raw as { body: string })
+        .render(
+          ctx =>
+            h(
+              "section",
+              { id: "page" },
+              `rendered:${(ctx.data as { body: string }).body}`
+            ) as ReturnType<typeof h>
+        )
+        .head(() => ({ title: "Doc" }))
+    });
+    app = createApp({
+      plugins: [sitePlugin, i18nPlugin, routerPlugin, headPlugin, spaPlugin, dataPlugin],
+      pluginConfigs: {
+        site: SITE,
+        i18n: { locales: ["en"], defaultLocale: "en" },
+        router: { routes, mode: "spa" as const },
+        head: {},
+        spa: { progressBar: false }
+      }
+    });
+    await app.start();
+    // The client fetches the PERSISTED page data (not an HTML page) via data.at →
+    // the data URL. Serve it; assert the fetch targeted the data file, then render.
+    const fetchSpy = vi.fn((url: string) => {
+      expect(url).toBe("/_data/doc/index.json");
+      return Promise.resolve(Response.json({ body: "from-data" }, { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    app.spa.navigate("/doc/");
+    await vi.waitFor(() => expect(app.spa.current()).toBe("/doc/"));
+
+    expect(document.querySelector("#page")?.textContent).toBe("rendered:from-data");
+    expect(document.title).toBe("Doc");
+    expect(fetchSpy).toHaveBeenCalledWith("/_data/doc/index.json"); // data fetch, not HTML page
   });
 
   it("type-level: app.spa is SpaApi with register/navigate/current", () => {

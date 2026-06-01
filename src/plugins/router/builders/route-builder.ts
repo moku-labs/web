@@ -101,6 +101,21 @@ export function route<P extends string>(pattern: P): RouteBuilder<RouteState<P>>
       return set("render", handler);
     },
     /**
+     * Attach the client-side validation gate (raw `unknown` → this route's data
+     * type). Runs at the trust boundary before `render` on the client; throw to
+     * reject malformed data (spa falls back to HTML-over-fetch).
+     *
+     * @param handler - The validator/parser.
+     * @returns The same builder for chaining.
+     * @example
+     * ```ts
+     * route("/shop/{id}/").parse(raw => ProductSchema.parse(raw));
+     * ```
+     */
+    parse(handler: unknown) {
+      return set("parse", handler);
+    },
+    /**
      * Attach the head/SEO handler.
      *
      * @param handler - The head handler.

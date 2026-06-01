@@ -94,6 +94,8 @@ export type PhaseContext = {
   readonly global: Readonly<{ mode: "production" | "development" }>;
   /** Resolve a depended-upon plugin instance to its public API. */
   require: PhaseRequire;
+  /** Whether a plugin is registered (by name) — used to detect the OPTIONAL `data` plugin. */
+  has: (name: string) => boolean;
   /** Emit a build event (notification-only). */
   emit: PhaseEmit;
   /** Structured logger (core `log` API). */

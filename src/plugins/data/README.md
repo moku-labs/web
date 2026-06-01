@@ -1,75 +1,83 @@
 # data
 
-> Standard plugin — the **isomorphic bridge** for the two-world data pattern. It owns the build↔runtime data contract on *both* sides: on Node (build) `emit()` writes a STABLE route-index manifest + per-route content-hashed JSON sidecars; in the browser `load(path)`/`manifest()` fetch and parse those same files and hand the route's data to `spa` for JSON-driven navigation. One module owns write **and** read, so the on-disk format can't drift.
+> Standard plugin — the **agnostic data provider** for the SSG→DATA→SPA pattern. It owns ONE contract: `page path → persisted JSON file`, and knows **nothing** about what the data is. On Node (build) `write(entries)` persists one JSON file per page (build supplies the entries it already expanded); in the browser `at(path)` fetches + caches it as `unknown`, which the route's `parse` validates before `render`. One module owns write **and** read **and** the URL convention, so the file build writes is exactly the URL the client fetches.
 
 > [!NOTE]
 > `data` is **not** a framework default — it is optional. Compose it where you need it:
-> a Node build (`createApp({ plugins: [dataPlugin, contentPlugin, buildPlugin] })`) to
-> emit, and your browser entry (`createApp({ plugins: [dataPlugin] })`) so `spa` can
-> read. It declares **no hard `depends`**, so it composes in either world; `emit()`
-> lazily `require`s `router`+`content` at call time (Node only). With
-> `"sideEffects": false`, a browser app that doesn't compose it tree-shakes it away.
+> a Node build (`createApp({ plugins: [dataPlugin, contentPlugin, buildPlugin] })`) so
+> `build` can write data sidecars, and your browser entry (`createApp({ plugins: [dataPlugin] })`)
+> so `spa` can read them. It declares **no hard `depends`**; the `node:fs` writer is behind a
+> lazy `import()` inside `write()`. With `"sideEffects": false`, a browser app that doesn't
+> compose it tree-shakes it away.
+
+## The model: the route owns rendering, the provider owns transport
+
+A route is one contract — `.load(params, locale)` (real `D`), `.render(ctx)` (a Preact
+`VNode` from `D`), and `.parse(raw)` (validate `unknown → D`). The persisted data IS
+`load()`'s output, so the SAME `render` runs at build and on the client:
+
+- **SSG (build):** `load → render → renderToString` → static HTML (SEO + first paint).
+- **DATA:** `build` calls `data.write(entries)` to persist each page's `load()` output as JSON.
+- **SPA (client nav):** `spa` → `router.match` → `data.at(path)` → `route.parse` (validate) →
+  `route.render` (Preact). `route.load` does NOT run on the client.
+
+`data` is **agnostic**: its types carry no domain vocabulary. Any Layer-3 shape (docs,
+products, metrics, …) integrates by declaring a route with its own `load`/`parse`/`render`.
 
 ## API
 
 | Method | Side | Signature | Purpose |
 |--------|------|-----------|---------|
-| `emit` | Node | `(options?: { outDir?: string }) => Promise<EmitSummary>` | Write the route-index manifest + per-route sidecars under `outDir`. AWAITED — call after `await app.build.run()`. Lazily loads its `node:fs` writer; never contaminates a browser bundle. |
-| `manifest` | browser | `() => Promise<RouteIndexFile \| null>` | Fetch (and cache) the STABLE route-index from `config.baseUrl`. `null` on failure. |
-| `load` | browser | `(path: string) => Promise<RouteData \| null>` | Resolve `path` against the manifest, fetch the matching sidecar, return its `RouteData`. `null` ⇒ caller (`spa`) falls back to HTML-over-fetch. |
+| `write` | Node | `(entries: readonly DataEntry[], options?: { outDir? }) => Promise<DataWriteSummary>` | Persist one JSON file per page (keyed by `fileFor`). Called by `build` after it expands routes. Lazily loads its `node:fs` writer. |
+| `at` | browser | `(path: string) => Promise<unknown \| null>` | Fetch (+cache) the persisted data for a page path. `null` on fetch/parse failure (spa falls back). |
+| `urlFor` | pure | `(path: string) => string` | `/en/hello/` → `/_data/en/hello/index.json` (browser fetch URL). |
+| `fileFor` | pure | `(path: string) => string` | `/en/hello/` → `_data/en/hello/index.json` (outDir-relative file). |
 
 ```ts
-// Node build — emit the data files:
+// Node build: `build` calls app.data.write(...) during its pages phase when
+// router.mode !== "ssg". Just compose the plugin + set the mode:
 const app = createApp({
   plugins: [dataPlugin, contentPlugin, buildPlugin],
-  pluginConfigs: { content: { contentDir: "./content" } }
+  pluginConfigs: { content: { contentDir: "./content" }, router: { routes, mode: "hybrid" } }
 });
 await app.start();
-await app.build.run();   // produce the static site first
-await app.data.emit();   // then emit route-index + sidecars
+await app.build.run();   // writes HTML + per-page data sidecars
 
-// Browser app — spa reads through the bridge on navigation:
-const routeData = await app.data.load("/blog/hello/");
-// → { kind: "fragment", html, meta } | { kind: "data", data, meta } | null
+// Browser app — spa fetches via app.data.at(path) on nav (then route.parse validates).
 ```
-
-> [!IMPORTANT]
-> Pipelines ship in waves: **W3** = `emit()` (`router.clientManifest()` +
-> `content.loadAll()` → `routes-manifest.json` + content-hashed sidecars via
-> `p-limit`, lazy `node:fs` writer in `emit.ts`). **W4** = `manifest()`/`load()`
-> (fetch + match via the shared `iso-match`) and the `spa` consume-half. Until then
-> each method throws `[web] data.<method>: not implemented (build wave N)`.
 
 ## Configuration
 
 | Field | Type | Default | Purpose |
 |-------|------|---------|---------|
-| `outputDir` | `string` | `"_data"` | WRITE side (Node): output root **relative to the build `outDir`** (a filesystem path). |
-| `baseUrl` | `string` | `"/_data/"` | READ side (browser): site-root-relative URL the client fetches from. Different *domain* from `outputDir`; keep consistent (`"/" + trim(outputDir) + "/"`). |
-| `payload` | `"fragment" \| "data"` | `"fragment"` | `"fragment"` = `load()` returns pre-rendered HTML (hybrid, no client render layer); `"data"` = raw data the client renders (pure-SPA). |
+| `outputDir` | `string` | `"_data"` | WRITE side (Node): output subdir **relative to the build `outDir`** (a filesystem path). |
+| `baseUrl` | `string` | `"/_data/"` | READ side (browser): site-root-relative URL the client fetches from. Keep consistent with `outputDir`. |
 
 ## Output shape
 
-- **`routes-manifest.json`** (`RouteIndexFile`) — a STABLE, un-hashed route index (short cache); each entry's `dataUrl` points at a content-hashed sidecar (long cache).
-- **Per-route sidecars** — `SidecarFragment` (`{ html, meta }`) for `payload: "fragment"`, or `SidecarData` (`{ data, meta }`) for `payload: "data"`.
-- **`load()` result** — a discriminated `RouteData`: `{ kind: "fragment", html, meta }` or `{ kind: "data", data, meta }`. `spa` switches on `kind`.
+- **`<outDir>/<outputDir>/<page-path>/index.json`** — each page's real `load()` output,
+  serialized verbatim. The list route persists slim cards; the detail route persists one
+  full record. No HTML, no manifest, no domain knowledge. The file URL mirrors the page URL.
 
 ## Key invariants
 
-- **Isomorphic, but each side stays clean.** The `node:fs`/`node:crypto` writer lives behind a lazy `import()` inside `emit()` (W3's `emit.ts`), so composing `data` in a browser app keeps the bundle free of `node:*`. The read side uses only `fetch` + the shared (browser-safe) `iso-match` matcher.
-- **No hard `depends`.** `emit()` `require`s `router`+`content` lazily at call time (present in a Node build); a missing one throws a clear `[web]` error. This keeps `data` composable in either world and avoids a default→optional edge from `spa`.
-- **`spa` consumes via the API, optionally.** `spa` (a framework default) cannot hard-depend on the optional `data` plugin, so on navigation it checks `ctx.has("data")` → `ctx.require(dataPlugin).load(path)`; otherwise (or on any `null`/throw) it falls back to HTML-over-fetch. `data` owns the format; `spa` owns the DOM.
-- **Draft safety.** Production `emit()` reads `content.loadAll()`'s production-filtered output (drafts already dropped) — ZERO draft data in the manifest or any sidecar. A lint ban keeps `content.load(` out of `src/plugins/data/**`.
-- **Build ordering is a call-site contract.** `await app.build.run()` then `await app.data.emit()`. No `build` `depends` edge; no `onStart`/`onStop`.
+- **Agnostic transport.** `write` persists whatever `data` each entry carries; the source imports no content/Article. Any shape integrates at Layer 3 via a route's `load`/`parse`/`render`.
+- **Right granularity, on demand.** One file per page (keyed by URL); a navigation fetches only its own page's data — independent of site size.
+- **Validation at the trust boundary.** `at` returns `unknown`; the route's `parse` narrows it to `D` (or throws → spa HTML fallback). `build` makes `parse` **required** for data-navigable routes in `hybrid`/`spa` mode.
+- **No format drift.** `urlFor`/`fileFor` derive from one `dataSuffix(path)` — the written file is exactly the fetched URL.
+- **Node-free read side.** The `node:fs` writer (`writer.ts`) and the `loadJson` Node branch are both behind lazy `import()`; a browser bundle composing `data` pulls zero `node:*` (the writer is a split chunk).
+- **Single mode.** `router.mode()` decides everything: `build` writes when `!== "ssg"`; `spa` data-renders when `!== "ssg"`.
 
 ## Structure
 
 | File | Role |
 |------|------|
 | `index.ts` | Wiring (`createPlugin("data", …)`, no hard `depends`). |
-| `types.ts` | `DataConfig`, `DataApi`, `RouteData`, `EmitSummary`, `DataState`, `RouteIndexFile`, `SidecarFragment`, `SidecarData`. |
-| `config.ts` | `defaultDataConfig` (`outputDir`/`baseUrl`/`payload`). |
-| `state.ts` | `createDataState` (`lastEmit` + lazy `manifest` cache). |
-| `api.ts` | `dataApi` — node-free; `emit()` (Node, lazy writer) + `manifest()`/`load()` (browser). |
-| `validate.ts` | `validateDataConfig` — `payload` + `baseUrl` checks at `onInit`. |
-| `emit.ts` | **(W3)** Node-only writer (`node:fs`/`node:crypto`); imported lazily by `emit()`. |
+| `types.ts` | `DataConfig`, `DataProvider`, `DataEntry`, `DataWriteSummary`, `DataState`. |
+| `config.ts` | `defaultDataConfig` (`outputDir`/`baseUrl`). |
+| `state.ts` | `createDataState` (`lastWrite` + lazy per-path `cache`). |
+| `convention.ts` | `dataSuffix(path)` — the one pure URL↔file mapping. |
+| `api.ts` | `dataApi` — node-free; `write()` (lazy writer) + `at()` (fetch+cache) + `urlFor`/`fileFor`. |
+| `validate.ts` | `validateDataConfig` — `baseUrl` check at `onInit`. |
+| `load-json.ts` | Internal isomorphic JSON reader (browser `fetch` / lazy `node:fs`); used by `at()`. |
+| `writer.ts` | Node-only per-page writer (`node:fs`); imported lazily by `write()`. |

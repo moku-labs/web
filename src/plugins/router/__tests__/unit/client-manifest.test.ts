@@ -25,7 +25,7 @@ function load(): { n: number } {
 /** Build an api over a compiled table from the given declaration-ordered routes. */
 function makeApi(routes: CompileInput["routes"]) {
   const table = compileRoutes(makeInput(routes));
-  const state: RouterState = { table };
+  const state: RouterState = { table, mode: "hybrid" };
   return { api: createApi({ state }), table };
 }
 

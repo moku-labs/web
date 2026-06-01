@@ -1,132 +1,132 @@
 /**
- * @file data plugin — API factory (the isomorphic bridge surface).
+ * @file data plugin — API factory (the agnostic data provider surface).
  *
- * Node-free by construction: this module statically imports only types. The Node
- * write side (`emit()`) reaches its `node:fs`/`node:crypto` writer through a lazy
- * `await import("./emit")` at call time, so a browser bundle that composes `data`
- * for the read side never pulls `node:*`. The read side (`manifest()`/`load()`,
- * wave 4) uses only `fetch` + the browser-safe `../router/iso-match` matcher.
+ * Node-free by construction: this module statically imports only types + the pure
+ * convention. The Node write side (`write()`) reaches its `node:fs` writer through
+ * a lazy `await import("./writer")` at call time, so a browser bundle that composes
+ * `data` for the read side never pulls `node:*`. The read side (`at()`) uses only
+ * the isomorphic `loadJson` (whose Node branch is itself lazy).
  */
-import type {
-  DataApi,
-  DataConfig,
-  DataState,
-  EmitSummary,
-  RouteData,
-  RouteIndexFile
-} from "./types";
+import { dataSuffix } from "./convention";
+import { loadJson } from "./load-json";
+import type { DataConfig, DataEntry, DataProvider, DataState, DataWriteSummary } from "./types";
 
 /**
- * Extract a plugin's public API type from its phantom marker — mirrors the
- * `head`/`build` convention so `ctx.require(plugin)` is typed without importing
- * the kernel's full plugin-context generic.
+ * The plugin-context slice the data API factory consumes: mutable `state` and the
+ * resolved `config`. Typed loosely so api.ts stays free of the kernel's full
+ * plugin-context generic while remaining assignable from the execution context.
  *
  * @example
  * ```ts
- * type RouterApi = ExtractApi<typeof routerPlugin>;
- * ```
- */
-export type ExtractApi<PluginCandidate> = PluginCandidate extends {
-  readonly _phantom: { readonly api: infer PluginApi };
-}
-  ? PluginApi
-  : never;
-
-/**
- * The plugin-context slice the data API factory consumes: mutable `state`, the
- * resolved `config`, and the generic `require` (used by the Node `emit()` side to
- * resolve `router`/`content` lazily at call time). Typed loosely on purpose so
- * api.ts stays free of the kernel's full plugin-context generic machinery while
- * remaining assignable from the framework execution context.
- *
- * @example
- * ```ts
- * const ctx: DataPluginContext = { state, config, require: plugin => app[plugin.name] };
+ * const ctx: DataPluginContext = { state, config };
  * ```
  */
 export type DataPluginContext = {
-  /** Mutable plugin state (last emit summary + cached manifest). */
+  /** Mutable plugin state (last write summary + per-path fetch cache). */
   state: DataState;
   /** Resolved plugin configuration. */
   config: DataConfig;
-  /** Resolve a registered plugin instance to its public API (Node `emit()` side). */
-  require: <
-    PluginCandidate extends {
-      readonly name: string;
-      readonly spec: unknown;
-      readonly _phantom: {
-        readonly config: unknown;
-        readonly state: unknown;
-        readonly api: unknown;
-        readonly events: Record<string, unknown>;
-      };
-    }
-  >(
-    plugin: PluginCandidate
-  ) => ExtractApi<PluginCandidate>;
 };
 
 /**
- * Builds the data API — the isomorphic bridge. `emit()` is the Node write side
- * (wave 3); `manifest()`/`load()` are the browser read side (wave 4). No
- * `onStart`/`onStop` (holds no long-lived resource).
+ * Trim a single trailing slash from a config dir so `fileFor` joins cleanly.
+ *
+ * @param dir - The configured output dir (e.g. `"_data"` or `"_data/"`).
+ * @returns The dir without a trailing slash.
+ * @example
+ * ```ts
+ * trimTrailingSlash("_data/"); // "_data"
+ * ```
+ */
+function trimTrailingSlash(dir: string): string {
+  return dir.endsWith("/") ? dir.slice(0, -1) : dir;
+}
+
+/**
+ * Builds the data provider — the agnostic bridge. `write()` is the Node persist
+ * side; `at()` is the browser read side; `urlFor`/`fileFor` are the pure
+ * convention. No `onStart`/`onStop` (holds no long-lived resource).
  *
  * @param ctx - The data plugin context.
- * @returns The {@link DataApi} mounted at `app.data`.
+ * @returns The {@link DataProvider} mounted at `app.data`.
  * @example
  * ```ts
  * const api = dataApi(ctx);
- * await api.emit();          // Node build
- * await api.load("/blog/");  // browser
+ * await api.write([{ path: "/en/hello/", data: article }]); // Node build
+ * await api.at("/en/hello/");                               // browser
  * ```
  */
-export function dataApi(ctx: DataPluginContext): DataApi {
+export function dataApi(ctx: DataPluginContext): DataProvider {
   return {
     /**
-     * WRITE (Node) — emit the route-index manifest + per-route content-hashed
-     * sidecars. AWAITED; call after `await app.build.run()` so the on-disk SSR
-     * fragments exist. Lazily loads its `node:fs` writer (keeping a browser bundle
-     * node-free) and `require`s `router`/`content` at call time.
+     * READ (browser) — fetch (and cache) the persisted data for a page path.
+     * Returns the raw JSON as `unknown` (the caller's `route.parse` validates it),
+     * or `null` if the fetch/parse fails (so `spa` can fall back to HTML).
      *
+     * @param path - The page URL path (e.g. `/en/hello/`).
+     * @returns The page's raw data, or `null` on failure.
+     * @example
+     * ```ts
+     * const raw = await api.at("/en/hello/");
+     * ```
+     */
+    async at(path: string): Promise<unknown | null> {
+      if (ctx.state.cache.has(path)) return ctx.state.cache.get(path);
+      try {
+        const data = await loadJson<unknown>(`${ctx.config.baseUrl}${dataSuffix(path)}`);
+        ctx.state.cache.set(path, data);
+        return data;
+      } catch {
+        // eslint-disable-next-line unicorn/no-null -- "fetch/parse failed → fall back" signal
+        return null;
+      }
+    },
+    /**
+     * WRITE (Node) — persist one JSON file per entry, keyed by page path. Called by
+     * `build` after it expands routes. Lazily loads its `node:fs` writer (keeping a
+     * browser bundle node-free).
+     *
+     * @param entries - The per-page data to persist.
      * @param options - Optional `{ outDir }` override (defaults to `./dist`).
-     * @param options.outDir - Build output directory the emit writes under.
-     * @returns A summary of the emitted manifest path, sidecar count, and outDir.
+     * @param options.outDir - Build output directory the write happens under.
+     * @returns A summary of the written files.
      * @example
      * ```ts
-     * await api.emit({ outDir: "dist" });
+     * await api.write([{ path: "/en/hello/", data: article }], { outDir: "dist" });
      * ```
      */
-    async emit(options?: { outDir?: string }): Promise<EmitSummary> {
-      const { emitData } = await import("./emit");
-      return emitData(ctx, options);
+    async write(
+      entries: readonly DataEntry[],
+      options?: { outDir?: string }
+    ): Promise<DataWriteSummary> {
+      const { writeData } = await import("./writer");
+      return writeData(ctx, entries, options);
     },
     /**
-     * READ (browser) — fetch + cache the STABLE route-index manifest. Will return
-     * the parsed route-index (or `null` on failure) once implemented.
+     * PURE — the browser fetch URL for a page path.
      *
-     * @throws {Error} Always — the read side is implemented in build wave 4.
+     * @param path - The page URL path.
+     * @returns The site-root-relative data URL.
      * @example
      * ```ts
-     * const index = await api.manifest();
+     * api.urlFor("/en/hello/"); // "/_data/en/hello/index.json"
      * ```
      */
-    manifest(): Promise<RouteIndexFile | null> {
-      throw new Error("data.manifest: not implemented (build wave 4)");
+    urlFor(path: string): string {
+      return `${ctx.config.baseUrl}${dataSuffix(path)}`;
     },
     /**
-     * READ (browser) — resolve `path` against the manifest and fetch its sidecar.
-     * Will return the route's {@link RouteData} (or `null` to signal "fall back")
-     * once implemented.
+     * PURE — the `outDir`-relative file path for a page path.
      *
-     * @param _path - The pathname to resolve.
-     * @throws {Error} Always — the read side is implemented in build wave 4.
+     * @param path - The page URL path.
+     * @returns The output-relative file path.
      * @example
      * ```ts
-     * const routeData = await api.load("/blog/hello/");
+     * api.fileFor("/en/hello/"); // "_data/en/hello/index.json"
      * ```
      */
-    load(_path: string): Promise<RouteData | null> {
-      throw new Error("data.load: not implemented (build wave 4)");
+    fileFor(path: string): string {
+      return `${trimTrailingSlash(ctx.config.outputDir)}/${dataSuffix(path)}`;
     }
   };
 }

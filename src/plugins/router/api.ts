@@ -163,6 +163,18 @@ export function createApi(ctx: RouterApiContext): RouterApi {
      */
     clientManifest() {
       return Object.freeze(readTable(state).compiled.map(entry => toClientRoute(entry)));
+    },
+    /**
+     * The resolved render mode (single source of truth for static/hybrid/spa).
+     *
+     * @returns `"ssg" | "spa" | "hybrid"`.
+     * @example
+     * ```ts
+     * if (api.mode() !== "ssg") emitClientData();
+     * ```
+     */
+    mode() {
+      return state.mode;
     }
   };
 }
