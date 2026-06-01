@@ -13,7 +13,7 @@ describe("route() fluent builder", () => {
   it("every chain method returns a chainable builder", () => {
     const r = route("/{slug}/");
     expect(r.load(() => ({ title: "x" }))).toBe(r);
-    expect(r.layout(children => children as never)).toBe(r);
+    expect(r.layout((_ctx, children) => children as never)).toBe(r);
     expect(r.render(() => null as never)).toBe(r);
     expect(r.head(() => ({ title: "t" }))).toBe(r);
     expect(r.generate(() => [])).toBe(r);
@@ -49,6 +49,12 @@ describe("route() fluent builder", () => {
     expect(r._handlers.render).toBe(render);
     expect(r._handlers.head).toBe(head);
     expect(r._handlers.generate).toBe(generate);
+  });
+
+  it("captures the ctx-aware layout wrapper into _handlers.layout", () => {
+    const layout = (_ctx: unknown, children: unknown): never => children as never;
+    const r = route("/").layout(layout);
+    expect(r._handlers.layout).toBe(layout);
   });
 
   it("accumulates metadata across .meta() calls", () => {
@@ -101,6 +107,18 @@ describe("route() / defineRoutes() type-level proofs", () => {
       .head(ctx => {
         expectTypeOf(ctx.data).toEqualTypeOf<{ title: string }>();
         return { title: ctx.data.title };
+      });
+  });
+
+  it("the .layout() wrapper receives ctx (locale + meta + typed data) and children", () => {
+    route("/{slug}/")
+      .load(() => ({ title: "x" }))
+      .layout((ctx, children) => {
+        expectTypeOf(ctx.locale).toBeString();
+        expectTypeOf(ctx.meta).toEqualTypeOf<Record<string, unknown>>();
+        expectTypeOf(ctx.data).toEqualTypeOf<{ title: string }>();
+        expectTypeOf(ctx.params).toExtend<{ slug: string }>();
+        return children as never;
       });
   });
 

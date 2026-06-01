@@ -2,6 +2,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import type { VNode } from "preact";
 import { h } from "preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RouteDefinition, TypedRoute } from "../../../router/types";
@@ -259,6 +260,65 @@ describe("build/phases/pages", () => {
     const html = readFileSync(path.join(tmp, "post", "index.html"), "utf8");
     expect(html).toContain("<title>Loaded</title>");
     expect(html).toContain("<h1>Loaded</h1>");
+  });
+
+  it("wraps the page body in the route's .layout() chrome and passes meta.activeTab + locale", async () => {
+    const home = makeRoute(
+      "/",
+      {
+        render: () => h("p", {}, "page-content"),
+        layout: (lctx, children): VNode =>
+          h("div", { "data-shell": "true" }, [
+            h("header", {}, `tab:${String((lctx.meta as { activeTab?: string }).activeTab)}`),
+            h("main", {}, h("section", {}, children)),
+            h("footer", {}, `loc:${lctx.locale}`)
+          ]) as VNode
+      },
+      { activeTab: "home" }
+    );
+    const ctx = makeCtx({
+      config: { outDir: tmp },
+      requireMap: {
+        router: {
+          mode: () => "ssg",
+          manifest: () => [home],
+          entries: makeEntries([{ name: "home", pattern: "/" }])
+        },
+        i18n: { locales: () => ["en"], defaultLocale: () => "en" },
+        head: { render: () => "" }
+      }
+    });
+
+    await renderPages(ctx);
+
+    const html = readFileSync(path.join(tmp, "index.html"), "utf8");
+    expect(html).toContain("<div data-shell");
+    expect(html).toContain("<header>tab:home</header>");
+    // The page content is nested inside the layout's main > section swap region.
+    expect(html).toContain("<main><section><p>page-content</p></section></main>");
+    expect(html).toContain("<footer>loc:en</footer>");
+  });
+
+  it("a route without .layout() ships the render output verbatim (back-compat — no chrome)", async () => {
+    const home = makeRoute("/", { render: () => h("p", {}, "bare") });
+    const ctx = makeCtx({
+      config: { outDir: tmp },
+      requireMap: {
+        router: {
+          mode: () => "ssg",
+          manifest: () => [home],
+          entries: makeEntries([{ name: "home", pattern: "/" }])
+        },
+        i18n: { locales: () => ["en"], defaultLocale: () => "en" },
+        head: { render: () => "" }
+      }
+    });
+
+    await renderPages(ctx);
+
+    const html = readFileSync(path.join(tmp, "index.html"), "utf8");
+    expect(html).toContain("<body><p>bare</p></body>");
+    expect(html).not.toContain("<main>");
   });
 
   it("required-validator gate: a data-navigable route without .parse fails the build in hybrid mode", async () => {

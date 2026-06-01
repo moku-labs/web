@@ -75,13 +75,20 @@ export function route<P extends string>(pattern: P): RouteBuilder<RouteState<P>>
       return set("load", loader);
     },
     /**
-     * Attach a layout wrapper component.
+     * Attach a ctx-aware layout wrapper that frames the page in persistent chrome.
+     * The wrapper receives the route's `LayoutContext` (render context + `.meta()`
+     * bag) and the page children. Applied in the SSG render path only — client
+     * navigation keeps the chrome and swaps just the inner region.
      *
-     * @param component - The layout component.
+     * @param component - The layout component `(ctx, children) => VNode`.
      * @returns The same builder for chaining.
      * @example
      * ```ts
-     * route("/").layout((children) => children);
+     * route("/")
+     *   .meta({ activeTab: "home" })
+     *   .layout((ctx, children) => (
+     *     <Shell locale={ctx.locale} active={ctx.meta.activeTab}>{children}</Shell>
+     *   ));
      * ```
      */
     layout(component: unknown) {

@@ -56,7 +56,8 @@ Builder methods (each returns the builder; `.load` widens the data generic `D`):
 - `.generate((locale) => params[])` — concrete instances for SSG expansion.
 - `.meta(record)` — JSON-serializable metadata (shipped in `clientManifest`).
 - `.toJson((ctx) => unknown)` — JSON serializer (e.g. feeds), separate from the data path.
-- `.toFile((params) => string)` / `.layout((children) => VNode)` — output path / layout overrides.
+- `.toFile((params) => string)` — output path override.
+- `.layout((ctx, children) => VNode)` — persistent chrome wrapper. `ctx` is a `LayoutContext` (render ctx + `meta`), so chrome can read `ctx.locale` / `ctx.meta.activeTab`. Applied in SSG ONLY — on client (spa) navigation the chrome persists and only the inner swap region is replaced.
 
 Pattern syntax: `{name}` required param, `{name:?}` optional, `{lang:?}` is the locale-prefix slot (excluded from specificity).
 
