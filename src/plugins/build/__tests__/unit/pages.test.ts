@@ -260,4 +260,47 @@ describe("build/phases/pages", () => {
     expect(html).toContain("<title>Loaded</title>");
     expect(html).toContain("<h1>Loaded</h1>");
   });
+
+  it("required-validator gate: a data-navigable route without .parse fails the build in hybrid mode", async () => {
+    // render + load (so it WOULD be client-data-navigated) but no .parse → build error.
+    const route = makeRoute("/post/", {
+      load: async () => ({ title: "X" }),
+      render: rctx => h("h1", {}, (rctx.data as { title: string }).title)
+    });
+    const ctx = makeCtx({
+      config: { outDir: tmp },
+      requireMap: {
+        router: {
+          mode: () => "hybrid",
+          manifest: () => [route],
+          entries: makeEntries([{ name: "post", pattern: "/post/" }])
+        },
+        i18n: { locales: () => ["en"], defaultLocale: () => "en" },
+        head: { render: () => "" }
+      }
+    });
+
+    await expect(renderPages(ctx)).rejects.toThrow(/\[web\] build: route "\/post\/".*\.parse\(\)/);
+  });
+
+  it("ssg mode skips the validator gate (no .parse required)", async () => {
+    const route = makeRoute("/post/", {
+      load: async () => ({ title: "X" }),
+      render: rctx => h("h1", {}, (rctx.data as { title: string }).title)
+    });
+    const ctx = makeCtx({
+      config: { outDir: tmp },
+      requireMap: {
+        router: {
+          mode: () => "ssg",
+          manifest: () => [route],
+          entries: makeEntries([{ name: "post", pattern: "/post/" }])
+        },
+        i18n: { locales: () => ["en"], defaultLocale: () => "en" },
+        head: { render: () => "" }
+      }
+    });
+
+    await expect(renderPages(ctx)).resolves.toBeDefined();
+  });
 });

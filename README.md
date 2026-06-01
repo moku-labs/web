@@ -78,14 +78,22 @@ in a browser app (with `"sideEffects": false`, your bundler tree-shakes them out
 also choose the `env` provider per target: `[dotenv(), processEnv()]` on Node,
 `[browserEnv()]` in the browser. The framework never hard-blocks either runtime.
 
-`data` is a special case — an **optional isomorphic bridge**: composed on Node it
-`emit()`s static JSON (route-index + per-route sidecars); composed in the browser its
-`load()` lets `spa` navigate by fetching that JSON instead of full HTML. Add it on both
-sides when you want JSON-driven navigation; omit it for a plain static site.
+`data` is a special case — an **optional, domain-agnostic data provider**: composed on
+Node, `build` calls `data.write(...)` to persist each page's real `load()` output as JSON
+(one file per page URL); composed in the browser, `data.at(path)` fetches that JSON and
+`spa` re-runs the route's own `render` from it (validated through the route's `parse`
+gate) instead of fetching full HTML. The route owns rendering — the SAME `render` runs at
+build (SSG) and on the client, so parity is structural. Add `data` on both sides for
+client DATA navigation; omit it for a plain static site (HTML-over-fetch).
+
+The single switch is **`router.mode`** (`"ssg" | "spa" | "hybrid"`): `build` writes data +
+`spa` data-renders only when it is not `"ssg"`. A route that opts into data nav MUST
+declare `.parse(raw => data)` (validated at the client trust boundary) — `build` errors
+otherwise.
 
 A browser entry is just your own `createApp(...).start()` over the defaults (plus
-`dataPlugin` if you want JSON nav) — `spa`'s `onStart` mounts islands onto the SSR'd DOM
-and intercepts navigation.
+`dataPlugin` for DATA nav) — `spa`'s `onStart` mounts islands onto the SSR'd DOM and
+intercepts navigation.
 
 ## Plugins
 
@@ -93,13 +101,13 @@ and intercepts navigation.
 |---|---|---|
 | `site` | ✅ isomorphic | Site identity (name, URL, author) + canonical URL helper |
 | `i18n` | ✅ isomorphic | Locales, default-locale fallback, translations, hreflang/ogLocale maps |
-| `router` | ✅ isomorphic | Type-safe route DSL (`route`/`defineRoutes`), matching, URL/file derivation |
+| `router` | ✅ isomorphic | Type-safe route DSL (`route`/`defineRoutes`) with `.load`/`.render`/`.parse`, matching, `mode()`, URL/file derivation |
 | `head` | ✅ isomorphic | SEO `<head>` composition: title template, canonical, OG/Twitter, JSON-LD, hreflang |
 | `spa` | ✅ isomorphic | Client runtime: island hydration + intercepted navigation (inert on Node) |
 | `content` | ➕ node-only | Markdown pipeline → sanitized HTML, frontmatter, reading time, locale model |
 | `build` | ➕ node-only | SSG orchestrator: pages, feeds (RSS/Atom/JSON), sitemap, OG images |
 | `deploy` | ➕ node-only | Cloudflare Pages: `wrangler.jsonc` scaffolding + deploy |
-| `data` | ➕ optional bridge | Isomorphic: Node `emit()` writes route-index + JSON sidecars; browser `load()` feeds `spa` JSON-driven nav |
+| `data` | ➕ optional provider | Agnostic: Node `write()` persists per-page JSON (keyed by URL); browser `at()` fetches it for `spa` DATA nav (validated via `route.parse`) |
 | `log`, `env` | ✅ core | Structured logging + validated environment access |
 
 SEO primitives are exported for route `.head()` handlers: `meta`, `og`, `twitter`, `jsonLd`,
