@@ -7,6 +7,7 @@
  * only (`CompileInput`) — never the plugin ctx.
  */
 
+import { bySpecificity, dynamicSegmentCount } from "../iso-match";
 import type {
   CompiledRoute,
   CompileInput,
@@ -166,8 +167,10 @@ export function buildFilePath(pattern: string, params: Record<string, string>): 
 }
 
 /**
- * Count dynamic segments in a pattern (lower = more specific). The optional
- * `{lang:?}` segment is excluded so locale-prefixing does not affect priority.
+ * Count dynamic segments in a pattern (lower = more specific). Thin alias over the
+ * isomorphic {@link dynamicSegmentCount} — the single source of the specificity
+ * logic shared by the server table and the client matcher — kept for the build-time
+ * import surface.
  *
  * @param pattern - The route pattern.
  * @returns The number of dynamic (non-lang) segments.
@@ -177,14 +180,7 @@ export function buildFilePath(pattern: string, params: Record<string, string>): 
  * ```
  */
 export function countDynamicSegments(pattern: string): number {
-  let count = 0;
-  for (const segment of pattern.split("/")) {
-    const placeholder = parsePlaceholder(segment);
-    const isBraceDynamic = placeholder && !(placeholder.name === "lang" && placeholder.optional);
-    const isColonDynamic = !placeholder && segment.startsWith(":");
-    if (isBraceDynamic || isColonDynamic) count += 1;
-  }
-  return count;
+  return dynamicSegmentCount(pattern);
 }
 
 /**
@@ -213,7 +209,7 @@ function compileRoute(
   return {
     name,
     pattern,
-    dynamicSegmentCount: countDynamicSegments(pattern),
+    dynamicSegmentCount: dynamicSegmentCount(pattern),
     matchers,
     matchFn: createMatchFunction(matchers, input.defaultLocale),
     /**
@@ -270,14 +266,10 @@ export function compileRoutes(input: CompileInput): MatcherTable {
     declarationOrder.push(entry);
     byName.set(name, entry);
   }
-  const compiled = declarationOrder
-    .map((entry, index) => ({ entry, index }))
-    .toSorted((a, b) =>
-      a.entry.dynamicSegmentCount === b.entry.dynamicSegmentCount
-        ? a.index - b.index
-        : a.entry.dynamicSegmentCount - b.entry.dynamicSegmentCount
-    )
-    .map(wrapped => wrapped.entry);
+  // `toSorted` is a stable sort; `bySpecificity` returns 0 on equal specificity,
+  // so equal-specificity routes preserve declaration order (the SAME ordering the
+  // client reproduces from `clientManifest()` — single source of truth).
+  const compiled = declarationOrder.toSorted(bySpecificity);
   return { compiled, byName };
 }
 

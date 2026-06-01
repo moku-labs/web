@@ -87,11 +87,23 @@ export interface RouteBuilder<S extends RouteState> extends RouteDefinition {
   layout(component: (children: ComponentChildren) => VNode): RouteBuilder<S>;
   /** Attach the page render handler. */
   render(handler: (ctx: RouteContext<S>) => VNode): RouteBuilder<S>;
+  /**
+   * Attach the client-side validation gate: parse the raw `unknown` fetched from
+   * the persisted data file back into this route's data type `S["data"]`. Runs at
+   * the trust boundary before `render` on the client (and MUST return `S["data"]`,
+   * so a mismatched schema is a compile error). Throw inside it to reject malformed
+   * data — `spa` then falls back to HTML-over-fetch. Use a hand guard or any
+   * Standard-Schema validator (zod/valibot/arktype).
+   */
+  parse(handler: (raw: unknown) => S["data"]): RouteBuilder<S>;
   /** Attach the head/SEO handler. */
   head(handler: (ctx: RouteContext<S>) => HeadConfig): RouteBuilder<S>;
   /** Attach a static-generation param producer. */
   generate(handler: (locale: string) => S["params"][] | Promise<S["params"][]>): RouteBuilder<S>;
-  /** Attach an arbitrary metadata bag. */
+  /**
+   * Attach an arbitrary metadata bag. The bag MUST be JSON-serializable: it is
+   * projected verbatim into `clientManifest()` and shipped to the browser.
+   */
   meta(meta: Record<string, unknown>): RouteBuilder<S>;
   /** Attach a JSON serializer for the route's data. */
   toJson(handler: (ctx: RouteContext<S>) => unknown): RouteBuilder<S>;
@@ -107,6 +119,8 @@ export interface RouteHandlers {
   readonly layout?: (children: ComponentChildren) => VNode;
   /** Page renderer. */
   readonly render?: (ctx: RouteContext<RouteState>) => VNode;
+  /** Client-side validation gate: `unknown` (fetched JSON) → the route's data type, or throw. */
+  readonly parse?: (raw: unknown) => unknown;
   /** Head/SEO producer. */
   readonly head?: (ctx: RouteContext<RouteState>) => HeadConfig;
   /** Static-generation param producer. */
@@ -215,6 +229,8 @@ export interface MatcherTable {
 export interface RouterState {
   /** Compiled matcher table; `null` until `onInit` assigns it. */
   table: MatcherTable | null;
+  /** Resolved render mode (single source of truth; set in `onInit`). Defaults `"hybrid"`. */
+  mode: "ssg" | "spa" | "hybrid";
 }
 
 /** Plain-data input to `compileRoutes` — resolved DATA only, never the plugin ctx. */
@@ -229,6 +245,25 @@ export interface CompileInput {
   readonly locales: readonly string[];
   /** Default locale used for bare-pattern fallback. */
   readonly defaultLocale: string;
+}
+
+/**
+ * Serializable route entry for the client route-index — a projection of the
+ * compiled route table with NO `_handlers` closures, safe to ship to the browser
+ * (the SPA recompiles matchers lazily from `pattern`).
+ *
+ * @remarks
+ * `meta` MUST be JSON-serializable: `clientManifest()` is intended to survive a
+ * `JSON.stringify`/`JSON.parse` round-trip, so a route's `.meta()` bag must contain
+ * only JSON-safe values (no functions, symbols, or class instances).
+ */
+export interface ClientRoute {
+  /** URL pattern string, e.g. `/{lang:?}/{slug}/`. */
+  readonly pattern: string;
+  /** Route name key from the route map. */
+  readonly name: string;
+  /** Route metadata bag from `.meta()`. MUST be JSON-serializable. */
+  readonly meta: Record<string, unknown>;
 }
 
 /** Public API exposed via `ctx.require(routerPlugin)`. */
@@ -270,6 +305,27 @@ export type RouterApi = {
    * for (const def of ctx.require(routerPlugin).manifest()) { def._handlers.load?.({}, "en"); }
    */
   manifest(): readonly RouteDefinition[];
+  /**
+   * Serializable, specificity-sorted projection of the route table for client
+   * shipping. Maps the compiled table to `{ pattern, name, meta }` entries with NO
+   * `_handlers` closures, returned as a fresh frozen array. JSON-serializable so the
+   * SPA can embed it and recompile matchers lazily in the browser.
+   *
+   * @returns A fresh, frozen, specificity-sorted read-only array of {@link ClientRoute}.
+   * @example
+   * const json = JSON.stringify(ctx.require(routerPlugin).clientManifest());
+   */
+  clientManifest(): readonly ClientRoute[];
+  /**
+   * The resolved render mode — the single source of truth for static/hybrid/spa
+   * behavior. `build` reads it to decide whether to emit client data sidecars;
+   * `spa` reads it to decide whether to attempt client DATA navigation.
+   *
+   * @returns `"ssg" | "spa" | "hybrid"`.
+   * @example
+   * if (ctx.require(routerPlugin).mode() !== "ssg") { ... }
+   */
+  mode(): "ssg" | "spa" | "hybrid";
 };
 
 /** Re-export under the canonical `Config` name for the plugin-types barrel. */

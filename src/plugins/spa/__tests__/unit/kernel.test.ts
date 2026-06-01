@@ -1,14 +1,27 @@
 // @vitest-environment happy-dom
+import { h } from "preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Api as HeadApi } from "../../../head/types";
-import type { RouterApi } from "../../../router/types";
+import type { RouteDefinition, RouterApi } from "../../../router/types";
 import { createSpaKernel, resolveSpaConfig } from "../../kernel";
 import { createState } from "../../state";
 import type { SpaKernelDeps, SpaState } from "../../types";
 
-/** Minimal stub deps — the kernel only reuses these structurally in head-sync. */
+/** A router stub with the given mode + match result. */
+function makeRouter(
+  mode: "ssg" | "spa" | "hybrid",
+  route?: RouteDefinition | undefined
+): RouterApi {
+  return {
+    mode: () => mode,
+    // eslint-disable-next-line unicorn/no-null -- RouterApi.match returns `... | null` on no match
+    match: () => (route ? { params: { lang: "en" }, route } : null)
+  } as unknown as RouterApi;
+}
+
+/** Minimal stub deps — HTML-over-fetch only (no data reader). */
 const deps: SpaKernelDeps = {
-  router: {} as RouterApi,
+  router: makeRouter("hybrid"),
   head: { render: () => "" } as unknown as HeadApi
 };
 
@@ -18,6 +31,43 @@ function setup(config = {}) {
   const emit = vi.fn();
   const kernel = createSpaKernel(state, config, emit, deps);
   return { state, emit, kernel };
+}
+
+/** Options for a data-path kernel: the matched route, the raw data the reader returns, the mode. */
+interface DataSetup {
+  route?: RouteDefinition | undefined;
+  raw?: unknown;
+  mode?: "ssg" | "spa" | "hybrid";
+}
+
+/** A kernel wired with the data reader enabled + the given matched route + raw payload. */
+function setupData(options: DataSetup = {}) {
+  const state: SpaState = createState({ global: {}, config: {} });
+  const emit = vi.fn();
+  const raw = "raw" in options ? options.raw : { title: "From Data" };
+  const dataAt = vi.fn(() => Promise.resolve(raw));
+  const deps: SpaKernelDeps = {
+    router: makeRouter(options.mode ?? "hybrid", options.route),
+    head: { render: () => "" } as unknown as HeadApi,
+    dataAt
+  };
+  const kernel = createSpaKernel(state, {}, emit, deps);
+  return { state, emit, kernel, dataAt };
+}
+
+/** A route with a `parse` validator + a `render` producing a known VNode (no `load` — data is fetched). */
+function makeDataRoute(extra: Partial<RouteDefinition["_handlers"]> = {}): RouteDefinition {
+  return {
+    pattern: "/{lang:?}/{slug}/",
+    _meta: {},
+    _handlers: {
+      parse: (raw: unknown) => raw,
+      render: (ctx: { data: unknown }) =>
+        h("p", {}, `data:${(ctx.data as { title: string }).title}`),
+      head: (ctx: { data: unknown }) => ({ title: (ctx.data as { title: string }).title }),
+      ...extra
+    }
+  } as RouteDefinition;
 }
 
 beforeEach(() => {
@@ -202,5 +252,111 @@ describe("component nav lifecycle during processNav", () => {
     kernel.processNav("/next");
     await vi.waitFor(() => expect(order).toContain("onNavEnd"));
     expect(order).toEqual(["onNavStart", "onNavEnd"]);
+  });
+});
+
+describe("kernel.processNav — client DATA path (data plugin composed)", () => {
+  it("matches → fetches via dataAt → route.parse → route.render into the swap region", async () => {
+    const { state, emit, kernel, dataAt } = setupData({
+      route: makeDataRoute(),
+      raw: { title: "From Data" }
+    });
+    kernel.init();
+    // No fetch stub: a fetch here would prove the HTML fallback wrongly ran.
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+
+    kernel.processNav("/en/hello/");
+    await vi.waitFor(() =>
+      expect(emit).toHaveBeenCalledWith("spa:navigated", { url: "/en/hello/" })
+    );
+
+    expect(dataAt).toHaveBeenCalledWith("/en/hello/");
+    expect(document.querySelector("#page")?.textContent).toBe("data:From Data");
+    expect(document.title).toBe("From Data");
+    expect(state.currentUrl).toBe("/en/hello/");
+    expect(fetchSpy).not.toHaveBeenCalled(); // DATA path, not HTML-over-fetch
+  });
+
+  it("falls back to HTML-over-fetch when route.parse throws (no partial swap)", async () => {
+    const { kernel } = setupData({
+      route: makeDataRoute({
+        parse: () => {
+          throw new Error("invalid payload");
+        }
+      })
+    });
+    kernel.init();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(`<main><section id="page">html fallback</section></main>`, { status: 200 })
+        )
+      )
+    );
+
+    kernel.processNav("/en/hello/");
+    await vi.waitFor(() =>
+      expect(document.querySelector("#page")?.textContent).toBe("html fallback")
+    );
+  });
+
+  it("falls back to HTML-over-fetch when dataAt returns null (file missing)", async () => {
+    // eslint-disable-next-line unicorn/no-null -- exercising the data-miss → fallback signal
+    const { kernel } = setupData({ route: makeDataRoute(), raw: null });
+    kernel.init();
+    const fetchSpy = vi.fn(() =>
+      Promise.resolve(
+        new Response(`<main><section id="page">html</section></main>`, { status: 200 })
+      )
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+
+    kernel.processNav("/en/hello/");
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+  });
+
+  it("falls back to HTML-over-fetch when no route matches", async () => {
+    const { kernel } = setupData({ route: undefined });
+    kernel.init();
+    const fetchSpy = vi.fn(() =>
+      Promise.resolve(
+        new Response(`<main><section id="page">html</section></main>`, { status: 200 })
+      )
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+
+    kernel.processNav("/unmatched/");
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+  });
+
+  it("does NOT use the DATA path when mode is ssg (HTML-over-fetch only)", async () => {
+    const { kernel, dataAt } = setupData({ route: makeDataRoute(), mode: "ssg" });
+    kernel.init();
+    const fetchSpy = vi.fn(() =>
+      Promise.resolve(
+        new Response(`<main><section id="page">html</section></main>`, { status: 200 })
+      )
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+
+    kernel.processNav("/en/hello/");
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledWith("/en/hello/"));
+    expect(dataAt).not.toHaveBeenCalled(); // ssg mode skips the data path entirely
+  });
+
+  it("does NOT use the DATA path when no data reader is composed (HTML-over-fetch only)", async () => {
+    const { kernel } = setup(); // default deps: no dataAt
+    kernel.init();
+    const fetchSpy = vi.fn(() =>
+      Promise.resolve(
+        new Response(`<main><section id="page">html</section></main>`, { status: 200 })
+      )
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+
+    kernel.processNav("/en/hello/");
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledWith("/en/hello/"));
   });
 });

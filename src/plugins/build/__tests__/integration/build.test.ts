@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -133,8 +133,8 @@ describe("build integration", () => {
     const app = buildApp(out, bySlug, [probe]);
     await app.build.run();
 
-    // Disabled Phase-4 outputs emit NO boundary (ogImage is off in this build).
-    const disabled = new Set<string>(["og-images"]);
+    // Disabled Phase-4 outputs emit NO boundary (these are off in this build).
+    const disabled = new Set<string>(["og-images", "public", "not-found", "locale-redirects"]);
     // Every enabled phase emitted start then done, before the single complete.
     for (const phase of app.build.phases()) {
       if (disabled.has(phase)) {
@@ -203,6 +203,71 @@ describe("build integration", () => {
     await app.build.run();
     const html = readFileSync(path.join(out, "hello-world", "index.html"), "utf8");
     expect(html).toContain("shiki");
+  });
+
+  it("builds with all additive flags ON → emits public/404/template/locale-redirect artifacts", async () => {
+    const out = path.join(tmp, "dist");
+    const publicDir = path.join(tmp, "public");
+    const templatePath = path.join(tmp, "shell.html");
+    mkdirSync(publicDir, { recursive: true });
+    writeFileSync(path.join(publicDir, "robots-custom.txt"), "custom");
+    writeFileSync(
+      templatePath,
+      "<!doctype html><html><head><!--moku:head--><!--moku:assets--></head><body><!--moku:body--></body></html>"
+    );
+
+    const localized = route("/{lang:?}/guide/")
+      .render(() => h("h1", {}, "Guide"))
+      .head(() => ({ title: "Guide" }));
+    const homeRoute = route("/")
+      .render(() => h("h1", {}, "Home"))
+      .head(() => ({ title: "Home" }));
+    const routes = defineRoutes({ home: homeRoute, guide: localized });
+
+    const coreConfig = createCoreConfig("web-test", {
+      config: { mode: "production" as const },
+      plugins: [logPlugin],
+      pluginConfigs: { log: { mode: "test" as const } }
+    });
+    const { createApp } = coreConfig.createCore(coreConfig, { plugins: [] });
+    const app = createApp({
+      plugins: [sitePlugin, i18nPlugin, routerPlugin, contentPlugin, headPlugin, buildPlugin],
+      pluginConfigs: {
+        site: SITE,
+        i18n: { locales: ["en", "uk"], defaultLocale: "en" },
+        router: { routes, mode: "ssg" as const },
+        content: { contentDir: FIXTURE_DIR },
+        build: {
+          outDir: out,
+          feeds: false,
+          sitemap: false,
+          images: false,
+          ogImage: false,
+          minify: false,
+          publicDir,
+          notFound: true,
+          localeRedirects: true,
+          injectAssets: true,
+          template: templatePath
+        }
+      }
+    });
+
+    await app.build.run();
+
+    // #4 publicDir copied verbatim.
+    expect(existsSync(path.join(out, "robots-custom.txt"))).toBe(true);
+    // #5 notFound → 404.html.
+    expect(existsSync(path.join(out, "404.html"))).toBe(true);
+    // #9 template fill (placeholders consumed).
+    const home = readFileSync(path.join(out, "index.html"), "utf8");
+    expect(home).not.toContain("<!--moku:");
+    expect(home).toContain("Home");
+    // #5 localeRedirects → bare-path redirect for the locale-prefixed route, no _redirects.
+    const redirect = readFileSync(path.join(out, "guide", "index.html"), "utf8");
+    expect(redirect).toContain("/en/guide/");
+    expect(redirect).toContain('http-equiv="refresh"');
+    expect(existsSync(path.join(out, "_redirects"))).toBe(false);
   });
 
   it("type-level: app.build is Api; run() returns Promise<BuildResult>", async () => {

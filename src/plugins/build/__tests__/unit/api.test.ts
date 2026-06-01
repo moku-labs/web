@@ -28,7 +28,7 @@ describe("build/api", () => {
       const ctx = makeCtx({
         config: { outDir: path.join(tmp, "default"), feeds: false, sitemap: false },
         requireMap: {
-          router: { manifest: () => [] },
+          router: { mode: () => "ssg", manifest: () => [] },
           i18n: { locales: () => ["en"], defaultLocale: () => "en" },
           content: { loadAll: async () => new Map() },
           head: { render: () => "" },

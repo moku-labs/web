@@ -12,7 +12,15 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { h } from "preact";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { buildArticleHead, createApp, defineRoutes, route } from "../../src";
+import {
+  buildArticleHead,
+  buildPlugin,
+  contentPlugin,
+  createApp,
+  defineRoutes,
+  deployPlugin,
+  route
+} from "../../src";
 import type { Article } from "../../src/plugins/content/types";
 import {
   type ArticlesByLocale,
@@ -75,6 +83,8 @@ function makeMigratedBlog(outDir: string, byLocale: ArticlesByLocale) {
     });
 
   return createApp({
+    // Node-only SSG plugins — composed by the consumer (not framework defaults).
+    plugins: [contentPlugin, buildPlugin, deployPlugin],
     pluginConfigs: {
       site: SITE,
       i18n: { ...I18N },

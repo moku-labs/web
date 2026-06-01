@@ -48,6 +48,7 @@ export function makeCtx(options: {
     config,
     global: { mode: "production" as const },
     require: ((plugin: { name: string }) => requireMap[plugin.name]) as PhaseContext["require"],
+    has: (name: string) => name in requireMap,
     emit: emit as unknown as PhaseContext["emit"],
     log: makeLog()
   } satisfies PhaseContext;

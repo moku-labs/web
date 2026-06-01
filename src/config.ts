@@ -3,7 +3,7 @@
  * @see README.md
  */
 import { createCoreConfig } from "@moku-labs/core";
-import { dotenv, envPlugin, processEnv } from "./plugins/env";
+import { envPlugin } from "./plugins/env";
 import { logPlugin } from "./plugins/log";
 
 /**
@@ -31,9 +31,12 @@ export const coreConfig = createCoreConfig<Config, Events, [typeof logPlugin, ty
     plugins: [logPlugin, envPlugin],
     pluginConfigs: {
       // Core-plugin defaults (levels 1–2 of the 4-level core cascade, spec/03 §5).
-      log: { mode: "production" },
-      // env: framework supplies the working provider default (.env.local wins over process.env).
-      env: { providers: [dotenv(), processEnv()] }
+      // NOTE: env providers are intentionally NOT set here. The Node providers
+      // (`dotenv`, `processEnv`) import `node:fs`, so baking them in would block
+      // the isomorphic default app in the browser. The consumer supplies the
+      // provider for its target via `createApp({ pluginConfigs: { env: { providers } } })`
+      // — `[dotenv(), processEnv()]` on Node, `[browserEnv()]` in the browser.
+      log: { mode: "production" }
     }
   }
 );

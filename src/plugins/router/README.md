@@ -5,7 +5,7 @@
 The single source of truth for the framework's route table: a typed, fluent
 route-builder DSL (`route()`), a route-map identity helper (`defineRoutes()`),
 compile-time path-param inference (`ExtractRouteParams`), and a runtime matcher
-(`match`, `toUrl`, `entries`, `manifest`). Downstream plugins (`build`, `head`,
+(`match`, `toUrl`, `entries`, `manifest`, `mode`). Downstream plugins (`build`, `head`,
 `spa`) consult it via `ctx.require(routerPlugin)` — never via config readback.
 
 ## Public surface
@@ -16,7 +16,8 @@ import { createApp, defineRoutes, route } from "@moku-labs/web";
 const routes = defineRoutes({
   home: route("/").render(() => <Home />),
   article: route("/{lang:?}/{slug}/")
-    .load(({ slug }) => loadArticle(slug)) // typed → ctx.data
+    .load(({ slug }) => loadArticle(slug))      // typed → ctx.data
+    .parse((raw) => ArticleSchema.parse(raw))    // client trust-boundary validator (data nav)
     .render((ctx) => <Article article={ctx.data} />)
     .head((ctx) => ({ title: ctx.data.title }))
 });
@@ -25,10 +26,14 @@ const app = createApp({
   pluginConfigs: {
     site: { name: "Blog", url: "https://blog.dev", author: "Alex", description: "…" },
     i18n: { locales: ["en", "uk"], defaultLocale: "en" },
-    router: { routes }
+    router: { routes, mode: "hybrid" } // "ssg" | "spa" | "hybrid" — the single SSG/DATA/SPA switch
   }
 });
 ```
+
+The data generic threads `load → parse → render`: `.parse` MUST return `.load`'s type
+(a mismatch is a compile error), and `ctx.data` in `.render`/`.head` is that type. On the
+client, `spa` runs `.parse` on the fetched JSON (validate `unknown → data`) before `.render`.
 
 ## API (`ctx.require(routerPlugin)`)
 
@@ -37,7 +42,8 @@ const app = createApp({
 | `match(pathname)` | `{ params, route } \| null` | Scans the specificity-sorted table; most specific wins. |
 | `toUrl(name, params)` | `string` | Substitutes `{param}` / `{param:?}`; throws on an unknown name. |
 | `entries()` | `readonly TypedRoute[]` | URL-utility view in **specificity** order (for `spa`/`head`). |
-| `manifest()` | `readonly RouteDefinition[]` | Full definitions with `_handlers`, in **declaration** order (for `build`). |
+| `manifest()` | `readonly RouteDefinition[]` | Full definitions with `_handlers` (incl. `parse`), in **declaration** order (for `build`). |
+| `mode()` | `"ssg" \| "spa" \| "hybrid"` | Resolved render mode — the single source of truth `build`/`spa` read to gate data nav. |
 
 ## Matching model
 
@@ -69,6 +75,6 @@ the matcher table synchronously into `ctx.state.table`. There is **no** `onStart
 - `builders/route-builder.ts` — `route()` fluent builder + `defineRoutes()` identity.
 - `builders/compile.ts` — `validateRoutes`, `patternToUrlPattern`, `buildUrl`, `buildFilePath`, `countDynamicSegments`, `compileRoutes`, `buildRouterTable`.
 - `builders/match.ts` — `createMatchFunction`, `extractParams`, `matchRoute`.
-- `api.ts` — `match` / `toUrl` / `entries` / `manifest` closures.
+- `api.ts` — `match` / `toUrl` / `entries` / `manifest` / `clientManifest` / `mode` closures.
 - `state.ts` — the `{ table: null }` holder filled in `onInit`.
 - `types.ts` — `ExtractRouteParams`, `RouteBuilder`, `RouteDefinition`, `RouteMap`, `TypedRoute`, `CompiledRoute`, `MatcherTable`, `RouterConfig`, `RouterState`, `RouterApi`.

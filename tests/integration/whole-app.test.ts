@@ -10,7 +10,9 @@
 import { describe, expect, it } from "vitest";
 import {
   buildArticleHead,
+  buildPlugin,
   canonical,
+  contentPlugin,
   createApp,
   createPlugin,
   defineRoutes,
@@ -24,9 +26,13 @@ import {
 } from "../../src";
 import { FIXTURE_CONTENT_DIR, SITE } from "./helpers/harness";
 
-/** Minimal valid config for the real createApp (site + non-empty routes + contentDir). */
+/**
+ * Minimal valid config for the real createApp (site + non-empty routes + contentDir).
+ * `content`/`build` are node-only — composed explicitly (not framework defaults).
+ */
 function bootConfig(routes: ReturnType<typeof defineRoutes>, mode: "ssg" | "spa" | "hybrid") {
   return {
+    plugins: [contentPlugin, buildPlugin],
     pluginConfigs: {
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
@@ -61,6 +67,7 @@ describe("integration: framework boots (whole app)", () => {
   it("fails fast on an empty route map", () => {
     expect(() =>
       createApp({
+        plugins: [contentPlugin],
         pluginConfigs: {
           site: SITE,
           content: { contentDir: FIXTURE_CONTENT_DIR },

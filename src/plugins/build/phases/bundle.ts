@@ -4,7 +4,7 @@
  */
 import { existsSync } from "node:fs";
 import path from "node:path";
-import type { PhaseContext } from "../types";
+import type { BuildCacheEntry, PhaseContext } from "../types";
 
 /** Conventional CSS entry candidates (project-relative). */
 const CSS_ENTRY_CANDIDATES = ["src/client/styles.css", "src/styles/main.css"] as const;
@@ -120,6 +120,29 @@ function resolveEntrypoints(candidates: readonly string[]): string[] {
 }
 
 /**
+ * Resolve the authoritative JS client entrypoint (#8): when `config.clientEntry` is
+ * set, use it directly (the authoritative override); otherwise fall back to the
+ * conventional candidate scan. When neither yields an entry, `ctx.log.warn` (no
+ * client bundle is produced) and an empty list is returned.
+ *
+ * @param ctx - Plugin context (provides `config`, `log`).
+ * @returns The resolved JS entrypoint list (possibly empty).
+ * @example
+ * ```ts
+ * resolveJsEntrypoints(ctx);
+ * ```
+ */
+function resolveJsEntrypoints(ctx: Pick<PhaseContext, "config" | "log">): string[] {
+  const { clientEntry } = ctx.config;
+  if (typeof clientEntry === "string" && clientEntry.length > 0) return [clientEntry];
+  const scanned = resolveEntrypoints(JS_ENTRY_CANDIDATES);
+  if (scanned.length === 0) {
+    ctx.log.warn("build:bundle", { clientEntry: "none", scanned: JS_ENTRY_CANDIDATES });
+  }
+  return scanned;
+}
+
+/**
  * Run one bundler pass for a single asset kind and record the hashed output
  * paths under `state.buildCache` keyed by the original entry basename.
  *
@@ -147,7 +170,7 @@ async function runOne(
   if (!result.success) {
     throw new Error(`[web] build.bundle ${kind} build failed`);
   }
-  const hashed: Record<string, string> = {};
+  const hashed: BuildCacheEntry = {};
   for (const output of result.outputs) {
     hashed[path.basename(output.path)] = output.path;
   }
@@ -175,7 +198,7 @@ export async function bundle(
   const runner = options.runner ?? defaultRunner;
   const { minify, outDir } = ctx.config;
   const cssEntrypoints = options.cssEntrypoints ?? resolveEntrypoints(CSS_ENTRY_CANDIDATES);
-  const jsEntrypoints = options.jsEntrypoints ?? resolveEntrypoints(JS_ENTRY_CANDIDATES);
+  const jsEntrypoints = options.jsEntrypoints ?? resolveJsEntrypoints(ctx);
   await runOne(ctx, runner, "css", cssEntrypoints, path.join(outDir, "assets"), minify);
   await runOne(ctx, runner, "js", jsEntrypoints, path.join(outDir, "assets"), minify);
 }

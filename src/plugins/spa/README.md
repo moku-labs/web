@@ -10,16 +10,19 @@ built once in `onInit` and stored in `ctx.state.kernel`; `api`, `onStart`, and `
 reuse that one instance. `index.ts` is wiring only (≤30 lines) — all logic lives in the
 domain files (`kernel`, `router`, `head`, `progress`, `components`, `lifecycle`).
 
-The plugin is **browser-only**: `onStart` is a no-op when `typeof document === "undefined"`,
-so `spa` is safe to register in the SSR/build pipeline. Live DOM-bound navigation also ships
-via a separate browser entry (`client.ts`, the `./spa` subpath export) that imports only pure
-domain functions and never touches `ctx` or Moku kernel code.
+`spa` is an **isomorphic framework default**: `onStart` is a no-op when
+`typeof document === "undefined"`, so it is inert in the Node SSG/build pipeline and boots the
+browser runtime only in a browser. There is no separate browser entry or subpath export — a
+browser app is just your own `createApp(...).start()` over the defaults (with
+`env.providers: [browserEnv()]`); `spa`'s `onStart` boots navigation listeners and mounts
+islands onto the SSR'd DOM.
 
 ## API
 
-The public surface mounted at `app.spa` is the **registration / control** side. The DOM-bound
-client runtime (`boot`, live `navigate`) ships through the `./spa` browser entry, not `app.spa`.
-All methods delegate to the single shared kernel in `ctx.state.kernel`.
+The public surface mounted at `app.spa` is the **registration / control** side
+(`register`/`navigate`/`current`). The DOM-bound runtime (navigation interception, island
+mounting) boots from `onStart`; all methods delegate to the single shared kernel in
+`ctx.state.kernel`.
 
 ### `register(component: ComponentDef): void`
 
@@ -37,6 +40,26 @@ kernel's `processNav` — a no-op without a DOM or before the runtime has booted
 
 Read the current resolved URL (`pathname + search`). Returns a string copy of
 `ctx.state.currentUrl`; no raw state is exposed.
+
+### Navigation: HTML-over-fetch, or client DATA render
+
+Every navigation entry point (Navigation API, History fallback, `navigate()`) funnels
+through one strategy:
+
+1. **Client DATA path** — *only* when `router.mode() !== "ssg"` and the optional
+   [`data`](../data/README.md) plugin is composed. `spa` runs `router.match(path)` →
+   `data.at(path)` (fetch the page's PERSISTED data as `unknown`) → the route's own
+   `parse(raw)` (validate → `D`) → `render(ctx)` (the SAME component the build used for
+   SSG) → Preact-render into the swap region, then re-mounts islands. `route.load` does
+   NOT run on the client. The Preact `render` layer is lazy-loaded (`./render`) in its own
+   chunk, so an app without `data` ships zero render layer.
+2. **HTML-over-fetch** (the default + fallback) — fetch the page, swap `swapSelector`,
+   head-sync from the fetched `<head>`. Any DATA-path miss/throw falls back here.
+3. **`location.href`** — a failed fetch falls back to a full browser navigation.
+
+`spa` stays `depends: [router, head]` and imports neither `data` nor its types — it
+captures the `data` reader at init via a structural by-name `ctx.require` (only when
+`ctx.has("data")`) and drives the matched route's handlers structurally.
 
 ### Usage
 

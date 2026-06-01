@@ -26,5 +26,11 @@ export const envPlugin = createCorePlugin("env", {
   api: createEnvApi,
   onInit: validateSchema
 });
-export { cloudflareBindings, dotenv, processEnv } from "./providers";
+// NOTE: the Node providers (`dotenv`, `processEnv`, `cloudflareBindings`) are
+// deliberately NOT re-exported here — they import `node:fs`, and `envPlugin` is a
+// core plugin pulled into every composition (including browser ones). They are
+// re-exported from the package root (`src/index.ts`), where `sideEffects: false`
+// lets a browser bundle tree-shake them away. `browserEnv` is `node:*`-free, so
+// it stays on the barrel.
+export { browserEnv } from "./providers.browser";
 export type { EnvApi, EnvConfig, EnvProvider, EnvState, EnvVarSpec } from "./types";

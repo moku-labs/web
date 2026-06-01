@@ -1,5 +1,5 @@
 /* eslint-disable unicorn/no-null -- fake `TypedRoute.match` stubs return `null` (the real signature returns `TParams | null`) */
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { h } from "preact";
@@ -74,6 +74,7 @@ describe("build/phases/pages", () => {
       config: { outDir: tmp },
       requireMap: {
         router: {
+          mode: () => "ssg",
           manifest,
           entries: makeEntries([
             { name: "home", pattern: "/" },
@@ -101,7 +102,11 @@ describe("build/phases/pages", () => {
       config: { outDir: tmp },
       runId: "RUNID-123",
       requireMap: {
-        router: { manifest: () => [home], entries: makeEntries([{ name: "home", pattern: "/" }]) },
+        router: {
+          mode: () => "ssg",
+          manifest: () => [home],
+          entries: makeEntries([{ name: "home", pattern: "/" }])
+        },
         i18n: { locales: () => ["en"], defaultLocale: () => "en" },
         head: { render: () => "<title>Home</title>" }
       }
@@ -126,6 +131,7 @@ describe("build/phases/pages", () => {
       config: { outDir: tmp },
       requireMap: {
         router: {
+          mode: () => "ssg",
           manifest: () => [home, article],
           entries: makeEntries([
             { name: "home", pattern: "/" },
@@ -147,6 +153,83 @@ describe("build/phases/pages", () => {
     expect(result.rootHtml).toContain("root");
   });
 
+  it("injects bundled CSS/JS asset tags from the typed manifest when injectAssets is on (default)", async () => {
+    const home = makeRoute("/", { render: () => h("h1", {}, "Home") });
+    const ctx = makeCtx({
+      config: { outDir: tmp },
+      requireMap: {
+        router: {
+          mode: () => "ssg",
+          manifest: () => [home],
+          entries: makeEntries([{ name: "home", pattern: "/" }])
+        },
+        i18n: { locales: () => ["en"], defaultLocale: () => "en" },
+        head: { render: () => "" }
+      }
+    });
+    // Seed a typed BuildCacheEntry manifest (as the bundle phase would).
+    ctx.state.buildCache.set("css", { "main.css": "assets/main-abc123.css" });
+    ctx.state.buildCache.set("js", { "main.js": "assets/main-def456.js" });
+
+    await renderPages(ctx);
+
+    const html = readFileSync(path.join(tmp, "index.html"), "utf8");
+    expect(html).toContain('<link rel="stylesheet" href="/assets/main-abc123.css">');
+    expect(html).toContain('<script type="module" src="/assets/main-def456.js"></script>');
+  });
+
+  it("omits asset tags when injectAssets is false", async () => {
+    const home = makeRoute("/", { render: () => h("h1", {}, "Home") });
+    const ctx = makeCtx({
+      config: { outDir: tmp, injectAssets: false },
+      requireMap: {
+        router: {
+          mode: () => "ssg",
+          manifest: () => [home],
+          entries: makeEntries([{ name: "home", pattern: "/" }])
+        },
+        i18n: { locales: () => ["en"], defaultLocale: () => "en" },
+        head: { render: () => "" }
+      }
+    });
+    ctx.state.buildCache.set("css", { "main.css": "assets/main-abc123.css" });
+
+    await renderPages(ctx);
+
+    const html = readFileSync(path.join(tmp, "index.html"), "utf8");
+    expect(html).not.toContain("stylesheet");
+  });
+
+  it("fills <!--moku:head/body/assets--> placeholders when a template is configured", async () => {
+    const templatePath = path.join(tmp, "shell.html");
+    writeFileSync(
+      templatePath,
+      "<!doctype html><html><head><!--moku:head--><!--moku:assets--></head><body><!--moku:body--></body></html>"
+    );
+    const home = makeRoute("/", { render: () => h("h1", {}, "Home") });
+    const ctx = makeCtx({
+      config: { outDir: tmp, template: templatePath },
+      requireMap: {
+        router: {
+          mode: () => "ssg",
+          manifest: () => [home],
+          entries: makeEntries([{ name: "home", pattern: "/" }])
+        },
+        i18n: { locales: () => ["en"], defaultLocale: () => "en" },
+        head: { render: () => "<title>Home</title>" }
+      }
+    });
+    ctx.state.buildCache.set("css", { "main.css": "assets/main-abc.css" });
+
+    await renderPages(ctx);
+
+    const html = readFileSync(path.join(tmp, "index.html"), "utf8");
+    expect(html).toContain("<title>Home</title>");
+    expect(html).toContain("<h1>Home</h1>");
+    expect(html).toContain("/assets/main-abc.css");
+    expect(html).not.toContain("<!--moku:");
+  });
+
   it("passes loaded data into head.render and the renderer", async () => {
     const load = vi.fn(async () => ({ title: "Loaded" }));
     const route = makeRoute("/post/", {
@@ -161,6 +244,7 @@ describe("build/phases/pages", () => {
       config: { outDir: tmp },
       requireMap: {
         router: {
+          mode: () => "ssg",
           manifest: () => [route],
           entries: makeEntries([{ name: "post", pattern: "/post/" }])
         },
@@ -175,5 +259,48 @@ describe("build/phases/pages", () => {
     const html = readFileSync(path.join(tmp, "post", "index.html"), "utf8");
     expect(html).toContain("<title>Loaded</title>");
     expect(html).toContain("<h1>Loaded</h1>");
+  });
+
+  it("required-validator gate: a data-navigable route without .parse fails the build in hybrid mode", async () => {
+    // render + load (so it WOULD be client-data-navigated) but no .parse → build error.
+    const route = makeRoute("/post/", {
+      load: async () => ({ title: "X" }),
+      render: rctx => h("h1", {}, (rctx.data as { title: string }).title)
+    });
+    const ctx = makeCtx({
+      config: { outDir: tmp },
+      requireMap: {
+        router: {
+          mode: () => "hybrid",
+          manifest: () => [route],
+          entries: makeEntries([{ name: "post", pattern: "/post/" }])
+        },
+        i18n: { locales: () => ["en"], defaultLocale: () => "en" },
+        head: { render: () => "" }
+      }
+    });
+
+    await expect(renderPages(ctx)).rejects.toThrow(/\[web\] build: route "\/post\/".*\.parse\(\)/);
+  });
+
+  it("ssg mode skips the validator gate (no .parse required)", async () => {
+    const route = makeRoute("/post/", {
+      load: async () => ({ title: "X" }),
+      render: rctx => h("h1", {}, (rctx.data as { title: string }).title)
+    });
+    const ctx = makeCtx({
+      config: { outDir: tmp },
+      requireMap: {
+        router: {
+          mode: () => "ssg",
+          manifest: () => [route],
+          entries: makeEntries([{ name: "post", pattern: "/post/" }])
+        },
+        i18n: { locales: () => ["en"], defaultLocale: () => "en" },
+        head: { render: () => "" }
+      }
+    });
+
+    await expect(renderPages(ctx)).resolves.toBeDefined();
   });
 });

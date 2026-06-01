@@ -94,6 +94,8 @@ export type PhaseContext = {
   readonly global: Readonly<{ mode: "production" | "development" }>;
   /** Resolve a depended-upon plugin instance to its public API. */
   require: PhaseRequire;
+  /** Whether a plugin is registered (by name) — used to detect the OPTIONAL `data` plugin. */
+  has: (name: string) => boolean;
   /** Emit a build event (notification-only). */
   emit: PhaseEmit;
   /** Structured logger (core `log` API). */
@@ -110,17 +112,66 @@ export type PhaseContext = {
  * const render: OgPngRenderer = async () => new Uint8Array();
  * ```
  */
-export type OgPngRenderer = (input: {
+export type OgPngRenderer = (input: RichOgInput) => Promise<Uint8Array>;
+
+/**
+ * Rich input handed to a custom OG `render` hook for a single article card. Carries
+ * the full article + site metadata so a consumer can compose any layout. Returned by
+ * the framework, not authored by consumers directly.
+ *
+ * @example
+ * ```ts
+ * const input: RichOgInput = {
+ *   title: "Hello", description: "Intro", date: "2026-01-15", tags: ["a"],
+ *   locale: "en", siteName: "Blog", size: { width: 1200, height: 630 }
+ * };
+ * ```
+ */
+export interface RichOgInput {
   /** Article title rendered into the card. */
   title: string;
-  /** Output width in pixels. */
-  width: number;
-  /** Output height in pixels. */
-  height: number;
-}) => Promise<Uint8Array>;
+  /** Article description / summary. */
+  description: string;
+  /** Publication date (ISO string from frontmatter). */
+  date: string;
+  /** Article tags. */
+  tags: string[];
+  /** Optional author name. */
+  author?: string;
+  /** Active locale for the card. */
+  locale: string;
+  /** Site name (from the site plugin / config). */
+  siteName: string;
+  /** Output dimensions for the card. */
+  size: { width: number; height: number };
+}
+
+/**
+ * A single custom OG font entry. Each `path` is read to a Buffer ONCE per build and
+ * handed to Satori. `weight`/`style` default to `400`/`"normal"` when omitted.
+ *
+ * @example
+ * ```ts
+ * const font: OgFont = { name: "Inter", path: "./fonts/Inter.ttf", weight: 600 };
+ * ```
+ */
+export interface OgFont {
+  /** Font family name referenced by the rendered card. */
+  name: string;
+  /** Path to the .ttf/.otf/.woff file. */
+  path: string;
+  /** Numeric weight (defaults to 400). */
+  weight?: number;
+  /** Font style (defaults to "normal"). */
+  style?: "normal" | "italic";
+}
 
 /**
  * Optional OG-image generation config. Omit the field (or set `false`) to disable.
+ *
+ * The optional `render` hook (`@jsxImportSource preact`) lets a consumer return a
+ * Preact `VNode` for the card; the framework casts it to Satori's input at the single
+ * render boundary. `fonts` supplies multiple named fonts loaded once per build.
  *
  * @example
  * ```ts
@@ -134,6 +185,10 @@ export interface OgImageConfig {
   template?: string;
   /** Output dimensions. Defaults to 1200x630. */
   size?: { width: number; height: number };
+  /** Custom card renderer; returns a Preact `VNode` from the {@link RichOgInput}. */
+  render?(input: RichOgInput): import("preact").VNode;
+  /** Explicit named fonts loaded once per build (overrides the first-file scan). */
+  fonts?: OgFont[];
 }
 
 /**
@@ -158,7 +213,35 @@ export type Config = {
   images: boolean;
   /** OG-image generation. `false` (or omitted) disables it; an object enables and configures it. */
   ogImage: OgImageConfig | false;
+  /** Auto-inject bundled `main.{css,js}` into rendered pages. Default `true`. */
+  injectAssets?: boolean;
+  /** Directory copied verbatim into `outDir` (skipped silently if absent). Default `"public"`. */
+  publicDir?: string;
+  /**
+   * Emit `outDir/404.html`. `true` for the built-in default page, or
+   * `{ route }` to supply the page's literal HTML body content (NOT a route
+   * path/slug — the string is written into the 404 page verbatim). Default `false`.
+   */
+  notFound?: boolean | { route?: string };
+  /** Emit per-path i18n bare-path redirect HTML pages. Default `false`. */
+  localeRedirects?: boolean;
+  /** Authoritative client bundle entry path (overrides the conventional scan). */
+  clientEntry?: string;
+  /** HTML shell template with `<!--moku:head-->`/`<!--moku:body-->`/`<!--moku:assets-->` placeholders. */
+  template?: string;
 };
+
+/**
+ * A typed asset-manifest entry for one bundled asset kind (CSS or JS): a map of the
+ * original entry basename to its hashed on-disk output path. Replaces the untyped
+ * `Map<string, unknown>` reads when emitting `<link>`/`<script>` tags in pages.tsx.
+ *
+ * @example
+ * ```ts
+ * const entry: BuildCacheEntry = { "main.css": "assets/main-abc123.css" };
+ * ```
+ */
+export type BuildCacheEntry = Record<string, string>;
 
 /**
  * Per-run closure state for the `build` plugin. Holds caches and config only —
@@ -202,6 +285,9 @@ export type PhaseName =
   | "feeds"
   | "sitemap"
   | "og-images"
+  | "public"
+  | "not-found"
+  | "locale-redirects"
   | "root-index";
 
 /**

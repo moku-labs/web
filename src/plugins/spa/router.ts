@@ -7,6 +7,14 @@
 export type RouterTeardown = () => void;
 
 /**
+ * A navigation strategy: perform a navigation to `pathname`, resolving once the
+ * swap (or fallback) is dispatched. The kernel injects a DATA-aware navigate
+ * (match → route.load → route.render) that falls back to the default
+ * HTML-over-fetch ({@link performNavigation}); without injection the default is used.
+ */
+export type NavigateFunction = (pathname: string) => Promise<void>;
+
+/**
  * Minimal Navigation API surface used by the router. The Navigation API is not
  * yet in TypeScript's DOM lib, so the slice the router consumes is declared here.
  */
@@ -240,11 +248,15 @@ export function resolveClickTarget(event: MouseEvent): URL | undefined {
  * Navigation API is unavailable).
  *
  * @param handlers - The navigation lifecycle callbacks.
+ * @param navigate - The navigation strategy (defaults to HTML-over-fetch via `performNavigation`).
  * @returns A teardown that removes the attached listeners.
  * @example
  * const dispose = attachHistoryFallback(handlers);
  */
-export function attachHistoryFallback(handlers: RouterHandlers): RouterTeardown {
+export function attachHistoryFallback(
+  handlers: RouterHandlers,
+  navigate: NavigateFunction = pathname => performNavigation(pathname, handlers)
+): RouterTeardown {
   /**
    * Intercept an internal-link click and run a History-API navigation.
    *
@@ -262,7 +274,7 @@ export function attachHistoryFallback(handlers: RouterHandlers): RouterTeardown 
     }
     saveScrollPosition(location.pathname);
     history.pushState({ scrollY: 0 }, "", url.pathname);
-    performNavigation(url.pathname, handlers)
+    navigate(url.pathname)
       .then(() => window.scrollTo(0, 0))
       .catch(() => {});
   };
@@ -273,7 +285,7 @@ export function attachHistoryFallback(handlers: RouterHandlers): RouterTeardown 
    * globalThis.addEventListener("popstate", onPopState);
    */
   const onPopState = (): void => {
-    performNavigation(location.pathname, handlers)
+    navigate(location.pathname)
       .then(() => restoreScrollPosition(location.pathname))
       .catch(() => {});
   };
@@ -290,13 +302,15 @@ export function attachHistoryFallback(handlers: RouterHandlers): RouterTeardown 
  *
  * @param navigation - The Navigation API object to attach the listener to.
  * @param handlers - The navigation lifecycle callbacks.
+ * @param navigate - The navigation strategy (defaults to HTML-over-fetch via `performNavigation`).
  * @returns A teardown that removes the `navigate` listener.
  * @example
  * const dispose = attachNavigationApi(navigation, handlers);
  */
 export function attachNavigationApi(
   navigation: NavigationApi,
-  handlers: RouterHandlers
+  handlers: RouterHandlers,
+  navigate: NavigateFunction = pathname => performNavigation(pathname, handlers)
 ): RouterTeardown {
   /**
    * Handle a `navigate` event: classify, then intercept with fetch-and-swap.
@@ -323,7 +337,7 @@ export function attachNavigationApi(
       scroll: "manual",
       // eslint-disable-next-line jsdoc/require-jsdoc -- inline fetch-and-swap handler
       handler: async () => {
-        await performNavigation(url.pathname, handlers);
+        await navigate(url.pathname);
         if (navEvent.navigationType === "traverse") {
           navEvent.scroll();
         } else {
@@ -341,11 +355,17 @@ export function attachNavigationApi(
  * fallback. Returns a teardown removing every listener it attached.
  *
  * @param handlers - The navigation lifecycle callbacks the kernel supplies.
+ * @param navigate - The navigation strategy (defaults to HTML-over-fetch via `performNavigation`).
  * @returns A teardown removing all attached listeners.
  * @example
- * const dispose = attachRouter(handlers);
+ * const dispose = attachRouter(handlers, navigate);
  */
-export function attachRouter(handlers: RouterHandlers): RouterTeardown {
+export function attachRouter(
+  handlers: RouterHandlers,
+  navigate?: NavigateFunction
+): RouterTeardown {
   const navigation = getNavigation();
-  return navigation ? attachNavigationApi(navigation, handlers) : attachHistoryFallback(handlers);
+  return navigation
+    ? attachNavigationApi(navigation, handlers, navigate)
+    : attachHistoryFallback(handlers, navigate);
 }

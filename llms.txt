@@ -1,0 +1,62 @@
+# @moku-labs/web
+
+> A content-focused static-site + SPA framework built on the @moku-labs/core micro-kernel (three-layer plugin model). It SSG-renders Preact pages to static HTML for SEO + first paint, then progressively enhances them with client-side island hydration and DATA-driven navigation. The framework ships browser-safe **isomorphic** plugins by default and exposes **node-only** plugins for the Node build, composed à la carte via `createApp({ plugins: [...] })`.
+
+Requires Node 24+ (the router uses the global `URLPattern`). Package manager: `bun`. Strict TypeScript (`exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`).
+
+## Mental model
+
+- **Layer 3 (consumer):** call `createApp({ plugins?, pluginConfigs })`. Never import `@moku-labs/core` directly.
+- **Defaults are isomorphic** (run on Node AND in the browser): `site`, `i18n`, `router`, `head`, `spa` + the `log`/`env` core.
+- **Node-only plugins** (`content`, `build`, `deploy`, `data`) are exported but NOT defaults — add them for a Node build; omit them in a browser bundle (`"sideEffects": false` tree-shakes them out).
+- **The route is the contract:** `route(pattern).load(→D).parse(unknown→D).render(ctx:D→VNode).head(→HeadConfig).generate(→params[])`. The SAME `load`/`render` run at build (SSG→HTML) and on the client (DATA nav) → structural parity.
+- **One switch:** `router.mode` = `"ssg" | "spa" | "hybrid"`. `build` writes per-page data + `spa` data-renders only when it is not `"ssg"`.
+
+## Quickstart
+
+```ts
+import { createApp, defineRoutes, route, contentPlugin, buildPlugin, dataPlugin, processEnv } from "@moku-labs/web";
+
+const routes = defineRoutes({
+  home: route("/{lang:?}/").load((_p, l) => listCards(l)).parse(r => r as Card[]).render(c => <Home cards={c.data} />),
+  post: route("/{lang:?}/{slug}/").generate(l => slugs(l).map(slug => ({ slug }))).load((p, l) => getPost(p.slug, l)).parse(r => PostSchema.parse(r)).render(c => <Post post={c.data} />).head(c => ({ title: c.data.title }))
+});
+
+const app = createApp({
+  plugins: [contentPlugin, buildPlugin, dataPlugin],          // node-only, composed for the build
+  pluginConfigs: {
+    site: { name: "Blog", url: "https://blog.dev", author: "A", description: "…" },
+    i18n: { locales: ["en"], defaultLocale: "en" },
+    router: { routes, mode: "hybrid" },                        // the single SSG/DATA/SPA switch
+    content: { contentDir: "./content" },
+    env: { providers: [processEnv()] }
+  }
+});
+await app.start();
+await app.build.run();   // writes dist/<path>/index.html + (mode!==ssg) dist/_data/<path>/index.json
+```
+
+## Plugins (one-liner each; see each plugin's README)
+
+- [site](src/plugins/site/README.md): site identity (name/url/author) + canonical URL helper. Default.
+- [i18n](src/plugins/i18n/README.md): locales, default-locale fallback, translations, hreflang/ogLocale maps. Default.
+- [router](src/plugins/router/README.md): typed route DSL (`route`/`defineRoutes`) with `.load`/`.parse`/`.render`/`.head`/`.generate`; `match`/`toUrl`/`entries`/`manifest`/`mode`. Default.
+- [head](src/plugins/head/README.md): SEO `<head>` composition (title template, canonical, OG/Twitter, JSON-LD, hreflang). Default.
+- [spa](src/plugins/spa/README.md): client runtime — island hydration + intercepted navigation (HTML-over-fetch, or DATA nav when `data` is composed). Inert on Node. Default.
+- [content](src/plugins/content/README.md): markdown → sanitized HTML, frontmatter, reading time, locale model. Node-only.
+- [build](src/plugins/build/README.md): SSG orchestrator — pages, feeds, sitemap, OG images; persists per-page data when `mode!=="ssg"`. Node-only.
+- [deploy](src/plugins/deploy/README.md): Cloudflare Pages scaffolding + deploy. Node-only.
+- [data](src/plugins/data/README.md): agnostic data provider — `write(entries)` (Node) persists per-page JSON keyed by URL; `at(path)` (browser) fetches it for `spa` DATA nav (validated via `route.parse`). Optional, isomorphic.
+- log, env: structured logging + validated environment access (`dotenv`/`processEnv`/`cloudflareBindings` on Node, `browserEnv()` in the browser). Core.
+
+## Consumer helpers
+
+- `createApp`, `createPlugin`, `defineRoutes`, `route`, `createComponent` (spa islands).
+- env providers: `dotenv`, `processEnv`, `cloudflareBindings`, `browserEnv`.
+- SEO primitives for `.head()`: `meta`, `og`, `twitter`, `jsonLd`, `canonical`, `hreflang`, `feedLink`, `buildArticleHead`.
+- Type namespaces: `Site`, `I18n`, `Router`, `Head`, `Spa`, `Content`, `Build`, `Deploy`, `Data`, `Log`, `Env`.
+
+## Optional
+
+- [llms-full.txt](llms-full.txt): the full single-file reference (model, every plugin's API/config, the route DSL, data provider, env, build, testing).
+- [README.md](README.md): repo overview.

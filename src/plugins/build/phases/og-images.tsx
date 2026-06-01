@@ -8,10 +8,10 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { Resvg } from "@resvg/resvg-js";
-import satori from "satori";
+import { h, type VNode } from "preact";
 import type { Article } from "../../content/types";
-import type { OgImageConfig, OgPngRenderer, PhaseContext } from "../types";
+import { sitePlugin } from "../../site";
+import type { OgFont, OgImageConfig, OgPngRenderer, PhaseContext, RichOgInput } from "../types";
 import { readCachedContent } from "./content";
 
 /** Default OG image dimensions when `size` is omitted. */
@@ -46,80 +46,180 @@ export type OgImagesOptions = {
 };
 
 /**
- * Compute the content-hash cache key for an article: `sha256(title+template+size)`.
+ * A loaded Satori font: a family name, raw bytes, and weight/style. Built once per
+ * build (outside the per-image loop) from either `ogImage.fonts` or the `fontDir` scan.
  *
- * @param title - The article title.
+ * @example
+ * ```ts
+ * const font: LoadedFont = { name: "OG", data: Buffer.from(""), weight: 400, style: "normal" };
+ * ```
+ */
+export type LoadedFont = {
+  /** Font family name. */
+  name: string;
+  /** Raw font bytes. */
+  data: Buffer;
+  /** Numeric weight. */
+  weight: number;
+  /** Font style. */
+  style: "normal" | "italic";
+};
+
+/**
+ * Compute a stable cache key for the `fonts` configuration so a font change
+ * invalidates cached PNGs. Hashes the name/path/weight/style of each entry (order
+ * preserved); an empty/omitted list yields a fixed sentinel.
+ *
+ * @param fonts - The configured OG fonts (optional).
+ * @returns A short stable key derived from the fonts list.
+ * @example
+ * ```ts
+ * fontsKey([{ name: "Inter", path: "./Inter.ttf" }]);
+ * ```
+ */
+export function fontsKey(fonts?: readonly OgFont[]): string {
+  if (!fonts || fonts.length === 0) return "default-font";
+  const parts = fonts.map(
+    font => `${font.name}:${font.path}:${font.weight ?? 400}:${font.style ?? "normal"}`
+  );
+  return createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 16);
+}
+
+/**
+ * Compute the content-hash cache key for an article OG image. Covers the FULL
+ * {@link RichOgInput} (title/description/date/tags/author/locale/siteName/size),
+ * the resolved `template`, and a {@link fontsKey} of the fonts list — so changing
+ * any input field OR the fonts invalidates the cached PNG.
+ *
+ * @param input - The full rich OG input for the card.
  * @param template - The resolved OG template identifier.
- * @param size - The output dimensions.
+ * @param fontsHash - The {@link fontsKey} of the configured fonts.
  * @returns The hex-encoded SHA-256 digest.
  * @example
  * ```ts
- * ogHash("Hello", "default", { width: 1200, height: 630 });
+ * ogHash(input, "default", fontsKey());
  * ```
  */
-export function ogHash(
-  title: string,
-  template: string,
-  size: { width: number; height: number }
-): string {
-  return createHash("sha256")
-    .update(`${title}|${template}|${size.width}x${size.height}`)
-    .digest("hex");
+export function ogHash(input: RichOgInput, template: string, fontsHash: string): string {
+  const payload = [
+    input.title,
+    input.description,
+    input.date,
+    input.tags.join(","),
+    input.author ?? "",
+    input.locale,
+    input.siteName,
+    `${input.size.width}x${input.size.height}`,
+    template,
+    fontsHash
+  ].join("|");
+  return createHash("sha256").update(payload).digest("hex");
 }
 
 /**
- * Resolve the first font file in `fontDir` and read its bytes for Satori.
+ * Load the configured OG fonts ONCE per build. When `ogImage.fonts` is set, each
+ * `path` is read to a Buffer (outside any per-image loop) and mapped to a Satori
+ * font entry; otherwise the first font file found in `fontDir` is used as a single
+ * 400/normal fallback.
  *
- * @param fontDir - Directory containing at least one font file.
- * @returns The font name + bytes, or `null` when no font is present.
+ * @param og - The font directory + optional explicit fonts list.
+ * @param og.fontDir - Directory scanned for a fallback font when `fonts` is unset.
+ * @param og.fonts - Explicit named fonts (each loaded once).
+ * @returns The loaded fonts (empty when no font is available).
  * @example
  * ```ts
- * await loadFont("./fonts");
+ * await loadFonts({ fontDir: "./fonts" });
  * ```
  */
-async function loadFont(fontDir: string): Promise<{ name: string; data: Buffer } | undefined> {
-  if (!existsSync(fontDir)) return undefined;
-  const entries = await readdir(fontDir);
-  const font = entries.find(name => FONT_EXTENSIONS.some(extension => name.endsWith(extension)));
-  if (!font) return undefined;
-  return { name: "OG", data: await readFile(path.join(fontDir, font)) };
-}
-
-/**
- * The default PNG renderer: Satori renders a card to SVG, resvg rasterizes to PNG.
- *
- * @param ctx - The font directory + template wiring for the renderer.
- * @param ctx.fontDir - Directory containing at least one font file.
- * @returns An {@link OgPngRenderer} bound to the loaded font.
- * @example
- * ```ts
- * const render = makeDefaultRenderer({ fontDir: "./fonts" });
- * ```
- */
-function makeDefaultRenderer(ctx: { fontDir: string }): OgPngRenderer {
-  // Load the font ONCE for the whole render pass (the promise is awaited per
-  // article but the disk read happens a single time), not once per article.
-  const fontPromise = loadFont(ctx.fontDir);
-  return async ({ title, width, height }) => {
-    const font = await fontPromise;
-    if (!font) throw new Error("[web] build.ogImage no font available for rendering");
-    const svg = await satori(
-      <div
-        style={{
-          display: "flex",
-          width: "100%",
-          height: "100%",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: 64,
-          background: "#0b0b0c",
-          color: "#ffffff"
-        }}
-      >
-        {title}
-      </div>,
-      { width, height, fonts: [{ name: font.name, data: font.data, weight: 400, style: "normal" }] }
+export async function loadFonts(og: {
+  fontDir: string;
+  fonts?: readonly OgFont[];
+}): Promise<LoadedFont[]> {
+  if (og.fonts && og.fonts.length > 0) {
+    return Promise.all(
+      og.fonts.map(async font => ({
+        name: font.name,
+        data: await readFile(font.path),
+        weight: font.weight ?? 400,
+        style: font.style ?? "normal"
+      }))
     );
+  }
+  if (!existsSync(og.fontDir)) return [];
+  const entries = await readdir(og.fontDir);
+  const file = entries.find(name => FONT_EXTENSIONS.some(extension => name.endsWith(extension)));
+  if (!file) return [];
+  return [
+    { name: "OG", data: await readFile(path.join(og.fontDir, file)), weight: 400, style: "normal" }
+  ];
+}
+
+/**
+ * The built-in default OG card — a centered title on a dark background. Used when
+ * no custom `ogImage.render` hook is configured. (`@jsxImportSource preact`.)
+ *
+ * @param input - The rich OG input (only `title` is used by the default card).
+ * @returns The Preact `VNode` for the default card.
+ * @example
+ * ```ts
+ * defaultCard(input);
+ * ```
+ */
+function defaultCard(input: RichOgInput): VNode {
+  return h(
+    "div",
+    {
+      style: {
+        display: "flex",
+        width: "100%",
+        height: "100%",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: 64,
+        background: "#0b0b0c",
+        color: "#ffffff"
+      }
+    },
+    input.title
+    // h() infers a precise prop-typed VNode; the public hook contract is the
+    // generic `VNode`, so widen it here (sound — only the node shape crosses).
+  ) as VNode;
+}
+
+/**
+ * The default PNG renderer: a Preact `VNode` (custom `render` hook or the built-in
+ * card) is rendered to SVG by Satori, then rasterized to PNG by resvg. Both native
+ * deps are imported LAZILY (browser-safe goal); the VNode→Satori-input cast happens
+ * at this single framework boundary only.
+ *
+ * @param ctx - The renderer wiring (preloaded fonts + optional custom card).
+ * @param ctx.fonts - Fonts loaded once for the whole render pass.
+ * @param ctx.render - Optional custom card renderer; defaults to {@link defaultCard}.
+ * @returns An {@link OgPngRenderer} bound to the loaded fonts + renderer.
+ * @example
+ * ```ts
+ * const render = makeDefaultRenderer({ fonts, render: undefined });
+ * ```
+ */
+function makeDefaultRenderer(ctx: {
+  fonts: LoadedFont[];
+  render?: (input: RichOgInput) => VNode;
+}): OgPngRenderer {
+  return async input => {
+    if (ctx.fonts.length === 0) {
+      throw new Error("[web] build.ogImage no font available for rendering");
+    }
+    const { default: satori } = await import("satori");
+    const { Resvg } = await import("@resvg/resvg-js");
+    const card = (ctx.render ?? defaultCard)(input);
+    // Single framework boundary: cast the Preact VNode + loaded fonts to Satori's
+    // input shapes (LoadedFont is structurally Satori's FontOptions).
+    const options = {
+      width: input.size.width,
+      height: input.size.height,
+      fonts: ctx.fonts
+    } as unknown as Parameters<typeof satori>[1];
+    const svg = await satori(card as unknown as Parameters<typeof satori>[0], options);
     return new Resvg(svg).render().asPng();
   };
 }
@@ -140,13 +240,65 @@ function selectArticles(byLocale: Map<string, Article[]>): Article[] {
 }
 
 /**
- * Renders OG images for published articles with a `p-limit(4)` concurrency pool.
- * Computes `sha256(title+template+size)` per article and skips regeneration when
- * the hash matches `state.ogImageHashCache`; writes the cache back to
- * `<outDir>/.cache/og-images.json`. No-op when `config.ogImage` is false.
+ * Build the {@link RichOgInput} for one article from its frontmatter/computed
+ * fields plus the resolved size and site name.
  *
- * @param ctx - Plugin context (provides `state`, `config`, `log`).
- * @param options - Optional dependency-injection seam (PNG renderer).
+ * @param article - The published article to render a card for.
+ * @param size - The resolved OG output dimensions.
+ * @param siteName - The site name (from the site plugin, or `""` when unavailable).
+ * @returns The fully-populated rich OG input.
+ * @example
+ * ```ts
+ * buildInput(article, { width: 1200, height: 630 }, "Blog");
+ * ```
+ */
+function buildInput(
+  article: Article,
+  size: { width: number; height: number },
+  siteName: string
+): RichOgInput {
+  const input: RichOgInput = {
+    title: article.frontmatter.title,
+    description: article.frontmatter.description,
+    date: article.frontmatter.date,
+    tags: [...article.frontmatter.tags],
+    locale: article.locale,
+    siteName,
+    size
+  };
+  if (article.frontmatter.author !== undefined) input.author = article.frontmatter.author;
+  return input;
+}
+
+/**
+ * Resolve the site name via `ctx.require(sitePlugin)`, falling back to `""` when the
+ * site API is unavailable (e.g. unit mocks that omit it).
+ *
+ * @param ctx - Plugin context (provides `require`).
+ * @returns The site name, or `""` when the site plugin is not wired.
+ * @example
+ * ```ts
+ * resolveSiteName(ctx);
+ * ```
+ */
+function resolveSiteName(ctx: Pick<PhaseContext, "require">): string {
+  try {
+    return ctx.require(sitePlugin).name();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Renders OG images for published articles with a `p-limit(4)` concurrency pool.
+ * Computes {@link ogHash} (full {@link RichOgInput} + template + fonts) per article
+ * and skips regeneration when the hash matches `state.ogImageHashCache`; writes the
+ * cache back to `<outDir>/.cache/og-images.json`. The configured `ogImage.render`
+ * hook (when present) builds each card; otherwise the built-in card is used. Fonts
+ * are loaded ONCE for the whole pass. No-op when `config.ogImage` is false.
+ *
+ * @param ctx - Plugin context (provides `require`, `state`, `config`, `log`).
+ * @param options - Optional dependency-injection seam (PNG rasterizer).
  * @returns The render/skip counts + peak concurrency, or `null` when disabled.
  * @example
  * ```ts
@@ -154,7 +306,7 @@ function selectArticles(byLocale: Map<string, Article[]>): Article[] {
  * ```
  */
 export async function generateOgImages(
-  ctx: Pick<PhaseContext, "state" | "config" | "log">,
+  ctx: Pick<PhaseContext, "require" | "state" | "config" | "log">,
   options: OgImagesOptions = {}
 ): Promise<OgImagesResult | null> {
   const og = ctx.config.ogImage;
@@ -164,10 +316,16 @@ export async function generateOgImages(
     return null;
   }
   const { default: pLimit } = await import("p-limit");
-  const size = (og as OgImageConfig).size ?? DEFAULT_SIZE;
-  const template = (og as OgImageConfig).template ?? "default";
-  const renderPng = options.renderPng ?? makeDefaultRenderer({ fontDir: og.fontDir });
-  const articles = selectArticles(readCachedContent(ctx as Pick<PhaseContext, "state">));
+  const config: OgImageConfig = og;
+  const size = config.size ?? DEFAULT_SIZE;
+  const template = config.template ?? "default";
+  const fontsHash = fontsKey(config.fonts);
+  // Fonts loaded ONCE for the whole pass (outside the per-image loop).
+  const fonts = options.renderPng ? [] : await loadFonts(config);
+  const renderHook = config.render ? { render: config.render } : {};
+  const renderPng = options.renderPng ?? makeDefaultRenderer({ fonts, ...renderHook });
+  const siteName = resolveSiteName(ctx);
+  const articles = selectArticles(readCachedContent(ctx));
   const cache = ctx.state.ogImageHashCache;
   await loadDiskCache(ctx.config.outDir, cache);
 
@@ -182,7 +340,8 @@ export async function generateOgImages(
     articles.map(article =>
       limit(async () => {
         const key = article.computed.contentId;
-        const hash = ogHash(article.frontmatter.title, template, size);
+        const input = buildInput(article, size, siteName);
+        const hash = ogHash(input, template, fontsHash);
         if (cache.get(key) === hash) {
           skipped += 1;
           return;
@@ -190,7 +349,7 @@ export async function generateOgImages(
         active += 1;
         peakConcurrency = Math.max(peakConcurrency, active);
         try {
-          const png = await renderPng({ title: article.frontmatter.title, ...size });
+          const png = await renderPng(input);
           await mkdir(outDir, { recursive: true });
           await writeFile(path.join(outDir, `${key}.png`), png);
           cache.set(key, hash);

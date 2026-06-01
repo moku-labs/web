@@ -166,6 +166,35 @@ describe("content/api", () => {
     );
   });
 
+  it("load throws the not-found error for a draft slug in production", async () => {
+    const { ctx } = makeCtx({ locales: ["en"], defaultLocale: "en", mode: "production" });
+    // The IDENTICAL message the null-resolve path throws (security: drafts must
+    // be indistinguishable from missing articles in production).
+    const expectedMessage =
+      `[web] content article "draft-post" not found for locale "en".\n` +
+      `  Looked for draft-post/en.md and the default-locale fallback.`;
+    await expect(createContentApi(ctx).load("draft-post", "en")).rejects.toThrow(expectedMessage);
+  });
+
+  it("load returns the draft article in development", async () => {
+    const { ctx } = makeCtx({ locales: ["en"], defaultLocale: "en", mode: "development" });
+    const article = await createContentApi(ctx).load("draft-post", "en");
+    expect(article.computed.slug).toBe("draft-post");
+    expect(article.computed.status).toBe("draft");
+  });
+
+  it("load returns a published article in both production and development", async () => {
+    const prod = makeCtx({ locales: ["en"], defaultLocale: "en", mode: "production" });
+    const prodArticle = await createContentApi(prod.ctx).load("hello-world", "en");
+    expect(prodArticle.computed.slug).toBe("hello-world");
+    expect(prodArticle.computed.status).toBe("published");
+
+    const dev = makeCtx({ locales: ["en"], defaultLocale: "en", mode: "development" });
+    const devArticle = await createContentApi(dev.ctx).load("hello-world", "en");
+    expect(devArticle.computed.slug).toBe("hello-world");
+    expect(devArticle.computed.status).toBe("published");
+  });
+
   it("drafts are excluded in production mode, included in development", async () => {
     const prod = makeCtx({ locales: ["en"], defaultLocale: "en", mode: "production" });
     const prodByLocale = await createContentApi(prod.ctx).loadAll();

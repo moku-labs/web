@@ -20,6 +20,23 @@ describe("route() fluent builder", () => {
     expect(r.meta({ activeTab: "blog" })).toBe(r);
     expect(r.toJson(() => ({}))).toBe(r);
     expect(r.toFile(() => "x.html")).toBe(r);
+    expect(r.parse(raw => raw as { title: string })).toBe(r);
+  });
+
+  it("captures the .parse() validator and types it as the loaded data", () => {
+    const parse = (raw: unknown): { title: string } => raw as { title: string };
+    const r = route("/{slug}/")
+      .load(() => ({ title: "hi" }))
+      .parse(parse);
+    expect(r._handlers.parse).toBe(parse);
+  });
+
+  it("parse must return the loaded data type (compile-time gate)", () => {
+    const r = route("/{slug}/")
+      .load(() => ({ title: "hi" }))
+      // @ts-expect-error — parse must return { title: string }, not a number
+      .parse(() => 123);
+    expect(r._handlers.parse).toBeDefined();
   });
 
   it("captures handlers into the _handlers bag", () => {

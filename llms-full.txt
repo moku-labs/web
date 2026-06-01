@@ -1,0 +1,171 @@
+# @moku-labs/web — full reference
+
+A content-focused **static-site generator + SPA framework** built on the `@moku-labs/core`
+micro-kernel. It SSG-renders Preact pages to static HTML (SEO + first paint), then
+progressively enhances them with client-side island hydration and optional DATA-driven
+navigation. Browser-safe **isomorphic** plugins are the default composition; **node-only**
+plugins are composed à la carte for the build.
+
+- Runtime: **Node 24+** (the router uses the global `URLPattern`), Bun, Cloudflare Workers, browsers.
+- Package manager: **bun**. Strict TS: `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`.
+- Single package entry `.` (ESM + CJS); `"sideEffects": false` lets browser bundles tree-shake node-only plugins.
+
+## 1. The three-layer model (from @moku-labs/core)
+
+1. **Layer 1 — config + events** (`createCoreConfig`): internal.
+2. **Layer 2 — framework + plugins** (`createCore`): internal to `@moku-labs/web`.
+3. **Layer 3 — consumer**: you call `createApp(...)`. NEVER import `@moku-labs/core`.
+
+`createApp({ plugins?, pluginConfigs })`:
+- `plugins` — extra plugin instances ADDED to the isomorphic defaults (e.g. the node-only ones).
+- `pluginConfigs` — per-plugin config keyed by plugin name. 4-level cascade (plugin default → framework → consumer), shallow-merged + frozen.
+- Returns a frozen `app` exposing `app.start()`, `app.stop()`, and each plugin's API at `app.<name>` (e.g. `app.build`, `app.data`, `app.spa`, `app.content`).
+
+**Defaults (isomorphic):** `site`, `i18n`, `router`, `head`, `spa` + `log`/`env` core.
+**Node-only (compose explicitly):** `content`, `build`, `deploy`, `data`.
+
+Cross-plugin access is a synchronous PULL via `ctx.require(plugin)` (resolved by name); events
+are notification-only (no request/response over events). `ctx.has(name)` checks registration.
+
+## 2. The route is the single contract
+
+```ts
+import { route, defineRoutes } from "@moku-labs/web";
+
+const routes = defineRoutes({
+  home: route("/{lang:?}/")
+    .load((params, locale) => listCards(locale))      // → D (this route's data type)
+    .parse((raw) => raw as Card[])                     // validate unknown → D (client trust boundary)
+    .render((ctx) => <Home cards={ctx.data} />)        // ctx: { params, data: D, locale }
+    .head((ctx) => ({ title: "Home" })),
+  post: route("/{lang:?}/{slug}/")
+    .generate((locale) => slugs(locale).map((slug) => ({ lang: locale, slug })))  // SSG param sets
+    .load((params, locale) => getPost(params.slug, locale))
+    .parse((raw) => PostSchema.parse(raw))             // hand guard OR any Standard-Schema lib
+    .render((ctx) => <Post post={ctx.data} />)
+    .head((ctx) => ({ title: ctx.data.title }))
+    .meta({ section: "blog" })                         // JSON-serializable bag (clientManifest)
+});
+```
+
+Builder methods (each returns the builder; `.load` widens the data generic `D`):
+- `.load((params, locale) => D | Promise<D>)` — data loader. Runs at BUILD only.
+- `.parse((raw: unknown) => D)` — client validation gate. MUST return `.load`'s type (mismatch = compile error). Runs on the CLIENT before `render`; throw to reject (→ HTML fallback). **Required** for data-navigable routes in `hybrid`/`spa` mode (else build error).
+- `.render((ctx: { params, data: D, locale }) => VNode)` — Preact render. Runs at build (→ `renderToString`) AND on the client (→ Preact `render`).
+- `.head((ctx) => HeadConfig)` — SEO head.
+- `.generate((locale) => params[])` — concrete instances for SSG expansion.
+- `.meta(record)` — JSON-serializable metadata (shipped in `clientManifest`).
+- `.toJson((ctx) => unknown)` — JSON serializer (e.g. feeds), separate from the data path.
+- `.toFile((params) => string)` / `.layout((children) => VNode)` — output path / layout overrides.
+
+Pattern syntax: `{name}` required param, `{name:?}` optional, `{lang:?}` is the locale-prefix slot (excluded from specificity).
+
+### RouterApi (`ctx.require(routerPlugin)` / `app.router`)
+- `match(pathname) => { params, route } | null` — specificity-sorted; most specific wins.
+- `toUrl(name, params) => string` — substitute params; throws on unknown name.
+- `entries() => readonly TypedRoute[]` — URL-utility view, specificity order.
+- `manifest() => readonly RouteDefinition[]` — full defs with `_handlers` (incl. `parse`), declaration order (build).
+- `clientManifest() => readonly { pattern, name, meta }[]` — serializable projection (no closures).
+- `mode() => "ssg" | "spa" | "hybrid"` — the SINGLE source of truth for static/hybrid/spa behavior.
+
+Config: `router: { routes, mode?: "ssg" | "spa" | "hybrid" }` (default `"hybrid"`).
+
+## 3. SSG → DATA → SPA (the data flow)
+
+```
+BUILD (router.mode !== "ssg")              ON DISK                      CLIENT NAV
+ for each route instance:                  dist/en/post/index.html      click /en/p2/
+   data = route.load(params, locale)  ───► (SSG HTML: SEO+first paint)  1. router.match(path)
+   html = renderToString(render(data)) ──►                              2. data.at(path) → fetch
+   app.data.write([{path,data}])      ───► dist/_data/en/post/index.json   /_data/en/p2/index.json
+                                            (REAL data, never HTML)      3. route.parse(unknown)→D
+                                                                          4. route.render(D)→Preact
+                                                                          (miss/throw → HTML fetch → location.href)
+```
+
+- Persisted data = `load()`'s output (NOT a divergent projection) → the SAME `render` runs both
+  sides → SSR/client parity is structural.
+- Granularity follows `load`: a list route loads slim cards (small file); a detail route loads one
+  record (per-page file). Fetched on demand — payload is independent of site size.
+- `route.load` does NOT run on the client; the build already persisted its output.
+
+### Data provider API (`app.data`) — agnostic, optional, isomorphic
+- `write(entries: { path, data }[], options?: { outDir? }) => Promise<{ fileCount, bytes, files }>` — Node; persists one JSON per page (keyed by `fileFor`). Called by `build`; lazy `node:fs` writer (browser-safe).
+- `at(path) => Promise<unknown | null>` — browser; fetch+cache the page's JSON (`null` on miss/parse-fail).
+- `urlFor(path) => string` — `/en/p/` → `/_data/en/p/index.json` (fetch URL).
+- `fileFor(path) => string` — `/en/p/` → `_data/en/p/index.json` (outDir-relative file).
+- Config: `data: { outputDir?: "_data", baseUrl?: "/_data/" }`. Knows NO domain types — any Layer-3 shape integrates via its route's `load`/`parse`/`render`.
+
+## 4. spa — client runtime (island hydration + navigation)
+
+Default plugin, `depends: [router, head]`, inert on Node (`onStart` no-ops without `document`).
+On `app.start()` in the browser, it mounts islands onto the SSR'd DOM and intercepts navigation.
+
+- Islands: `createComponent(name, hooks)` with lifecycle `onCreate` / `onMount` / `onNavStart` / `onNavEnd` / `onUnMount` / `onDestroy` (ctx: `{ el, data }`, where `data` is the page payload from `script#__DATA__`). Match elements via `data-component="name"`. Components OUTSIDE the swap region are persistent across navigations.
+- `app.spa.register(component)`, `app.spa.navigate(path)`, `app.spa.current()`.
+- Config: `spa: { swapSelector?: "main > section", viewTransitions?: false, progressBar?: true, components?: [] }`.
+- Navigation strategy: when `router.mode() !== "ssg"` AND `data` is composed → DATA path (match → `data.at` → `route.parse` → `route.render`, Preact render lazy-loaded in its own chunk); otherwise HTML-over-fetch; failure → `location.href`. `spa` imports neither `data` nor its types (captures the reader via a structural by-name `ctx.require`).
+- Events: `spa:navigate`, `spa:navigated`, `spa:component-mount`, `spa:component-unmount`.
+- The browser entry is just your own `createApp(...).start()` over the defaults (+ `dataPlugin` for DATA nav). There is no framework `hydrate()` / `./client` export.
+
+## 5. head — SEO `<head>` composition
+
+`head.render(resolvedRoute, data) => string` composes title/meta/canonical/OG/Twitter/JSON-LD/hreflang.
+Config: `head: { titleTemplate?: "%s — Site" }`. Title/description/baseURL come from `site`.
+
+SEO primitives for `.head()` handlers (all exported):
+`meta`, `og`, `twitter`, `jsonLd`, `canonical`, `hreflang`, `feedLink`, `buildArticleHead`.
+`HeadConfig = { title?, description?, canonical?, image?, elements?: HeadElement[] }`.
+
+## 6. content — markdown pipeline (node-only)
+
+`app.content`:
+- `loadAll() => Promise<Map<locale, Article[]>>` — production-filtered (drafts excluded in prod).
+- `load(slug, locale) => Promise<Article>` — single article (NOT draft-filtered; use loadAll for safe sets).
+- `renderMarkdown(md) => Promise<string>`, `invalidate(paths)`, `articleToCard(article) => ArticleCard`.
+- `Article = { frontmatter, computed: { slug, readingTime, contentId, status, wordCount }, html, locale, isFallback, url }`. `ArticleCard` is the slim list projection (title/date/description/tags/readingTime/url — no body).
+- Config: `content: { contentDir, defaultAuthor?, trustedContent?, shikiTheme? }`. Articles live in `contentDir/<slug>/<locale>.md` with YAML frontmatter (`title`, `date`, `description`, `tags`, `language`, optional `author`, `draft`).
+
+## 7. build — SSG orchestrator (node-only)
+
+`app.build.run(options?: { outDir? }) => Promise<{ outDir, pageCount, durationMs }>`. Phases:
+0. **clean** — `rm(outDir)`.
+1. **bundle** — optional client JS/CSS (injectable runner).
+2. **content + images** (parallel) — `content.loadAll()`; copy static image dirs.
+3. **pages** — expand routes ONCE; per instance: `load` → `head.render` → `render` → write `outDir/<path>/index.html`. **When `router.mode() !== "ssg"` and `data` is composed**, the same expansion persists each page's `load()` output via `app.data.write(...)`. `assertDataValidators` fails the build if a data-navigable route (`render`+`load`) lacks `.parse()`.
+4. **feeds + sitemap + og-images** (parallel, gated by config flags).
+5. **root-index** — write the default `/` page to `outDir/index.html`.
+Emits `build:complete { outDir, pageCount, durationMs }`.
+Config flags include: `outDir`, `feeds`, `sitemap`, `images`, `ogImage`, `minify`, `injectAssets`, `publicDir`, `notFound`, `localeRedirects`, `clientEntry`, `template`, `ogImage: { template, fontDir, fontName, fonts }`.
+**Call order:** `await app.build.run(); /* data sidecars written within */`.
+
+## 8. deploy — Cloudflare Pages (node-only)
+
+Scaffolds `wrangler.jsonc` and deploys the built `dist/`. Compose `deployPlugin`; see its README.
+
+## 9. env — validated environment access (core)
+
+Compose a provider per target via `env: { providers: [...] }`:
+- Node: `dotenv()`, `processEnv()`, `cloudflareBindings()`.
+- Browser: `browserEnv()` (reads `import.meta.env` + a global). Keeps `node:fs` out of the client bundle.
+
+## 10. site / i18n (defaults)
+
+- `site: { name, url, author, description }` → `app.site` (`url()`, `name()`, `canonical(path)`, …).
+- `i18n: { locales, defaultLocale, localeNames?, ogLocaleMap?, translations? }` → `app.i18n` (`locales()`, `defaultLocale()`, …). The `{lang:?}` route slot + locale fallback derive from this.
+
+## 11. Testing (vitest)
+
+- Two projects: `unit` (`tests/unit/**`, `src/plugins/**/__tests__/unit/**`) and `integration` (`tests/integration/**`, `src/plugins/**/__tests__/integration/**`). Browser-side tests use `// @vitest-environment happy-dom`.
+- Coverage thresholds 85% (istanbul). Framework-level integration drives the REAL `createApp`.
+- Plugin tests are colocated; root `tests/` is framework-level only.
+
+## 12. Key invariants
+
+- Defaults are browser-safe; node-only plugins are opt-in and tree-shaken when unused.
+- The route owns rendering; the `data` provider owns transport (page path → JSON). No HTML-in-JSON, no `unknown` blobs reaching `render` (the `parse` gate validates).
+- `node:*` and Preact DOM `render` are isolated behind lazy `import()` (split chunks) so a data-composing browser bundle stays node-free and a no-data bundle ships no render layer.
+- Single mode (`router.mode`); no parallel runtime / hand-rolled `boot()`; everything flows through the factory chain.
+
+## Per-plugin READMEs
+site · i18n · router · head · spa · content · build · deploy · data · log · env — see `src/plugins/<name>/README.md`.
