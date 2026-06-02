@@ -17,9 +17,19 @@ import type { VNode } from "preact";
 import { render } from "preact";
 
 /**
- * Render a route's `VNode` into the live swap region, replacing its contents.
- * Reuses the build's component output verbatim (same `route.render`), so the
- * client paint matches the SSG paint.
+ * Render a route's `VNode` into the live swap region, starting from a clean slate
+ * each time. Preact keeps the previous vdom tree on the container and diffs the
+ * next render against it — but the kernel clears the region between navs to drop
+ * the static SSR markup. A raw `replaceChildren()` would delete the live DOM out
+ * from under Preact's retained vdom, so the next diff patches detached nodes → an
+ * empty region (the bug where a SECOND consecutive client nav went blank).
+ *
+ * To stay correct without tracking element identity, first `render(null, region)`
+ * — this unmounts any Preact tree Preact owns AND resets its retained vdom pointer
+ * (a no-op the first time, when the region still holds raw SSR/HTML). Then clear
+ * whatever static children remain, then mount the new VNode fresh. Reuses the
+ * build's component output verbatim (same `route.render`), so the client paint
+ * matches the SSG paint.
  *
  * @param vnode - The VNode produced by the matched route's `.render(ctx)`.
  * @param region - The swap-region element to render into.
@@ -30,5 +40,8 @@ import { render } from "preact";
  * ```
  */
 export function renderVNode(vnode: VNode, region: Element): void {
+  // eslint-disable-next-line unicorn/no-null -- Preact's unmount sentinel (resets the retained vdom)
+  render(null, region);
+  region.replaceChildren();
   render(vnode, region);
 }

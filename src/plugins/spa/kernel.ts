@@ -205,9 +205,9 @@ export function createSpaKernel(
       syncDataHead(hit.route, routeContext);
       unmountPageSpecific(state, emit);
       runSwap(() => {
-        // Clear the SSR content first — Preact `render` mounts INTO the region and
-        // would otherwise leave the prior static children alongside the new VNode.
-        region.replaceChildren();
+        // `renderVNode` clears the static SSR children on first render into this region,
+        // then lets Preact own + diff it on subsequent navs (clearing again would desync
+        // Preact's retained vdom from the live DOM → a blank region on the next nav).
         renderVNode(vnode, region);
         scanAndMount(state, emit, resolved.swapSelector);
         notifyNavEnd(state);
