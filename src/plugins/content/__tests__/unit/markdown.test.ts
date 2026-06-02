@@ -60,6 +60,22 @@ describe("content/pipeline/markdown", () => {
     expect(html.toLowerCase()).toContain("#f97316");
   });
 
+  it("types shikiTheme as the BundledTheme union (editor autocomplete) + a theme object", () => {
+    // Bundled names are the typed, autocompleted set (assigned to the literal type, not
+    // widened to `string`); a ThemeRegistration object is also accepted. Note: arbitrary
+    // strings still type-check via ThemeRegistrationAny's all-optional object arm — same as
+    // Shiki's own `StringLiteralUnion<BundledTheme>` — so this documents autocomplete, not
+    // typo-rejection.
+    const byName: Config["shikiTheme"] = "dracula";
+    const byObject: Config["shikiTheme"] = {
+      name: "warm",
+      type: "dark",
+      settings: [{ scope: "keyword", settings: { foreground: "#f97316" } }]
+    };
+    expect(byName).toBe("dracula");
+    expect(byObject).toMatchObject({ name: "warm" });
+  });
+
   it("strips <script>/onerror/javascript: when trustedContent is false (sanitize LAST)", async () => {
     const md = [
       "<script>alert(1)</script>",

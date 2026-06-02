@@ -1,7 +1,7 @@
 /**
  * @file content plugin — type definitions skeleton.
  */
-import type { ThemeRegistrationAny } from "shiki";
+import type { BundledTheme, ThemeRegistrationAny } from "shiki";
 import type { Pluggable, Processor } from "unified";
 
 /**
@@ -26,11 +26,13 @@ export type Config = {
   /** Additional rehype plugins, concatenated after custom transforms, before Shiki + sanitize. Defaults to []. */
   extraRehypePlugins?: readonly Pluggable[];
   /**
-   * Shiki theme for syntax highlighting: either a bundled theme NAME (e.g.
-   * "github-dark", the default) or a custom Shiki `ThemeRegistration` object —
-   * passed straight through to `@shikijs/rehype`'s `theme` option.
+   * Shiki theme for syntax highlighting: a bundled theme NAME — typed as Shiki's
+   * `BundledTheme` union so editors autocomplete the ~60 built-ins (default
+   * "github-dark") — or a custom `ThemeRegistration` object. Passed straight through
+   * to `@shikijs/rehype`'s `theme`. (Like Shiki's own theme type, an arbitrary string
+   * still compiles via the object arm, so this is autocomplete, not typo-rejection.)
    */
-  shikiTheme?: string | ThemeRegistrationAny;
+  shikiTheme?: BundledTheme | ThemeRegistrationAny;
   /** Author applied to articles whose frontmatter omits author. Defaults to undefined. */
   defaultAuthor?: string;
 };
