@@ -69,6 +69,29 @@ describe("log console sink routing", () => {
     expect(console.log).toHaveBeenCalledTimes(2);
   });
 
+  it("consoleSink(minLevel) drops entries below the threshold", () => {
+    const sink = consoleSink("info");
+    sink.write({ level: "debug", event: "d", ts: 0 }); // below info -> dropped
+    sink.write({ level: "info", event: "i", ts: 0 });
+    sink.write({ level: "warn", event: "w", ts: 0 });
+    sink.write({ level: "error", event: "e", ts: 0 });
+    expect(console.log).toHaveBeenCalledTimes(1); // info only (debug dropped)
+    expect(console.warn).toHaveBeenCalledTimes(1);
+    expect(console.error).toHaveBeenCalledTimes(1);
+  });
+
+  it("production suppresses debug (info+ only); dev prints debug", () => {
+    const prod = createLogState({ config: { mode: "production" } });
+    installDefaultSinks({ config: { mode: "production" }, state: prod });
+    createLogApi({ config: { mode: "production" }, state: prod }).debug("build:bundle");
+    expect(console.log).not.toHaveBeenCalled(); // debug suppressed in production
+
+    const dev = createLogState({ config: { mode: "dev" } });
+    installDefaultSinks({ config: { mode: "dev" }, state: dev });
+    createLogApi({ config: { mode: "dev" }, state: dev }).debug("build:bundle");
+    expect(console.log).toHaveBeenCalledTimes(1); // debug printed in dev
+  });
+
   it("trace records entries in all four modes", () => {
     for (const mode of ["test", "silent", "dev", "production"] as const) {
       const state = createLogState({ config: { mode } });
