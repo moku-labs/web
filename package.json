@@ -1,6 +1,5 @@
 {
   "name": "@moku-labs/web",
-  "version": "0.3.0",
   "description": "Content static-site generator + SPA web framework for TypeScript, built on @moku-labs/core.",
   "author": "Oleksandr Kucherenko",
   "license": "MIT",

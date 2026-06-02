@@ -1,7 +1,17 @@
 pre-commit:
   jobs:
     - name: build-and-validate
-      run: bun run build && bun run validate
+      # package.json carries NO version field (the version source of truth is the latest git tag;
+      # see publish.yml). publint packs the tarball via `bun pm pack`, which requires name+version,
+      # so seed the LATEST TAG's version for the validate step only (0.0.0 only if there are no
+      # tags) and strip it again — it never enters the commit.
+      run: |
+        bun run build || exit $?
+        V="$(git tag --list 'v*' --sort=-v:refname | head -n1)"; V="${V#v}"
+        npm version "${V:-0.0.0}" --no-git-tag-version --allow-same-version >/dev/null
+        bun run validate; rc=$?
+        npm pkg delete version >/dev/null 2>&1
+        exit $rc
     - name: biome-format
       glob: "*.{ts,js,mjs,cjs,json,jsonc}"
       run: bunx biome check --write --no-errors-on-unmatched --files-ignore-unknown=true --colors=off {staged_files}
