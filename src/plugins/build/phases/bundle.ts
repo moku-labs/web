@@ -150,7 +150,8 @@ function resolveJsEntrypoints(ctx: Pick<PhaseContext, "config" | "log">): string
  * @param runner - The bundler runner to invoke.
  * @param kind - The asset kind label (`"css"` / `"js"`) — used as the cache key.
  * @param entrypoints - Resolved entry files (skipped when empty).
- * @param outdir - The output directory.
+ * @param outDir - The publish root; stored asset paths are made relative to it.
+ * @param outdir - The bundler output directory (`<outDir>/assets`).
  * @param minify - Whether to minify.
  * @example
  * ```ts
@@ -162,6 +163,7 @@ async function runOne(
   runner: BundleRunner,
   kind: "css" | "js",
   entrypoints: string[],
+  outDir: string,
   outdir: string,
   minify: boolean
 ): Promise<void> {
@@ -172,7 +174,15 @@ async function runOne(
   }
   const hashed: BuildCacheEntry = {};
   for (const output of result.outputs) {
-    hashed[path.basename(output.path)] = output.path;
+    // Store the path RELATIVE to the publish root (`outDir`) with POSIX separators, e.g.
+    // "assets/main-abc123.css". `buildAssetTags` prepends "/" → "/assets/main-abc123.css".
+    // The runner may return an absolute path (Bun.build does), so a raw `output.path` here
+    // would inject a broken `//Users/.../main.css` (protocol-relative) URL.
+    const webPath = path
+      .relative(path.resolve(outDir), path.resolve(output.path))
+      .split(path.sep)
+      .join("/");
+    hashed[path.basename(output.path)] = webPath;
   }
   ctx.state.buildCache.set(kind, hashed);
   ctx.log.debug("build:bundle", { kind, count: result.outputs.length });
@@ -199,6 +209,6 @@ export async function bundle(
   const { minify, outDir } = ctx.config;
   const cssEntrypoints = options.cssEntrypoints ?? resolveEntrypoints(CSS_ENTRY_CANDIDATES);
   const jsEntrypoints = options.jsEntrypoints ?? resolveJsEntrypoints(ctx);
-  await runOne(ctx, runner, "css", cssEntrypoints, path.join(outDir, "assets"), minify);
-  await runOne(ctx, runner, "js", jsEntrypoints, path.join(outDir, "assets"), minify);
+  await runOne(ctx, runner, "css", cssEntrypoints, outDir, path.join(outDir, "assets"), minify);
+  await runOne(ctx, runner, "js", jsEntrypoints, outDir, path.join(outDir, "assets"), minify);
 }
