@@ -8,28 +8,47 @@
  * `createApp({ plugins: [...] })` in a Node build; omit them in a browser app.
  * The framework never hard-blocks either runtime — the consumer composes the
  * variant it needs and supplies the matching `env` provider.
+ *
+ * This is the full surface (dual ESM+CJS). For a guaranteed node-free client
+ * bundle, import the `@moku-labs/web/browser` entry instead of relying on
+ * tree-shaking this one — see `src/browser.ts`.
  * @see README.md
  */
 import { coreConfig, createCore } from "./config";
 import { headPlugin, i18nPlugin, routerPlugin, sitePlugin, spaPlugin } from "./plugins";
 
-const framework = createCore(coreConfig, {
+// ─── Plugin instances + type namespaces (Layer-3 composition surface) ─────────
+// `export *` includes every built-in (incl. the node-only content/build/deploy/
+// data plugins + their type namespaces); `"sideEffects": false` lets a browser
+// bundle tree-shake the ones it does not compose. For a guaranteed node-free
+// client bundle, import `@moku-labs/web/browser` instead.
+export * from "./plugins";
+
+// ─── env providers (compose per target: dotenv/processEnv on Node, browserEnv in the browser) ──
+export { cloudflareBindings, dotenv, processEnv } from "./plugins/env/providers";
+export { browserEnv } from "./plugins/env/providers.browser";
+
+// ─── Consumer helpers: route DSL, SPA islands, SEO <head> primitives ──────────
+export { defineRoutes, route } from "./plugins/router";
+export { createComponent } from "./plugins/spa";
+export {
+  buildArticleHead,
+  canonical,
+  feedLink,
+  hreflang,
+  jsonLd,
+  meta,
+  og,
+  twitter
+} from "./plugins/head";
+
+const core = createCore(coreConfig, {
   // Isomorphic defaults — each runs on Node AND in the browser; every `depends`
   // edge points backward (spec/11 §1.3/§1.5). Node-only plugins (content, build,
   // deploy, data) are added per-target by the consumer (Layer 3, spec/01 §10).
   plugins: [sitePlugin, i18nPlugin, routerPlugin, headPlugin, spaPlugin],
   pluginConfigs: {}
 });
-
-// ─── Plugins + type namespaces (Layer-3 composition surface) ──────────────────
-// `export *` includes every built-in (incl. the node-only data/content/build/
-// deploy plugins + the `Data` type namespace); `"sideEffects": false` lets a
-// browser bundle tree-shake the ones it does not compose.
-export * from "./plugins";
-
-// ─── env providers (compose per target: dotenv/processEnv on Node, browserEnv in the browser) ──
-export { cloudflareBindings, dotenv, processEnv } from "./plugins/env/providers";
-export { browserEnv } from "./plugins/env/providers.browser";
 
 // ─── Framework API ────────────────────────────────────────────────────────────
 
@@ -62,7 +81,7 @@ export { browserEnv } from "./plugins/env/providers.browser";
  * await app.build.run();
  * ```
  */
-export const createApp = framework.createApp;
+export const createApp = core.createApp;
 
 /**
  * Create a custom plugin bound to this framework's `Config`/`Events` and core
@@ -79,17 +98,4 @@ export const createApp = framework.createApp;
  * const app = createApp({ plugins: [analytics] });
  * ```
  */
-export const createPlugin = framework.createPlugin;
-
-// ─── Consumer helpers ───────────────────────────────────────────────────────────
-export { defineRoutes, route } from "./plugins/router";
-export {
-  buildArticleHead,
-  canonical,
-  feedLink,
-  hreflang,
-  jsonLd,
-  meta,
-  og,
-  twitter
-} from "./plugins/head";
+export const createPlugin = core.createPlugin;

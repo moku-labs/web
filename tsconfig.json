@@ -17,5 +17,5 @@
     "skipLibCheck": true,
     "types": ["bun"]
   },
-  "include": ["src", "tests", "declarations.d.ts", "*.config.ts"]
+  "include": ["src", "tests", "scripts", "declarations.d.ts", "*.config.ts"]
 }

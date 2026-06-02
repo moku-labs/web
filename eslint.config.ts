@@ -14,7 +14,10 @@ export default [
       ".claude/**",
       ".planning/**",
       "node_modules/**",
-      "declarations.d.ts"
+      "declarations.d.ts",
+      // Build/CI tooling — node scripts, not library source. Biome still formats
+      // them (`biome check .`); they don't follow the strict src JSDoc/process rules.
+      "scripts/**"
     ]
   },
 

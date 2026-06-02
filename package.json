@@ -39,6 +39,12 @@
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
+    },
+    "./browser": {
+      "import": {
+        "types": "./dist/browser.d.mts",
+        "default": "./dist/browser.mjs"
+      }
     }
   },
   "sideEffects": false,
@@ -97,6 +103,7 @@
   "scripts": {
     "build": "tsdown",
     "validate": "publint",
+    "check:bundle": "bun scripts/verify-browser-bundle.ts",
     "lint": "biome check . && eslint .",
     "lint:fix": "biome check --write . && eslint --fix .",
     "format": "biome format --write .",

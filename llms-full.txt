@@ -8,7 +8,30 @@ plugins are composed à la carte for the build.
 
 - Runtime: **Node 24+** (the router uses the global `URLPattern`), Bun, Cloudflare Workers, browsers.
 - Package manager: **bun**. Strict TS: `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`.
-- Single package entry `.` (ESM + CJS); `"sideEffects": false` lets browser bundles tree-shake node-only plugins.
+- Two entry points: `.` (Node SSG; dual ESM + CJS, full surface) and `./browser` (client bundle; ESM-only, guaranteed node-free). Prefer `./browser` for the client — do NOT rely on tree-shaking `.` for browser safety (see §0).
+
+## 0. Entry points (`.` vs `./browser`)
+
+Two published entries; pick by target:
+
+| Entry | Use | Format | Surface |
+| --- | --- | --- | --- |
+| `.` | **Node SSG build** | ESM + CJS | full (isomorphic defaults + node-only plugins/providers) |
+| `./browser` | **client/browser bundle** | ESM-only | isomorphic surface, node-free, env pre-wired |
+
+- **`.`** — unchanged. Add `contentPlugin`/`buildPlugin`/`deployPlugin`, wire `dotenv`/`processEnv`/`cloudflareBindings` for `env`.
+- **`./browser`** — exports the SAME `createApp` / `createPlugin` over the SAME isomorphic default set (`site`, `i18n`, `router`, `head`, `spa` + `log`/`env` core), PLUS `dataPlugin`, `defineRoutes`, `route`, `createComponent` (spa islands), `browserEnv`, the SEO head primitives (`meta`, `og`, `twitter`, `jsonLd`, `canonical`, `hreflang`, `feedLink`, `buildArticleHead`), and the browser-relevant type namespaces (`Data`, `Env`, `Head`, `Log`, `Router`, `Spa`). It EXCLUDES everything node-only: `contentPlugin`, `buildPlugin`, `deployPlugin`, the node env providers `dotenv`/`processEnv`/`cloudflareBindings`, and the `Build`/`Content`/`Deploy` type namespaces.
+- **env is pre-wired:** `./browser` sets `browserEnv()` as the default `env` provider, so env works with ZERO consumer config in the browser — you do NOT pass `pluginConfigs.env.providers`. It resolves from `import.meta.env` and `globalThis.__ENV__`.
+- **Guarantee:** importing `@moku-labs/web/browser` can NEVER drag node/native code into a client bundle, regardless of the consumer's bundler or tree-shaking — its static import graph references zero node-only modules. This is STRONGER and more reliable than the previous guidance of "import `@moku-labs/web` and rely on `sideEffects: false` tree-shaking" (which is fragile: building entries together can merge node code into a shared chunk).
+- A CI gate (`bun run check:bundle`) asserts the built browser bundle has zero static node/native imports and stays under a gzip size budget (~35 kB gzip).
+- `dataPlugin` stays consumer-composed (NOT a default) — compose it for client DATA navigation (`router.mode` `"spa"` | `"hybrid"`); its node write-half is loaded only via dynamic import.
+
+```ts
+import { createApp, spaPlugin, dataPlugin, browserEnv, defineRoutes, route } from "@moku-labs/web/browser";
+// env works with no wiring — browserEnv is the default provider
+const app = createApp({ plugins: [dataPlugin], pluginConfigs: { router: { mode: "spa", routes } } });
+await app.start();
+```
 
 ## 1. The three-layer model (from @moku-labs/core)
 
@@ -107,7 +130,7 @@ On `app.start()` in the browser, it mounts islands onto the SSR'd DOM and interc
 - Config: `spa: { swapSelector?: "main > section", viewTransitions?: false, progressBar?: true, components?: [] }`.
 - Navigation strategy: when `router.mode() !== "ssg"` AND `data` is composed → DATA path (match → `data.at` → `route.parse` → `route.render`, Preact render lazy-loaded in its own chunk); otherwise HTML-over-fetch; failure → `location.href`. `spa` imports neither `data` nor its types (captures the reader via a structural by-name `ctx.require`).
 - Events: `spa:navigate`, `spa:navigated`, `spa:component-mount`, `spa:component-unmount`.
-- The browser entry is just your own `createApp(...).start()` over the defaults (+ `dataPlugin` for DATA nav). There is no framework `hydrate()` / `./client` export.
+- The browser runtime is just your own `createApp(...).start()` over the defaults (+ `dataPlugin` for DATA nav), imported from the `./browser` entry (see §0). There is no framework `hydrate()` / `./client` export.
 
 ## 5. head — SEO `<head>` composition
 
@@ -147,8 +170,8 @@ Scaffolds `wrangler.jsonc` and deploys the built `dist/`. Compose `deployPlugin`
 ## 9. env — validated environment access (core)
 
 Compose a provider per target via `env: { providers: [...] }`:
-- Node: `dotenv()`, `processEnv()`, `cloudflareBindings()`.
-- Browser: `browserEnv()` (reads `import.meta.env` + a global). Keeps `node:fs` out of the client bundle.
+- Node (`.` entry): `dotenv()`, `processEnv()`, `cloudflareBindings()` — wire explicitly.
+- Browser (`./browser` entry): `browserEnv()` (reads `import.meta.env` + `globalThis.__ENV__`) is the PRE-WIRED default — env works with ZERO config, no `providers` array needed. Keeps `node:fs` out of the client bundle.
 
 ## 10. site / i18n (defaults)
 
@@ -163,7 +186,7 @@ Compose a provider per target via `env: { providers: [...] }`:
 
 ## 12. Key invariants
 
-- Defaults are browser-safe; node-only plugins are opt-in and tree-shaken when unused.
+- Defaults are browser-safe; node-only plugins are opt-in. For the client, import the `./browser` entry — it is guaranteed node-free by construction (zero static node imports), not by relying on the consumer's tree-shaking (see §0).
 - The route owns rendering; the `data` provider owns transport (page path → JSON). No HTML-in-JSON, no `unknown` blobs reaching `render` (the `parse` gate validates).
 - `node:*` and Preact DOM `render` are isolated behind lazy `import()` (split chunks) so a data-composing browser bundle stays node-free and a no-data bundle ships no render layer.
 - Single mode (`router.mode`); no parallel runtime / hand-rolled `boot()`; everything flows through the factory chain.

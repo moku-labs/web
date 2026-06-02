@@ -12,10 +12,26 @@ domain files (`kernel`, `router`, `head`, `progress`, `components`, `lifecycle`)
 
 `spa` is an **isomorphic framework default**: `onStart` is a no-op when
 `typeof document === "undefined"`, so it is inert in the Node SSG/build pipeline and boots the
-browser runtime only in a browser. There is no separate browser entry or subpath export — a
-browser app is just your own `createApp(...).start()` over the defaults (with
-`env.providers: [browserEnv()]`); `spa`'s `onStart` boots navigation listeners and mounts
-islands onto the SSR'd DOM.
+browser runtime only in a browser. To ship `spa`'s client runtime, import `createApp` +
+`spaPlugin` from the dedicated browser-safe entry **`@moku-labs/web/browser`** rather than the
+full `.` entry. `./browser` is ESM-only, exports the same `createApp`/`createPlugin` over the
+same isomorphic default set (`site`, `i18n`, `router`, `head`, `spa` + the `log`/`env` core)
+plus `dataPlugin`, `defineRoutes`, `route`, `createComponent`, `browserEnv`, the SEO head primitives, and the
+browser-relevant type namespaces, while **excluding** everything node-only (`contentPlugin`,
+`buildPlugin`, `deployPlugin`, the `dotenv`/`processEnv`/`cloudflareBindings` env providers, and
+the `Build`/`Content`/`Deploy` type namespaces). Its static import graph references zero
+node-only modules, so importing `@moku-labs/web/browser` can **never** drag node/native code into
+a client bundle regardless of bundler or tree-shaking — a stronger, more reliable guarantee than
+importing `@moku-labs/web` and relying on `sideEffects: false` tree-shaking (which is fragile,
+since building entries together can merge node code into a shared chunk). A CI gate
+(`bun run check:bundle`) asserts the built browser bundle has zero static node/native imports and
+stays under a gzip size budget (the browser bundle is ~35 kB gzip). `./browser` also **pre-wires
+`browserEnv()` as the default env provider**, so env works with zero consumer config (resolving
+from `import.meta.env` and `globalThis.__ENV__`) — you do not need to pass
+`pluginConfigs.env.providers`. A browser app is just your own `createApp(...).start()` over the
+defaults; `spa`'s `onStart` boots navigation listeners and mounts islands onto the SSR'd DOM.
+Use the `.` entry for the Node SSG build (adding `contentPlugin`/`buildPlugin`/`deployPlugin` and
+wiring `dotenv`/`processEnv`); use `./browser` for the client/browser bundle.
 
 ## API
 
@@ -64,7 +80,8 @@ captures the `data` reader at init via a structural by-name `ctx.require` (only 
 ### Usage
 
 ```ts
-import { createApp, createComponent, defineRoutes, route } from "@moku-labs/web";
+// Browser bundle: import from the node-free "./browser" entry (env is pre-wired).
+import { createApp, createComponent, defineRoutes, route } from "@moku-labs/web/browser";
 
 const counter = createComponent("counter", {
   onMount({ el }) {
