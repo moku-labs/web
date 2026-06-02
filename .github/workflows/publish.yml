@@ -84,12 +84,14 @@ jobs:
         run: |
           # main is protected (no direct push), so a release never commits to it.
           # The version source of truth is the latest tag: seed package.json from
-          # it, then bump. Falls back to package.json only if there are no tags.
+          # it, then bump. package.json on main carries NO version field (it is
+          # informational only and was removed to stop drift), so the no-tags
+          # bootstrap falls back to 0.0.0 rather than reading package.json.
           LATEST="$(git tag --list 'v*' --sort=-v:refname | head -n1)"
           if [ -n "$LATEST" ]; then
             BASE="${LATEST#v}"
           else
-            BASE="$(node -p "require('./package.json').version")"
+            BASE="0.0.0"
           fi
           npm version "$BASE" --no-git-tag-version --allow-same-version >/dev/null
           TAG="$(npm version "$RELEASE_TYPE" --no-git-tag-version)"
@@ -122,7 +124,14 @@ jobs:
           case "$TAG" in
             *-*) PRERELEASE="--prerelease" ;;
           esac
-          gh release create "$TAG" --title "$TAG" --generate-notes --verify-tag $PRERELEASE
+          # Pin the notes base to the IMMEDIATELY PRECEDING tag. Releases are tag-only (each tag is
+          # a detached `chore(release)` bump commit NOT in the next tag's ancestry), so GitHub's
+          # auto base-selection walks ancestry and wrongly settles on the last on-main tag for every
+          # release — producing a wrong `compare` link and a cumulative/repeated PR list. Passing
+          # --notes-start-tag scopes the notes to commits between PREV and TAG only.
+          PREV="$(git tag --list 'v*' --sort=-v:refname | grep -vx "$TAG" | head -n1)"
+          gh release create "$TAG" --title "$TAG" --generate-notes \
+            ${PREV:+--notes-start-tag "$PREV"} --verify-tag $PRERELEASE
 
   # Publish to npm — runs for BOTH entry points.
   publish:
