@@ -81,6 +81,9 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - run: bun install --frozen-lockfile
       - run: bun run build
+      # Guard the ./browser entry: zero static node/native imports + under size budget.
+      # Must run after build (needs dist/); the parallel `test` job has no dist.
+      - run: bun run check:bundle
       # package.json carries NO version field (the version source of truth is the latest git tag;
       # see publish.yml). publint packs the tarball via `bun pm pack`, which requires a version, so
       # seed the LATEST TAG's version for the validate step only (0.0.0 only if there are no tags) —

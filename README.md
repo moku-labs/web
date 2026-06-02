@@ -73,10 +73,32 @@ from production builds.
 `createApp`'s **defaults are the isomorphic plugins** — the ones that run unchanged on
 both Node and the browser: `site`, `i18n`, `router`, `head`, `spa` (plus the `log`/`env`
 core). The **node-only** plugins (`content`, `build`, `deploy`) are exported but not
-defaults — add them with `createApp({ plugins: [...] })` for a Node build, and omit them
-in a browser app (with `"sideEffects": false`, your bundler tree-shakes them out). You
-also choose the `env` provider per target: `[dotenv(), processEnv()]` on Node,
-`[browserEnv()]` in the browser. The framework never hard-blocks either runtime.
+defaults — add them with `createApp({ plugins: [...] })` for a Node build. You also choose
+the `env` provider per target: `[dotenv(), processEnv()]` on Node, `browserEnv()` in the
+browser. The framework never hard-blocks either runtime.
+
+Two entry points pick the right surface per target:
+
+- **`@moku-labs/web`** (the `.` entry, dual ESM+CJS) — the full surface, for **Node SSG
+  builds**: add `contentPlugin`/`buildPlugin`/`deployPlugin` and wire `dotenv()`/`processEnv()`.
+- **`@moku-labs/web/browser`** (ESM-only) — the recommended **client/browser** entry. It
+  re-exports the SAME `createApp`/`createPlugin` over the SAME isomorphic default set
+  (`site`, `i18n`, `router`, `head`, `spa` + `log`/`env`), plus `dataPlugin`, `defineRoutes`,
+  `route`, `createComponent`, `browserEnv`, the SEO head primitives, and the browser-relevant type namespaces
+  (`Data`, `Env`, `Head`, `Log`, `Router`, `Spa`). It **excludes** everything node-only
+  (`contentPlugin`, `buildPlugin`, `deployPlugin`, the `dotenv`/`processEnv`/`cloudflareBindings`
+  env providers, and the `Build`/`Content`/`Deploy` type namespaces), and **pre-wires
+  `browserEnv()`** as the default env provider — so `env` works with **zero** consumer
+  config (no `pluginConfigs.env.providers` needed), resolving from `import.meta.env` and
+  `globalThis.__ENV__`.
+
+Importing `@moku-labs/web/browser` can **never** drag node/native code into a client bundle,
+regardless of your bundler or tree-shaking — its static import graph references zero
+node-only modules. This is stronger and more reliable than importing `@moku-labs/web` and
+relying on `"sideEffects": false` tree-shaking, which is fragile (building entries together
+can merge node code into a shared chunk). A CI gate (`bun run check:bundle`) asserts the
+built browser bundle has zero static node/native imports and stays under a gzip size budget
+(the browser bundle is currently ~35 kB gzip).
 
 `data` is a special case — an **optional, domain-agnostic data provider**: composed on
 Node, `build` calls `data.write(...)` to persist each page's real `load()` output as JSON
@@ -91,9 +113,20 @@ The single switch is **`router.mode`** (`"ssg" | "spa" | "hybrid"`): `build` wri
 declare `.parse(raw => data)` (validated at the client trust boundary) — `build` errors
 otherwise.
 
-A browser entry is just your own `createApp(...).start()` over the defaults (plus
-`dataPlugin` for DATA nav) — `spa`'s `onStart` mounts islands onto the SSR'd DOM and
-intercepts navigation.
+A browser entry is `createApp(...).start()` imported from `@moku-labs/web/browser` over the
+defaults (plus `dataPlugin` for DATA nav) — `spa`'s `onStart` mounts islands onto the SSR'd
+DOM and intercepts navigation. `dataPlugin` stays consumer-composed (it is not a default):
+compose it for client DATA navigation (`router.mode` `"spa"` | `"hybrid"`); its node
+write-half is loaded only via dynamic import.
+
+```ts
+// A browser bundle — guaranteed node-free, env pre-wired:
+import { createApp, spaPlugin, dataPlugin, browserEnv, defineRoutes, route } from "@moku-labs/web/browser";
+
+// env works with no wiring — browserEnv is the default provider
+const app = createApp({ plugins: [dataPlugin], pluginConfigs: { router: { mode: "spa", routes } } });
+await app.start();
+```
 
 ## Plugins
 

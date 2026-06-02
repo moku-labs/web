@@ -44,7 +44,7 @@ string vs a plugin API). Do not confuse `ctx.env.require("X")` with
 | Field | Type | Spec default | Framework default | Notes |
 | ----- | ---- | ------------ | ----------------- | ----- |
 | `schema` | `Record<string, EnvVarSpec>` | `{}` | `{}` | Declares every variable the app reads. |
-| `providers` | `EnvProvider[]` | `[]` | `[dotenv(), processEnv()]` | Resolution order; index `0` wins on conflict. |
+| `providers` | `EnvProvider[]` | `[]` | `[dotenv(), processEnv()]` (Node) / `[browserEnv()]` (browser) | Resolution order; index `0` wins on conflict. |
 | `publicPrefix` | `string` | `"PUBLIC_"` | `"PUBLIC_"` | Bidirectionally enforced against `schema[key].public`. |
 
 ```ts
@@ -66,6 +66,20 @@ With the framework default order, a value in `.env.local` **wins over**
 `[processEnv(), dotenv()]`; Cloudflare deployments typically use
 `[cloudflareBindings(), processEnv()]`.
 
+### Default provider per entry point
+
+The default `providers` differ by which package entry you import:
+
+- **`.` (Node)** — wires `[dotenv(), processEnv()]`. Node-only providers
+  (`dotenv`, `processEnv`, `cloudflareBindings`) are exported here and must be
+  composed explicitly for non-default precedence.
+- **`./browser`** — the `@moku-labs/web/browser` entry **pre-wires
+  `browserEnv()`** as the default env provider, so `env` works with **zero
+  consumer config** in the browser. You do **not** need to pass
+  `pluginConfigs.env.providers`; it resolves from `import.meta.env` and
+  `globalThis.__ENV__`. The node-only providers are not exported from this
+  entry.
+
 ## Providers
 
 - **`dotenv(path = ".env.local")`** — zero-dependency `.env` parser, re-read from
@@ -75,6 +89,10 @@ With the framework default order, a value in `.env.local` **wins over**
   **not** stripped (`KEY=value # x` resolves to `value # x`). `KEY=` yields an
   empty string, which is later coerced to `undefined` during the merge.
 - **`processEnv()`** — returns a shallow copy of `process.env` at `load()` time.
+- **`browserEnv()`** — browser-safe provider that resolves from `import.meta.env`
+  and `globalThis.__ENV__`. It is **pre-wired as the default provider** by the
+  `@moku-labs/web/browser` entry, so a browser app needs no manual
+  `env.providers` wiring.
 - **`cloudflareBindings()`** — reads `globalThis.__CLOUDFLARE_ENV__` fresh on every
   `load()` and **never caches**. The consumer (request handler) owns the global's
   lifecycle: set it at the start of a request and clear it at the end. Apps that

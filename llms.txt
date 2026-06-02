@@ -7,8 +7,9 @@ Requires Node 24+ (the router uses the global `URLPattern`). Package manager: `b
 ## Mental model
 
 - **Layer 3 (consumer):** call `createApp({ plugins?, pluginConfigs })`. Never import `@moku-labs/core` directly.
+- **Two entries:** `@moku-labs/web` (`.`) is dual ESM+CJS with the full surface (Node SSG build). `@moku-labs/web/browser` is the ESM-only browser-safe entry — same `createApp`/`createPlugin` over the same isomorphic defaults, plus `dataPlugin`/`defineRoutes`/`route`/`createComponent`/`browserEnv` + the SEO head primitives, with all node-only plugins/providers excluded and `browserEnv()` pre-wired as the default env provider.
 - **Defaults are isomorphic** (run on Node AND in the browser): `site`, `i18n`, `router`, `head`, `spa` + the `log`/`env` core.
-- **Node-only plugins** (`content`, `build`, `deploy`, `data`) are exported but NOT defaults — add them for a Node build; omit them in a browser bundle (`"sideEffects": false` tree-shakes them out).
+- **Node-only plugins** (`content`, `build`, `deploy`, `data`) are exported but NOT defaults — add them for a Node build. For a browser bundle import from **`@moku-labs/web/browser`** instead: an ESM-only entry whose static import graph references zero node-only modules, so node/native code can NEVER reach the client bundle regardless of bundler/tree-shaking (stronger than relying on `sideEffects`/tree-shaking). It also pre-wires `browserEnv()` as the default env provider, so env works with zero config (no `pluginConfigs.env.providers` needed).
 - **The route is the contract:** `route(pattern).load(→D).parse(unknown→D).render(ctx:D→VNode).head(→HeadConfig).generate(→params[])`. The SAME `load`/`render` run at build (SSG→HTML) and on the client (DATA nav) → structural parity.
 - **One switch:** `router.mode` = `"ssg" | "spa" | "hybrid"`. `build` writes per-page data + `spa` data-renders only when it is not `"ssg"`.
 
@@ -52,7 +53,7 @@ await app.build.run();   // writes dist/<path>/index.html + (mode!==ssg) dist/_d
 ## Consumer helpers
 
 - `createApp`, `createPlugin`, `defineRoutes`, `route`, `createComponent` (spa islands).
-- env providers: `dotenv`, `processEnv`, `cloudflareBindings`, `browserEnv`.
+- env providers: `dotenv`, `processEnv`, `cloudflareBindings` (Node), `browserEnv` (browser — pre-wired as the default when importing `@moku-labs/web/browser`).
 - SEO primitives for `.head()`: `meta`, `og`, `twitter`, `jsonLd`, `canonical`, `hreflang`, `feedLink`, `buildArticleHead`.
 - Type namespaces: `Site`, `I18n`, `Router`, `Head`, `Spa`, `Content`, `Build`, `Deploy`, `Data`, `Log`, `Env`.
 
