@@ -42,6 +42,24 @@ describe("content/pipeline/markdown", () => {
     expect(html).toContain("<code");
   });
 
+  it("accepts a custom Shiki theme OBJECT (not just a bundled name)", async () => {
+    const customTheme = {
+      name: "test-warm",
+      type: "dark" as const,
+      colors: { "editor.background": "#181412", "editor.foreground": "#d4c8b8" },
+      tokenColors: [{ scope: ["keyword", "storage.type"], settings: { foreground: "#f97316" } }]
+    };
+    const html = await render("```ts\nconst x = 1;\n```", {
+      ...baseConfig,
+      shikiTheme: customTheme
+    });
+    // The custom theme renders to a <pre class="shiki test-warm"> with its bg + the
+    // keyword color inline — proving the object flows through to @shikijs/rehype.
+    expect(html).toContain("test-warm");
+    expect(html).toContain("#181412");
+    expect(html.toLowerCase()).toContain("#f97316");
+  });
+
   it("strips <script>/onerror/javascript: when trustedContent is false (sanitize LAST)", async () => {
     const md = [
       "<script>alert(1)</script>",
