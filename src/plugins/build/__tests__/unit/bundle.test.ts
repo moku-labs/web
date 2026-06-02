@@ -23,17 +23,34 @@ describe("build/phases/bundle", () => {
     expect(runner.mock.calls[0]?.[0].minify).toBe(false);
   });
 
-  it("caches hashed asset paths in state.buildCache keyed by kind", async () => {
+  it("caches hashed asset paths in state.buildCache keyed by kind (web-relative to outDir)", async () => {
     const runner = vi.fn(async () => ({
       success: true,
       outputs: [{ path: "dist/assets/styles-9f8e.css", kind: "entry-point" }]
     }));
-    const ctx = makeCtx({ config: { minify: true } });
+    const ctx = makeCtx({ config: { outDir: "./dist", minify: true } });
     await bundle(ctx, { runner, cssEntrypoints: ["styles.css"], jsEntrypoints: [] });
     const css = ctx.state.buildCache.get("css") as Record<string, string>;
-    expect(css).toEqual({ "styles-9f8e.css": "dist/assets/styles-9f8e.css" });
+    // Stored RELATIVE to outDir ("assets/…"), NOT the raw runner path — `buildAssetTags`
+    // prepends "/" to make a valid root-absolute URL.
+    expect(css).toEqual({ "styles-9f8e.css": "assets/styles-9f8e.css" });
     // JS pass had no entrypoints → not invoked, nothing cached.
     expect(ctx.state.buildCache.has("js")).toBe(false);
+  });
+
+  it("normalizes an ABSOLUTE runner output path to a web-relative asset path", async () => {
+    // Regression: Bun.build returns absolute paths. Storing them verbatim produced a broken
+    // protocol-relative URL ("//Users/.../main.css") that no browser could load.
+    const runner = vi.fn(async () => ({
+      success: true,
+      outputs: [{ path: "/Users/me/proj/dist/assets/main-abc123.css", kind: "entry-point" }]
+    }));
+    const ctx = makeCtx({ config: { outDir: "/Users/me/proj/dist", minify: true } });
+    await bundle(ctx, { runner, cssEntrypoints: ["styles.css"], jsEntrypoints: [] });
+    const css = ctx.state.buildCache.get("css") as Record<string, string>;
+    expect(css).toEqual({ "main-abc123.css": "assets/main-abc123.css" });
+    // No leading slash → "/" + value is a single-slash root-absolute URL.
+    expect(Object.values(css)[0]?.startsWith("/")).toBe(false);
   });
 
   it("skips a pass with no entrypoints (no runner call)", async () => {
