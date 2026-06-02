@@ -84,6 +84,29 @@ describe("build/phases/locale-redirects", () => {
     expect(html).toContain('rel="canonical"');
   });
 
+  it("still emits bare-path redirects when generate() supplies the locale param", async () => {
+    // Regression guard: real routes return params WITH `lang` from generate() (pages need it). The
+    // phase must strip `lang` to derive the bare path — otherwise the "bare" URL already carries the
+    // locale, target === bareUrl, and ZERO redirects are written (the prior bug).
+    const pattern = "/{lang:?}/about/";
+    const routeDef = {
+      pattern,
+      _meta: {},
+      _handlers: { generate: async () => [{ lang: "en" }] }
+    } as unknown as RouteDefinition;
+    const ctx = makeCtx({
+      config: { outDir: tmp, localeRedirects: true },
+      requireMap: {
+        router: { manifest: () => [routeDef], entries: makeEntries([{ name: "about", pattern }]) },
+        i18n: { locales: () => ["en", "uk"], defaultLocale: () => "en" }
+      }
+    });
+    const result = await generateLocaleRedirects(ctx);
+    expect(result?.written).toBeGreaterThan(0);
+    const html = readFileSync(path.join(tmp, "about", "index.html"), "utf8");
+    expect(html).toContain("/en/about/");
+  });
+
   it("never writes a Cloudflare _redirects catch-all file", async () => {
     const ctx = ctxWith([{ name: "about", pattern: "/{lang:?}/about/" }]);
     await generateLocaleRedirects(ctx);

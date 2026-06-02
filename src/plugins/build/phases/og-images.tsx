@@ -351,7 +351,11 @@ export async function generateOgImages(
         try {
           const png = await renderPng(input);
           await mkdir(outDir, { recursive: true });
-          await writeFile(path.join(outDir, `${key}.png`), png);
+          // Name the PNG by the URL-clean `slug`, NOT `loadAll`'s reassigned `${locale}:${index}:${slug}`
+          // contentId. Route loaders see `load()`'s contentId === slug (and `computed.slug`), so the file
+          // must be `/og/{slug}.png` for a consumer's `og:image` to resolve. The hash CACHE key stays
+          // `contentId` (stable + unique across locales).
+          await writeFile(path.join(outDir, `${article.computed.slug}.png`), png);
           cache.set(key, hash);
           rendered += 1;
         } finally {

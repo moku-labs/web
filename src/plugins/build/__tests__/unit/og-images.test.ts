@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -72,6 +72,21 @@ describe("build/phases/og-images", () => {
     expect(ctx.state.ogImageHashCache.get("fresh")).toBe(
       ogHash(inputFor("Hello World"), "default", fontsKey())
     );
+  });
+
+  it("names the PNG by the URL-clean slug, not the loadAll contentId", async () => {
+    // The build assigns contentId = `${locale}:${index}:${slug}`, but a consumer's og:image URL is
+    // `/og/{slug}.png` (route loaders see contentId === slug). The written file must use slug.
+    const article = makeArticle({
+      computed: { ...makeArticle().computed, slug: "my-post", contentId: "en:0007:my-post" }
+    });
+    const ctx = ogCtx(tmp, [article]);
+    const renderPng = vi.fn(async () => new Uint8Array([1]));
+
+    await generateOgImages(ctx, { renderPng });
+
+    expect(existsSync(path.join(tmp, "og", "my-post.png"))).toBe(true);
+    expect(existsSync(path.join(tmp, "og", "en:0007:my-post.png"))).toBe(false);
   });
 
   it("bounds concurrency to <=4 via p-limit", async () => {
