@@ -22,12 +22,10 @@ export type Config = {
 // biome-ignore lint/complexity/noBannedTypes: framework declares no global events; plugins own theirs.
 export type Events = {};
 
-const defaultConfig: Config = { mode: "production" };
-
 export const coreConfig = createCoreConfig<Config, Events, [typeof logPlugin, typeof envPlugin]>(
   "web",
   {
-    config: defaultConfig,
+    config: { mode: "production" },
     plugins: [logPlugin, envPlugin],
     pluginConfigs: {
       // Core-plugin defaults (levels 1–2 of the 4-level core cascade, spec/03 §5).
