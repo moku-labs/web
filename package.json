@@ -111,5 +111,6 @@
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
     "test:coverage": "vitest run --project unit --project integration --coverage"
-  }
+  },
+  "version": "0.5.3"
 }
