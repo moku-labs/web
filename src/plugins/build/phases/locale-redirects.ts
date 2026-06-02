@@ -93,9 +93,15 @@ async function expandRedirects(
   const jobs: Array<{ file: string; target: string }> = [];
   for (const raw of parameterSets) {
     const params = (raw ?? {}) as Record<string, string>;
-    const file = entry.toFile(params);
-    const target = entry.toUrl({ ...params, lang: defaultLocale });
-    const bareUrl = entry.toUrl(params);
+    // Compute the BARE (locale-less) path by stripping `lang`. `generate()` supplies `lang` (pages
+    // need it), so using `params` as-is makes the "bare" URL already carry the locale →
+    // target === bareUrl → NO redirect is ever emitted. Removing `lang` yields the real lang-less
+    // file/URL (`/`, `/about/`, `/{slug}/`) that must redirect to the default-locale URL.
+    const bareParams = { ...params };
+    delete bareParams.lang;
+    const file = entry.toFile(bareParams);
+    const target = entry.toUrl({ ...bareParams, lang: defaultLocale });
+    const bareUrl = entry.toUrl(bareParams);
     if (target !== bareUrl) jobs.push({ file, target });
   }
   return jobs;
