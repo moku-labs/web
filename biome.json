@@ -41,7 +41,7 @@
   },
   "overrides": [
     {
-      "includes": ["src/index.ts", "src/plugins/index.ts"],
+      "includes": ["src/index.ts", "src/browser.ts", "src/plugins/index.ts"],
       "assist": {
         "actions": { "source": { "organizeImports": "off" } }
       }

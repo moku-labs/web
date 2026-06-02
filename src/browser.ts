@@ -26,33 +26,42 @@ import { routerPlugin } from "./plugins/router";
 import { sitePlugin } from "./plugins/site";
 import { spaPlugin } from "./plugins/spa";
 
+// ─── Plugin instances (browser-safe; node-only content/build/deploy omitted) ──
+export { sitePlugin } from "./plugins/site";
+export { i18nPlugin } from "./plugins/i18n";
+export { routerPlugin } from "./plugins/router";
+export { headPlugin } from "./plugins/head";
+export { spaPlugin } from "./plugins/spa";
 export { dataPlugin } from "./plugins/data";
-export * as Data from "./plugins/data/types";
 export { envPlugin } from "./plugins/env";
+export { logPlugin } from "./plugins/log";
+
+// ─── env provider (browser-only; also the pre-wired default below) ────────────
 export { browserEnv } from "./plugins/env/providers.browser";
-export * as Env from "./plugins/env/types";
+
+// ─── Consumer helpers: route DSL, SPA islands, SEO <head> primitives ──────────
+export { defineRoutes, route } from "./plugins/router";
+export { createComponent } from "./plugins/spa";
 export {
   buildArticleHead,
   canonical,
   feedLink,
-  headPlugin,
   hreflang,
   jsonLd,
   meta,
   og,
   twitter
 } from "./plugins/head";
+
+// ─── Plugin type namespaces (node-only Build/Content/Deploy omitted) ──────────
+export * as Data from "./plugins/data/types";
+export * as Env from "./plugins/env/types";
 export * as Head from "./plugins/head/types";
-export { i18nPlugin } from "./plugins/i18n";
-export { logPlugin } from "./plugins/log";
 export * as Log from "./plugins/log/types";
-export { defineRoutes, route, routerPlugin } from "./plugins/router";
 export * as Router from "./plugins/router/types";
-export { sitePlugin } from "./plugins/site";
-export { createComponent, spaPlugin } from "./plugins/spa";
 export * as Spa from "./plugins/spa/types";
 
-const framework = createCore(coreConfig, {
+const core = createCore(coreConfig, {
   // Same isomorphic defaults as `src/index.ts`. Imported per-path (never the
   // `./plugins` barrel) so the node-only plugins stay out of this graph.
   plugins: [sitePlugin, i18nPlugin, routerPlugin, headPlugin, spaPlugin],
@@ -91,7 +100,7 @@ const framework = createCore(coreConfig, {
  * app.env.get("PUBLIC_API_URL"); // resolved from import.meta.env
  * ```
  */
-export const createApp = framework.createApp;
+export const createApp = core.createApp;
 
 /**
  * Create a custom plugin bound to this framework's `Config`/`Events` and core
@@ -108,4 +117,4 @@ export const createApp = framework.createApp;
  * const app = createApp({ plugins: [analytics] });
  * ```
  */
-export const createPlugin = framework.createPlugin;
+export const createPlugin = core.createPlugin;
