@@ -233,4 +233,10 @@ export type Api = {
    * @param article - The source article.
    */
   articleToCard(article: Article): ArticleCard;
+  /**
+   * The configured content source directory (e.g. `"./content"`). Lets the build copy each
+   * article's co-located assets (`<contentDir>/<slug>/images/`) into the output so the absolute
+   * image URLs the renderer emits resolve.
+   */
+  contentDir(): string;
 };

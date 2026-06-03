@@ -282,6 +282,7 @@ export type PhaseName =
   | "content"
   | "images"
   | "pages"
+  | "content-images"
   | "feeds"
   | "sitemap"
   | "og-images"
