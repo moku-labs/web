@@ -140,6 +140,7 @@ await app.start();
 | `content` | ➕ node-only | Markdown pipeline → sanitized HTML, frontmatter, reading time, locale model |
 | `build` | ➕ node-only | SSG orchestrator: pages, feeds (RSS/Atom/JSON), sitemap, OG images |
 | `deploy` | ➕ node-only | Cloudflare Pages: `wrangler.jsonc` scaffolding + deploy |
+| `cli` | ➕ node-only | Developer CLI — `build`/`serve`/`preview`/`deploy` with a boxed Panel renderer + live build progress; driven from thin per-command scripts (deploy confirm is TTY-only, CI auto-proceeds) |
 | `data` | ➕ optional provider | Agnostic: Node `write()` persists per-page JSON (keyed by URL); browser `at()` fetches it for `spa` DATA nav (validated via `route.parse`) |
 | `log`, `env` | ✅ core | Structured logging + validated environment access |
 
