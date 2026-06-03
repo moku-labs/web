@@ -8,6 +8,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { bundle } from "./phases/bundle";
 import { loadContent } from "./phases/content";
+import { copyContentImages } from "./phases/content-images";
 import { generateFeeds } from "./phases/feeds";
 import { processImages } from "./phases/images";
 import { generateLocaleRedirects } from "./phases/locale-redirects";
@@ -31,6 +32,7 @@ export const PHASE_ORDER: readonly PhaseName[] = [
   "content",
   "images",
   "pages",
+  "content-images",
   "feeds",
   "sitemap",
   "og-images",
@@ -142,7 +144,8 @@ export async function runPipeline(
   // Phase 1 — bundle.
   await withPhase(phaseContext, "bundle", () => bundle(phaseContext));
 
-  // Phase 2 — content + images (parallel; content delegates to the content plugin).
+  // Phase 2 — content + images + content-images (parallel; content delegates to the content plugin,
+  // content-images copies each article's co-located images next to its locale pages by convention).
   await Promise.all([
     withPhase(phaseContext, "content", () => loadContent(phaseContext)),
     withPhase(phaseContext, "images", () => processImages(phaseContext))
@@ -150,6 +153,10 @@ export async function runPipeline(
 
   // Phase 3 — pages.
   const pages = await withPhase(phaseContext, "pages", () => renderPages(phaseContext));
+
+  // Phase 3.5 — content-images. Runs after `pages` so the article tree is fully written before
+  // co-located images are copied into the shared `<outDir>/<slug>/images/` dirs.
+  await withPhase(phaseContext, "content-images", () => copyContentImages(phaseContext));
 
   // Phase 4 — feeds + sitemap + og-images (gated; allSettled).
   await runOutputs(phaseContext);

@@ -57,6 +57,25 @@ function articleToUrl(locale: string, slug: string): string {
   return `/${locale}/${slug}/`;
 }
 
+/** Matches an `<img>` `src` that points at the co-located `images/` dir (relative or root-relative). */
+const RELATIVE_IMAGE_SRC = /(<img\b[^>]*?\bsrc=")(?:\.?\/)?images\//g;
+
+/**
+ * Rewrite relative co-located image URLs (`./images/x.webp`) in rendered article HTML to the shared
+ * absolute path the build copies them to (`/<slug>/images/...`), so they resolve from any locale page.
+ *
+ * @param html - The rendered article HTML.
+ * @param slug - Article directory name.
+ * @returns The HTML with image `src`s rewritten to absolute paths.
+ * @example
+ * ```ts
+ * rewriteImageUrls('<img src="./images/a.webp">', "post"); // '<img src="/post/images/a.webp">'
+ * ```
+ */
+function rewriteImageUrls(html: string, slug: string): string {
+  return html.replaceAll(RELATIVE_IMAGE_SRC, `$1/${slug}/images/`);
+}
+
 /**
  * Build the canonical "article not found" error for {@link createContentApi.load}.
  * Centralised so the null-resolve path and the production draft-suppression path
@@ -190,7 +209,7 @@ async function readArticle(
 
   const { frontmatter, body } = parseFrontmatter(raw, ctx.config);
   const processor = ensureProcessor(ctx.state, ctx.config);
-  const html = String(await processor.process(body));
+  const html = rewriteImageUrls(String(await processor.process(body)), slug);
   const { readingTime, wordCount } = calculateReadingTime(body);
   const status: "published" | "draft" = frontmatter.draft ? "draft" : "published";
 
@@ -427,6 +446,19 @@ export function createContentApi(ctx: ContentApiContext): Api {
      */
     articleToCard(article: Article): ArticleCard {
       return toCard(article);
+    },
+
+    /**
+     * The configured content source directory (e.g. `"./content"`).
+     *
+     * @returns The content directory path from config.
+     * @example
+     * ```ts
+     * api.contentDir(); // "./content"
+     * ```
+     */
+    contentDir(): string {
+      return ctx.config.contentDir;
     }
   };
 }
