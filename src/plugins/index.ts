@@ -5,6 +5,7 @@
 
 // ─── Plugin Instances (alphabetical) ─────────────────────────
 export { buildPlugin } from "./build";
+export { cliPlugin } from "./cli";
 export { contentPlugin } from "./content";
 export { dataPlugin } from "./data";
 export { deployPlugin } from "./deploy";
@@ -20,6 +21,7 @@ export { spaPlugin } from "./spa";
 // Consumers access as Router.RouteDefinition, Content.Article, etc.
 // site + i18n (Micro) keep types inline and have no namespace entry.
 export * as Build from "./build/types";
+export * as Cli from "./cli/types";
 export * as Content from "./content/types";
 export * as Data from "./data/types";
 export * as Deploy from "./deploy/types";

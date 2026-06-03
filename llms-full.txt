@@ -45,7 +45,7 @@ await app.start();
 - Returns a frozen `app` exposing `app.start()`, `app.stop()`, and each plugin's API at `app.<name>` (e.g. `app.build`, `app.data`, `app.spa`, `app.content`).
 
 **Defaults (isomorphic):** `site`, `i18n`, `router`, `head`, `spa` + `log`/`env` core.
-**Node-only (compose explicitly):** `content`, `build`, `deploy`, `data`.
+**Node-only (compose explicitly):** `content`, `build`, `deploy`, `data`, `cli`.
 
 Cross-plugin access is a synchronous PULL via `ctx.require(plugin)` (resolved by name); events
 are notification-only (no request/response over events). `ctx.has(name)` checks registration.
@@ -192,4 +192,4 @@ Compose a provider per target via `env: { providers: [...] }`:
 - Single mode (`router.mode`); no parallel runtime / hand-rolled `boot()`; everything flows through the factory chain.
 
 ## Per-plugin READMEs
-site · i18n · router · head · spa · content · build · deploy · data · log · env — see `src/plugins/<name>/README.md`.
+site · i18n · router · head · spa · content · build · deploy · data · cli · log · env — see `src/plugins/<name>/README.md`.
