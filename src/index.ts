@@ -29,7 +29,10 @@ export { cloudflareBindings, dotenv, processEnv } from "./plugins/env/providers"
 export { browserEnv } from "./plugins/env/providers.browser";
 
 // ─── Consumer helpers: route DSL, SPA islands, SEO <head> primitives ──────────
-export { defineRoutes, route } from "./plugins/router";
+export { createUrls, defineRoutes, route } from "./plugins/router";
+// Browser-safe by-name handle for resolving the node-only content plugin inside a
+// route loader (`ctx.require(contentRef)`) — pure literal, no node code.
+export { contentRef } from "./plugins/content/ref";
 export { createComponent } from "./plugins/spa";
 export {
   buildArticleHead,

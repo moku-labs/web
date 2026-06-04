@@ -229,7 +229,7 @@ export interface SpaKernelDeps {
   /**
    * The OPTIONAL `data` reader. Present only when the `data` plugin is composed.
    * When present (and `router.mode() !== "ssg"`), navigation first tries the client
-   * DATA path (match → `dataAt(path)` → `route.parse` → `route.render`); otherwise
+   * DATA path (match → `dataAt(path)` → `route.render`); otherwise
    * it always uses HTML-over-fetch.
    */
   dataAt?: SpaDataReader;

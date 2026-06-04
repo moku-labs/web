@@ -7,7 +7,7 @@ import { i18nPlugin } from "../i18n";
 import { sitePlugin } from "../site";
 import { createApi } from "./api";
 import { buildRouterTable } from "./builders/compile";
-import { defineRoutes, route } from "./builders/route-builder";
+import { createUrls, defineRoutes, route } from "./builders/route-builder";
 import { createState } from "./state";
 import type { RouterConfig } from "./types";
 
@@ -35,7 +35,7 @@ const defaultConfig: RouterConfig = { routes: {}, mode: "hybrid" };
  */
 export const routerPlugin = createPlugin("router", {
   depends: [sitePlugin, i18nPlugin],
-  helpers: { route, defineRoutes },
+  helpers: { route, defineRoutes, createUrls },
   config: defaultConfig,
   createState,
   api: createApi,
@@ -46,4 +46,4 @@ export const routerPlugin = createPlugin("router", {
     ctx.state.table = buildRouterTable(ctx.config, baseUrl, i18n.locales(), i18n.defaultLocale());
   }
 });
-export { defineRoutes, route } from "./builders/route-builder";
+export { createUrls, defineRoutes, route } from "./builders/route-builder";

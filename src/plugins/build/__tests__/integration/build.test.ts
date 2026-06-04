@@ -55,7 +55,7 @@ function RawArticle(props: { html: string }) {
 function buildApp(outDir: string, bySlug: Map<string, Article>, extraPlugins: unknown[] = []) {
   const articleRoute = route("/{slug}/")
     .generate(() => [...bySlug.keys()].map(slug => ({ slug })))
-    .load(({ slug }) => bySlug.get(slug ?? ""))
+    .load(ctx => bySlug.get(ctx.params.slug ?? ""))
     .render(ctx => h(RawArticle, { html: (ctx.data as Article).html }) as ReturnType<typeof h>)
     .head(ctx => ({ title: (ctx.data as Article).frontmatter.title }));
   const homeRoute = route("/")

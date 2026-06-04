@@ -65,9 +65,9 @@ cross-plugin data is a synchronous PULL via `ctx.require`, never an event.
   the build-id meta tag, and write `outDir/<path>/index.html`. Renders concurrently
   via `Promise.all`. Captures the default (`/`) page for the root index. **When
   `router.mode() !== "ssg"` and the optional `data` plugin is composed**, this same
-  expansion also persists each page's `load()` output as JSON via `app.data.write(...)`
-  (one file per page URL) — feeding `spa`'s client DATA navigation. `assertDataValidators`
-  fails the build if a data-navigable route (`render` + `load`) lacks a `.parse()` validator.
+  expansion also persists each client-navigable page's data (the `load()` output, or `{}`
+  for a no-`load` static route) as JSON via `app.data.write(...)` (one file per page URL) —
+  feeding `spa`'s client DATA navigation.
 - **Phase 4 — feeds + sitemap + og-images** (parallel, `Promise.allSettled`). Each is
   gated by its config flag, so one failure is reported without losing the others.
 - **Phase 5 — root-index.** Write the captured default-page HTML to `outDir/index.html`.

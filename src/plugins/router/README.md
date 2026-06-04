@@ -11,16 +11,19 @@ compile-time path-param inference (`ExtractRouteParams`), and a runtime matcher
 ## Public surface
 
 ```ts
-import { createApp, defineRoutes, route } from "@moku-labs/web";
+import { createApp, defineRoutes, route, createUrls } from "@moku-labs/web";
 
 const routes = defineRoutes({
-  home: route("/").render(() => <Home />),
+  home: route("/").render(() => <Home />),     // no .load() — optional
   article: route("/{lang:?}/{slug}/")
-    .load(({ slug }) => loadArticle(slug))      // typed → ctx.data
-    .parse((raw) => ArticleSchema.parse(raw))    // client trust-boundary validator (data nav)
+    .load((ctx) => loadArticle(ctx.params.slug, ctx.locale))  // ctx.data is typed from the return
     .render((ctx) => <Article article={ctx.data} />)
     .head((ctx) => ({ title: ctx.data.title }))
 });
+
+// Build link hrefs with no app/router reference — a PURE helper over the map:
+const url = createUrls(routes);
+url.toUrl("article", { lang: "en", slug: "hello" }); // "/en/hello/"
 
 const app = createApp({
   pluginConfigs: {
@@ -31,9 +34,15 @@ const app = createApp({
 });
 ```
 
-The data generic threads `load → parse → render`: `.parse` MUST return `.load`'s type
-(a mismatch is a compile error), and `ctx.data` in `.render`/`.head` is that type. On the
-client, `spa` runs `.parse` on the fetched JSON (validate `unknown → data`) before `.render`.
+`ctx.data` in `.render`/`.head` is typed from **`.load()`'s return**; `.load` is OPTIONAL. On a
+client nav `spa` uses the fetched JSON (which the build wrote from `load()`) directly as
+`ctx.data` — no validation step; a missing/malformed file falls back to HTML-over-fetch.
+`.load`/`.generate` receive a single `ctx` (`{ params, locale, require, has }`), so a loader
+pulls sibling plugin APIs via `ctx.require(contentRef)` with no module global.
+
+`createUrls`, `route`, and `defineRoutes` are pure `helpers` (run before `createApp`, no `ctx`):
+`createUrls(routes).toUrl(name, params)` builds a link by name + params via pattern substitution
+— the cycle-free replacement for stashing `app.router` in a module global.
 
 ## API (`ctx.require(routerPlugin)`)
 
@@ -42,7 +51,7 @@ client, `spa` runs `.parse` on the fetched JSON (validate `unknown → data`) be
 | `match(pathname)` | `{ params, route } \| null` | Scans the specificity-sorted table; most specific wins. |
 | `toUrl(name, params)` | `string` | Substitutes `{param}` / `{param:?}`; throws on an unknown name. |
 | `entries()` | `readonly TypedRoute[]` | URL-utility view in **specificity** order (for `spa`/`head`). |
-| `manifest()` | `readonly RouteDefinition[]` | Full definitions with `_handlers` (incl. `parse`), in **declaration** order (for `build`). |
+| `manifest()` | `readonly RouteDefinition[]` | Full definitions with `_handlers` (load/render/head/generate), in **declaration** order (for `build`). |
 | `mode()` | `"ssg" \| "spa" \| "hybrid"` | Resolved render mode — the single source of truth `build`/`spa` read to gate data nav. |
 
 ## Matching model

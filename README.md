@@ -41,8 +41,8 @@ const routes = defineRoutes({
     .render(() => <h1>My Blog</h1>)
     .head(() => ({ title: "My Blog" })),
   article: route("/{lang:?}/{slug}/")
-    .generate((locale) => listSlugs(locale).map((slug) => ({ lang: locale, slug })))
-    .load(({ slug }, locale) => loadArticle(slug, locale)) // widens ctx.data
+    .generate((ctx) => listSlugs(ctx.locale).map((slug) => ({ lang: ctx.locale, slug })))
+    .load((ctx) => loadArticle(ctx.params.slug, ctx.locale)) // widens ctx.data
     .render((ctx) => <Article article={ctx.data} />)
     .head((ctx) => ({ title: ctx.data.title, description: ctx.data.description }))
 });
@@ -84,7 +84,7 @@ Two entry points pick the right surface per target:
 - **`@moku-labs/web/browser`** (ESM-only) — the recommended **client/browser** entry. It
   re-exports the SAME `createApp`/`createPlugin` over the SAME isomorphic default set
   (`site`, `i18n`, `router`, `head`, `spa` + `log`/`env`), plus `dataPlugin`, `defineRoutes`,
-  `route`, `createComponent`, `browserEnv`, the SEO head primitives, and the browser-relevant type namespaces
+  `route`, `createUrls`, `contentRef`, `createComponent`, `browserEnv`, the SEO head primitives, and the browser-relevant type namespaces
   (`Data`, `Env`, `Head`, `Log`, `Router`, `Spa`). It **excludes** everything node-only
   (`contentPlugin`, `buildPlugin`, `deployPlugin`, the `dotenv`/`processEnv`/`cloudflareBindings`
   env providers, and the `Build`/`Content`/`Deploy` type namespaces), and **pre-wires
@@ -103,15 +103,16 @@ built browser bundle has zero static node/native imports and stays under a gzip 
 `data` is a special case — an **optional, domain-agnostic data provider**: composed on
 Node, `build` calls `data.write(...)` to persist each page's real `load()` output as JSON
 (one file per page URL); composed in the browser, `data.at(path)` fetches that JSON and
-`spa` re-runs the route's own `render` from it (validated through the route's `parse`
-gate) instead of fetching full HTML. The route owns rendering — the SAME `render` runs at
+`spa` re-runs the route's own `render` from it instead of fetching full HTML. The route owns rendering — the SAME `render` runs at
 build (SSG) and on the client, so parity is structural. Add `data` on both sides for
 client DATA navigation; omit it for a plain static site (HTML-over-fetch).
 
 The single switch is **`router.mode`** (`"ssg" | "spa" | "hybrid"`): `build` writes data +
-`spa` data-renders only when it is not `"ssg"`. A route that opts into data nav MUST
-declare `.parse(raw => data)` (validated at the client trust boundary) — `build` errors
-otherwise.
+`spa` data-renders only when it is not `"ssg"`. On a client nav the fetched JSON (which the
+build wrote from `load()`) is used directly as `ctx.data` — no validation step; a missing or
+malformed file simply falls back to HTML-over-fetch. `ctx.data` is typed from `.load()`'s
+return. A route may also omit `.load()` entirely (a static page); `build` still emits an
+empty `{}` data sidecar so hybrid nav resolves cleanly.
 
 A browser entry is `createApp(...).start()` imported from `@moku-labs/web/browser` over the
 defaults (plus `dataPlugin` for DATA nav) — `spa`'s `onStart` mounts islands onto the SSR'd
@@ -134,14 +135,14 @@ await app.start();
 |---|---|---|
 | `site` | ✅ isomorphic | Site identity (name, URL, author) + canonical URL helper |
 | `i18n` | ✅ isomorphic | Locales, default-locale fallback, translations, hreflang/ogLocale maps |
-| `router` | ✅ isomorphic | Type-safe route DSL (`route`/`defineRoutes`) with `.load`/`.render`/`.parse`, matching, `mode()`, URL/file derivation |
+| `router` | ✅ isomorphic | Type-safe route DSL (`route`/`defineRoutes`) — optional `.load` (receives one `ctx`), `.render`/`.head`/`.generate`; pure `createUrls(routes)` link builder; matching, `mode()`, URL/file derivation |
 | `head` | ✅ isomorphic | SEO `<head>` composition: title template, canonical, OG/Twitter, JSON-LD, hreflang |
 | `spa` | ✅ isomorphic | Client runtime: island hydration + intercepted navigation (inert on Node) |
 | `content` | ➕ node-only | Markdown pipeline → sanitized HTML, frontmatter, reading time, locale model |
 | `build` | ➕ node-only | SSG orchestrator: pages, feeds (RSS/Atom/JSON), sitemap, OG images |
 | `deploy` | ➕ node-only | Cloudflare Pages: `wrangler.jsonc` scaffolding + deploy |
 | `cli` | ➕ node-only | Developer CLI — `build`/`serve`/`preview`/`deploy` with a boxed Panel renderer + live build progress; driven from thin per-command scripts (deploy confirm is TTY-only, CI auto-proceeds) |
-| `data` | ➕ optional provider | Agnostic: Node `write()` persists per-page JSON (keyed by URL); browser `at()` fetches it for `spa` DATA nav (validated via `route.parse`) |
+| `data` | ➕ optional provider | Agnostic: Node `write()` persists per-page JSON (keyed by URL); browser `at()` fetches it for `spa` DATA nav (used directly as `ctx.data`) |
 | `log`, `env` | ✅ core | Structured logging + validated environment access |
 
 SEO primitives are exported for route `.head()` handlers: `meta`, `og`, `twitter`, `jsonLd`,

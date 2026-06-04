@@ -60,7 +60,7 @@ export function dataApi(ctx: DataPluginContext): DataProvider {
   return {
     /**
      * READ (browser) — fetch (and cache) the persisted data for a page path.
-     * Returns the raw JSON as `unknown` (the caller's `route.parse` validates it),
+     * Returns the raw JSON as `unknown` (the route uses it directly as `ctx.data`),
      * or `null` if the fetch/parse fails (so `spa` can fall back to HTML).
      *
      * @param path - The page URL path (e.g. `/en/hello/`).

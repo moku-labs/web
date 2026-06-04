@@ -40,7 +40,11 @@ export { logPlugin } from "./plugins/log";
 export { browserEnv } from "./plugins/env/providers.browser";
 
 // ─── Consumer helpers: route DSL, SPA islands, SEO <head> primitives ──────────
-export { defineRoutes, route } from "./plugins/router";
+export { createUrls, defineRoutes, route } from "./plugins/router";
+// Browser-safe by-name handle for resolving the (node-only) content plugin inside a
+// route loader at build time (`ctx.require(contentRef)`) — pure literal, type-only
+// import, so it stays out of the client runtime graph (bundle-safety gate).
+export { contentRef } from "./plugins/content/ref";
 export { createComponent } from "./plugins/spa";
 export {
   buildArticleHead,

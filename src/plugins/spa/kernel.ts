@@ -188,8 +188,10 @@ export function createSpaKernel(
     try {
       const raw = await deps.dataAt(pathname); // persisted JSON (unknown) — null on miss
       if (raw === null) return false;
-      // Trust boundary: validate unknown → the route's data type, or throw → fallback.
-      const data = hit.route._handlers.parse ? hit.route._handlers.parse(raw) : raw;
+      // The persisted JSON IS this page's payload (the build wrote it from `load()`),
+      // used directly as `ctx.data`. A malformed/missing file already degrades to the
+      // HTML-over-fetch fallback (dataAt → null, or the surrounding try/catch).
+      const data = raw;
       const locale = hit.params.lang ?? document.documentElement.lang ?? "";
       const routeContext: RouteContext<RouteState> = { params: hit.params, data, locale };
       // NB: the route's `.layout()` is intentionally NOT applied here. The layout

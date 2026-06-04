@@ -62,6 +62,84 @@ export interface RouteContext<S extends RouteState> {
 }
 
 /**
+ * Structural extraction of a plugin instance's public API from its `_phantom`
+ * carrier (mirrors the kernel's non-exported `ExtractPluginApi` and the build
+ * plugin's `ExtractApi`). Lets the loader/generator `require` closure resolve a
+ * plugin instance — or a structural by-name handle — to its typed public API.
+ *
+ * @example
+ * type ContentApi = ExtractApi<typeof contentPlugin>;
+ */
+export type ExtractApi<PluginCandidate> = PluginCandidate extends {
+  readonly _phantom: { readonly api: infer PluginApi };
+}
+  ? PluginApi
+  : never;
+
+/**
+ * Generic `require` closure handed to a route's `.load()` / `.generate()` at build
+ * time. Resolves a plugin instance (or a structural by-name handle, e.g. content's
+ * `contentRef`) to its public API — the SAME shape the kernel / `PhaseContext`
+ * expose, so the build forwards its own `ctx.require` straight through.
+ *
+ * @example
+ * const content = ctx.require(contentRef); // ContentApi
+ */
+export type RouteRequire = <
+  PluginCandidate extends {
+    readonly name: string;
+    readonly spec: unknown;
+    readonly _phantom: {
+      readonly config: unknown;
+      readonly state: unknown;
+      readonly api: unknown;
+      readonly events: Record<string, unknown>;
+    };
+  }
+>(
+  plugin: PluginCandidate
+) => ExtractApi<PluginCandidate>;
+
+/**
+ * Build-time context handed to a route's `.load()`. Carries the resolved path
+ * `params` and active `locale`, plus `require`/`has` so a loader can pull sibling
+ * plugin APIs (e.g. `ctx.require(contentRef).loadAll()`) without a module global.
+ * Loaders run ONLY at build time (never on the client), inside the build plugin's
+ * context — so `require`/`has` are always live here.
+ *
+ * @example
+ * route("/{slug}/").load(async (ctx) => ctx.require(contentRef).load(ctx.params.slug, ctx.locale));
+ */
+export interface LoadContext<S extends RouteState> {
+  /** Resolved path params for this page instance. */
+  readonly params: S["params"];
+  /** Active locale this page instance is built for. */
+  readonly locale: string;
+  /** Resolve a sibling plugin instance / by-name handle to its public API. */
+  readonly require: RouteRequire;
+  /** Whether a plugin is registered (by name) — branch on OPTIONAL plugins. */
+  readonly has: (name: string) => boolean;
+}
+
+/**
+ * Build-time context handed to a route's `.generate()` — the static-param producer.
+ * Carries the active `locale` plus `require`/`has` (no `params` yet — `.generate()`
+ * PRODUCES the param sets). Same build-only guarantee as {@link LoadContext}.
+ *
+ * @example
+ * route("/{slug}/").generate(async (ctx) =>
+ *   [...(await ctx.require(contentRef).loadAll()).get(ctx.locale) ?? []].map((a) => ({ slug: a.computed.slug })));
+ */
+export interface GenerateContext {
+  /** Active locale to enumerate param sets for. */
+  readonly locale: string;
+  /** Resolve a sibling plugin instance / by-name handle to its public API. */
+  readonly require: RouteRequire;
+  /** Whether a plugin is registered (by name). */
+  readonly has: (name: string) => boolean;
+}
+
+/**
  * Context handed to a route's `.layout()` wrapper: the render-time
  * {@link RouteContext} plus the route's `.meta()` bag, so persistent chrome (e.g. a
  * TopBar/TabNav) can read `locale` and `meta.activeTab`. Distinct from
@@ -98,7 +176,7 @@ export interface RouteBuilder<S extends RouteState> extends RouteDefinition {
    * `.render()`/`.head()` see its return. Path params are preserved unchanged.
    */
   load<D>(
-    loader: (params: S["params"], locale: string) => D | Promise<D>
+    loader: (ctx: LoadContext<S>) => D | Promise<D>
   ): RouteBuilder<{ readonly params: S["params"]; readonly data: Awaited<D> }>;
   /**
    * Attach a ctx-aware layout wrapper that frames this route's rendered page in
@@ -110,19 +188,12 @@ export interface RouteBuilder<S extends RouteState> extends RouteDefinition {
   layout(component: (ctx: LayoutContext<S>, children: ComponentChildren) => VNode): RouteBuilder<S>;
   /** Attach the page render handler. */
   render(handler: (ctx: RouteContext<S>) => VNode): RouteBuilder<S>;
-  /**
-   * Attach the client-side validation gate: parse the raw `unknown` fetched from
-   * the persisted data file back into this route's data type `S["data"]`. Runs at
-   * the trust boundary before `render` on the client (and MUST return `S["data"]`,
-   * so a mismatched schema is a compile error). Throw inside it to reject malformed
-   * data — `spa` then falls back to HTML-over-fetch. Use a hand guard or any
-   * Standard-Schema validator (zod/valibot/arktype).
-   */
-  parse(handler: (raw: unknown) => S["data"]): RouteBuilder<S>;
   /** Attach the head/SEO handler. */
   head(handler: (ctx: RouteContext<S>) => HeadConfig): RouteBuilder<S>;
-  /** Attach a static-generation param producer. */
-  generate(handler: (locale: string) => S["params"][] | Promise<S["params"][]>): RouteBuilder<S>;
+  /** Attach a static-generation param producer (receives a {@link GenerateContext}). */
+  generate(
+    handler: (ctx: GenerateContext) => S["params"][] | Promise<S["params"][]>
+  ): RouteBuilder<S>;
   /**
    * Attach an arbitrary metadata bag. The bag MUST be JSON-serializable: it is
    * projected verbatim into `clientManifest()` and shipped to the browser.
@@ -136,18 +207,16 @@ export interface RouteBuilder<S extends RouteState> extends RouteDefinition {
 
 /** Build-only handler bag captured by a `RouteBuilder` (consumed by `build` via `manifest()`). */
 export interface RouteHandlers {
-  /** Data loader. */
-  readonly load?: (params: Record<string, string>, locale: string) => unknown;
+  /** Data loader (receives a {@link LoadContext}: params + locale + require/has). */
+  readonly load?: (ctx: LoadContext<RouteState>) => unknown;
   /** Layout wrapper (ctx-aware): frames the page in persistent chrome. SSG-only. */
   readonly layout?: (ctx: LayoutContext<RouteState>, children: ComponentChildren) => VNode;
   /** Page renderer. */
   readonly render?: (ctx: RouteContext<RouteState>) => VNode;
-  /** Client-side validation gate: `unknown` (fetched JSON) → the route's data type, or throw. */
-  readonly parse?: (raw: unknown) => unknown;
   /** Head/SEO producer. */
   readonly head?: (ctx: RouteContext<RouteState>) => HeadConfig;
-  /** Static-generation param producer. */
-  readonly generate?: (locale: string) => unknown[] | Promise<unknown[]>;
+  /** Static-generation param producer (receives a {@link GenerateContext}). */
+  readonly generate?: (ctx: GenerateContext) => unknown[] | Promise<unknown[]>;
   /** JSON serializer. */
   readonly toJson?: (ctx: RouteContext<RouteState>) => unknown;
   /** Output file-path producer. */
@@ -173,6 +242,33 @@ export interface RouteDefinition {
  * base (erased) `RouteDefinition`; this is the documented generic-erasure boundary.
  */
 export type RouteMap = Record<string, RouteDefinition>;
+
+/**
+ * A pure, app-free URL builder over a route map (the return type of `createUrls`).
+ * `toUrl` builds a route's path by name + params via pattern substitution — it needs
+ * NO running app, router instance, base URL, or i18n: just the route map the consumer
+ * already holds at module scope. Works identically at build, on client navigation,
+ * and inside hydrated islands. Reuses the SAME `buildUrl` as the runtime `RouterApi`,
+ * so the helper and the API can never diverge.
+ *
+ * @example
+ * const url = createUrls(routes);
+ * url.toUrl("article", { lang: "en", slug: "hello" }); // "/en/hello/"
+ */
+export interface Urls<T extends RouteMap> {
+  /**
+   * Build a route's URL path from its name and params. The name is typed to the
+   * route map's keys — only declared routes are accepted.
+   *
+   * @param name - Route name key from the map (e.g. `"home"`, `"article"`).
+   * @param params - Path params to substitute into the pattern. Defaults to `{}`.
+   * @returns The resolved relative URL path.
+   * @throws {Error} If `name` is not present in the route map.
+   * @example
+   * url.toUrl("home", { lang: "en" }); // "/en/"
+   */
+  toUrl<K extends keyof T & string>(name: K, params?: Record<string, string>): string;
+}
 
 /**
  * Configuration for the router plugin.
@@ -325,7 +421,7 @@ export type RouterApi = {
    *
    * @returns Read-only array of the typed route definitions, in declaration order.
    * @example
-   * for (const def of ctx.require(routerPlugin).manifest()) { def._handlers.load?.({}, "en"); }
+   * for (const def of ctx.require(routerPlugin).manifest()) def._handlers.render?.(routeContext);
    */
   manifest(): readonly RouteDefinition[];
   /**

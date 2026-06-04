@@ -4,7 +4,7 @@
  * The `data` plugin is the **agnostic data provider** for the SSG→DATA→SPA pattern.
  * It owns ONE thing: the contract `page path → persisted JSON file`. It knows
  * NOTHING about what the data *is* — no domain types appear here. A route decides
- * its own data shape (`load`'s return) and its own validation (`route.parse`).
+ * its own data shape (`load`'s return).
  *
  *  - **Node (build):** `write(entries)` persists one JSON file per page, keyed by
  *    the page's URL via {@link DataProvider.fileFor}. `build` supplies the entries
@@ -80,15 +80,15 @@ export interface DataState {
  * // Node build (build supplies the entries it already expanded):
  * await app.data.write([{ path: "/en/hello/", data: article }]);
  *
- * // Browser (inside spa nav): fetch the page's data, then route.parse validates it:
+ * // Browser (inside spa nav): fetch the page's data, used directly as ctx.data:
  * const raw = await app.data.at("/en/hello/"); // unknown | null
  * ```
  */
 export type DataProvider = {
   /**
    * READ (browser) — fetch (and cache) the persisted data for a page path from
-   * `config.baseUrl`. Returns the raw parsed JSON as `unknown` (the caller's
-   * `route.parse` validates it), or `null` if the fetch/parse fails.
+   * `config.baseUrl`. Returns the raw parsed JSON as `unknown` (used directly as
+   * the route's `ctx.data`), or `null` if the fetch/parse fails.
    *
    * @param path - The page URL path (e.g. `/en/hello/`).
    * @returns The page's raw data, or `null` on failure.

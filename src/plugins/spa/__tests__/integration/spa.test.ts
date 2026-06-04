@@ -157,7 +157,6 @@ describe("spa integration", () => {
         .head(() => ({ title: "Home" })),
       doc: route("/doc/")
         .load(() => ({ body: "from-data" }))
-        .parse(raw => raw as { body: string })
         .render(
           ctx =>
             h(

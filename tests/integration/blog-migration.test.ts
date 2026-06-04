@@ -57,10 +57,8 @@ function makeMigratedBlog(outDir: string, byLocale: ArticlesByLocale) {
     .head(() => ({ title: SITE.name, description: SITE.description }));
 
   const article = route("/{lang:?}/{slug}/")
-    .generate((locale: string) => slugs(locale).map(slug => ({ lang: locale, slug })))
-    .load((params: { lang?: string; slug?: string }, locale: string) =>
-      pick(locale, params.slug ?? "")
-    )
+    .generate(ctx => slugs(ctx.locale).map(slug => ({ lang: ctx.locale, slug })))
+    .load(ctx => pick(ctx.locale, ctx.params.slug ?? ""))
     .render(ctx => h(RawArticle, { html: (ctx.data as Article).html }) as ReturnType<typeof h>)
     .head(ctx => {
       const a = ctx.data as Article;

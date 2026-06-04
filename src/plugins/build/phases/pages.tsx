@@ -18,8 +18,10 @@ import type {
 import { i18nPlugin } from "../../i18n";
 import { routerPlugin } from "../../router";
 import type {
+  GenerateContext,
   HeadConfig,
   LayoutContext,
+  LoadContext,
   RouteContext,
   RouteDefinition,
   RouteState,
@@ -164,7 +166,8 @@ function fillTemplate(template: string, parts: DocumentParts): string {
 async function expandRoute(
   definition: RouteDefinition,
   locales: readonly string[],
-  byPattern: Map<string, TypedRoute>
+  byPattern: Map<string, TypedRoute>,
+  ctx: Pick<PhaseContext, "require" | "has">
 ): Promise<PageInstance[]> {
   const entry = byPattern.get(definition.pattern);
   if (!entry) {
@@ -176,8 +179,9 @@ async function expandRoute(
   const { name } = entry;
   const instances: PageInstance[] = [];
   for (const locale of locales) {
+    const generateContext: GenerateContext = { locale, require: ctx.require, has: ctx.has };
     const generated = definition._handlers.generate
-      ? await definition._handlers.generate(locale)
+      ? await definition._handlers.generate(generateContext)
       : [{}];
     for (const raw of generated) {
       instances.push({
@@ -257,15 +261,24 @@ function adaptHeadConfig(config: HeadConfig): ComposedHeadConfig {
  * ```
  */
 async function renderInstance(
-  ctx: Pick<PhaseContext, "require" | "state" | "config">,
+  ctx: Pick<PhaseContext, "require" | "state" | "config" | "has">,
   instance: PageInstance,
   shell: { assets: string; template: string | null }
-): Promise<{ url: string; html: string; data: unknown; hasData: boolean }> {
+): Promise<{ url: string; html: string; data: unknown; clientNavigable: boolean }> {
   const { definition, entry, params, locale, name } = instance;
-  const hasData = definition._handlers.load !== undefined;
-  const data = definition._handlers.load
-    ? await definition._handlers.load(params, locale)
-    : undefined;
+  // A route is client-navigable when it has a `render` handler (the build re-runs it
+  // on client navigation). Such routes ALWAYS get a data sidecar — `{}` when there is
+  // no `.load()` — so hybrid data-nav resolves cleanly instead of falling back to a
+  // full HTML fetch. The loader receives a LoadContext (params + locale + require/has)
+  // so it can pull sibling plugin APIs (e.g. ctx.require(contentRef)) with no global.
+  const clientNavigable = definition._handlers.render !== undefined;
+  const loadContext: LoadContext<RouteState> = {
+    params,
+    locale,
+    require: ctx.require,
+    has: ctx.has
+  };
+  const data = definition._handlers.load ? await definition._handlers.load(loadContext) : {};
   const routeContext: RouteContext<RouteState> = { params, data, locale };
   const headConfig: HeadConfig | undefined = definition._handlers.head?.(routeContext);
   const url = entry.toUrl(params);
@@ -295,7 +308,7 @@ async function renderInstance(
   const filePath = join(ctx.config.outDir, entry.toFile(params));
   await mkdir(dirname(filePath), { recursive: true });
   await writeFile(filePath, html, "utf8");
-  return { url, html, data, hasData };
+  return { url, html, data, clientNavigable };
 }
 
 /**
@@ -313,38 +326,6 @@ async function renderInstance(
  * const { pageCount, rootHtml } = await renderPages(ctx);
  * ```
  */
-/**
- * Enforce the data-validation contract: in `hybrid`/`spa` mode, any route that
- * has BOTH a `render` and a `load` (so it will be client-data-navigated) MUST
- * declare a `.parse()` validator — otherwise fetched JSON would reach `render`
- * unvalidated. Converts a runtime safety hole into a build error.
- *
- * @param manifest - The route definitions from `router.manifest()`.
- * @param mode - The resolved render mode.
- * @throws {Error} If a data-navigable route is missing `.parse()` in hybrid/spa mode.
- * @example
- * ```ts
- * assertDataValidators(router.manifest(), router.mode());
- * ```
- */
-function assertDataValidators(
-  manifest: readonly RouteDefinition[],
-  mode: "ssg" | "spa" | "hybrid"
-): void {
-  if (mode === "ssg") return;
-  for (const definition of manifest) {
-    const { render, load, parse } = definition._handlers;
-    if (render && load && !parse) {
-      throw new Error(
-        `[web] build: route "${definition.pattern}" enables client data navigation ` +
-          `(router mode "${mode}") but has no .parse() validator. Add ` +
-          `.parse(raw => /* validate → data */) so fetched JSON is validated before render, ` +
-          `or set router mode "ssg" to disable data navigation.`
-      );
-    }
-  }
-}
-
 export async function renderPages(
   ctx: Pick<PhaseContext, "require" | "state" | "config" | "log" | "has">
 ): Promise<PagesResult> {
@@ -352,7 +333,6 @@ export async function renderPages(
   const manifest = router.manifest();
   ctx.state.manifest = [...manifest];
   const mode = router.mode();
-  assertDataValidators(manifest, mode);
   const byPattern = makeEntryMap(router);
   const locales = ctx.require(i18nPlugin).locales();
   // Read the shell template ONCE and compute asset tags ONCE (O(1) per page).
@@ -365,7 +345,7 @@ export async function renderPages(
   const assets = buildAssetTags(ctx);
   const shell = { assets, template };
   const instanceLists = await Promise.all(
-    manifest.map(definition => expandRoute(definition, locales, byPattern))
+    manifest.map(definition => expandRoute(definition, locales, byPattern, ctx))
   );
   const instances = instanceLists.flat();
   const rendered = await Promise.all(
@@ -375,7 +355,7 @@ export async function renderPages(
   // ONE expansion (above) feeds both the HTML and the data sidecars — no duplication.
   if (mode !== "ssg" && ctx.has("data")) {
     const entries: DataEntry[] = rendered
-      .filter(page => page.hasData)
+      .filter(page => page.clientNavigable)
       .map(page => ({ path: page.url, data: page.data }));
     if (entries.length > 0) {
       const summary = await ctx.require(dataPlugin).write(entries, { outDir: ctx.config.outDir });

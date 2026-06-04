@@ -145,7 +145,7 @@ export function createApi(ctx: RouterApiContext): RouterApi {
      * @returns A fresh read-only array of the typed route definitions.
      * @example
      * ```ts
-     * for (const def of api.manifest()) def._handlers.load?.({}, "en");
+     * for (const def of api.manifest()) def._handlers.render?.(routeContext);
      * ```
      */
     manifest() {

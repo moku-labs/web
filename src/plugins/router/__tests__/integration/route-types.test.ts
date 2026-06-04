@@ -1,6 +1,6 @@
 /* eslint-disable unicorn/no-null -- render handler stubs return `null` (valid VNode) */
 import { describe, expectTypeOf, it } from "vitest";
-import { defineRoutes, route } from "../../index";
+import { createUrls, defineRoutes, route } from "../../index";
 import type {
   ClientRoute,
   HeadConfig,
@@ -12,7 +12,7 @@ import type {
 describe("route call-site + build-consumption type proofs", () => {
   it("call-site: ctx.data in .render() equals .load()'s return type", () => {
     route("/{lang:?}/{slug}/")
-      .load(({ slug }) => ({ slug, title: `Post ${slug}`, words: 100 }))
+      .load(ctx => ({ slug: ctx.params.slug, title: `Post ${ctx.params.slug}`, words: 100 }))
       .render(ctx => {
         expectTypeOf(ctx.data).toEqualTypeOf<{ slug: string; title: string; words: number }>();
         return null as never;
@@ -39,6 +39,16 @@ describe("route call-site + build-consumption type proofs", () => {
     expectTypeOf(r._handlers).toHaveProperty("load");
     expectTypeOf(r.pattern).toBeString();
     expectTypeOf(r._meta).toEqualTypeOf<Record<string, unknown>>();
+  });
+
+  it("createUrls.toUrl is typed to the route map's names and returns a string", () => {
+    const routes = defineRoutes({
+      home: route("/{lang:?}/"),
+      article: route("/{lang:?}/{slug}/")
+    });
+    const url = createUrls(routes);
+    expectTypeOf(url.toUrl).parameter(0).toEqualTypeOf<"home" | "article">();
+    expectTypeOf(url.toUrl("home", { lang: "en" })).toBeString();
   });
 });
 
