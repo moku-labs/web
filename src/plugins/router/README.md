@@ -38,7 +38,6 @@ const app = createApp({
   }
 });
 await app.build.run();    // or: await app.start(); — routes compiled at init
-// Runtime alternative (e.g. (re-)registering dynamically): app.router.set(routes)
 ```
 
 `ctx.data` in `.render`/`.head` is typed from **`.load()`'s return**; `.load` is OPTIONAL. On a
@@ -53,13 +52,12 @@ gets page data from the `data` plugin, never by re-running loaders.
 the framework delivers, so links need no `app` reference. `route`/`defineRoutes`/`createUrls` are
 pure `helpers` (run before `createApp`, no `ctx`); the render **`mode` is a GLOBAL config option**,
 and routes are registered the normal config way via **`pluginConfigs.router.routes`** (compiled at
-init) or imperatively at runtime with **`app.router.set(routes)`**.
+init).
 
 ## API (`ctx.require(routerPlugin)`)
 
 | Method | Returns | Notes |
 |---|---|---|
-| `set(routes)` | `void` | Imperative (re-)registration — the declarative path is `pluginConfigs.router.routes`. Resolves `site`/`i18n` + the global `mode` at call time. Re-calling recompiles. |
 | `match(pathname)` | `{ params, route } \| null` | Scans the specificity-sorted table; most specific wins. |
 | `toUrl(name, params)` | `string` | Substitutes `{param}` / `{param:?}`; throws on an unknown name. |
 | `entries()` | `readonly TypedRoute[]` | URL-utility view in **specificity** order (for `spa`/`head`). |
@@ -67,9 +65,9 @@ init) or imperatively at runtime with **`app.router.set(routes)`**.
 | `clientManifest()` | `readonly ClientRoute[]` | Specificity-sorted, JSON-serializable projection (`pattern`/`name`/`meta`, NO `_handlers`) for client shipping. |
 | `mode()` | `"ssg" \| "spa" \| "hybrid"` | Resolved render mode — the single source of truth `build`/`spa` read to gate data nav. |
 
-> Routes are normally provided declaratively via `pluginConfigs.router.routes` (compiled in the
-> router's `onInit`). `set()` is the imperative runtime equivalent — use it to (re-)register routes
-> after `createApp`, e.g. in a browser app that builds routes dynamically.
+> Routes are provided declaratively via `pluginConfigs.router.routes`, compiled once in the
+> router's `onInit`. There is no imperative registration API — the config route map is the
+> single source of truth.
 
 ## Matching model
 
@@ -83,7 +81,7 @@ init) or imperatively at runtime with **`app.router.set(routes)`**.
 
 ## Generic-erasure mitigation
 
-The route map passed to `app.router.set(routes)` is an opaque carrier
+The route map passed via `pluginConfigs.router.routes` is an opaque carrier
 (`RouteMap = Record<string, RouteDefinition>`); per-route `TParams`/`TData` are erased at
 that boundary. Type safety is a **call-site** property of `route()` + `defineRoutes()`, and
 per-route definition types are recovered for build time via the `manifest()` **API return**.
@@ -92,8 +90,8 @@ See `__tests__/integration/route-types.test.ts` for the two proofs.
 ## Lifecycle
 
 Routes are registered the normal config way via **`pluginConfigs.router.routes`**, compiled in the
-router's **`onInit`**; or imperatively at runtime via **`app.router.set(routes)`**. Either path
-validates (non-empty, well-formed patterns, ≤1 `{lang:?}`) and compiles the matcher table
+router's **`onInit`**. It validates (non-empty, well-formed patterns, ≤1 `{lang:?}`) and compiles
+the matcher table
 synchronously into `ctx.state.table`, resolving `site`/`i18n` + the global render `mode` via
 `ctx.require`/`ctx.global` at call time. `onInit` is the only lifecycle hook — it compiles the config
 route map when present; there is no `onStart`/`onStop`, as the router manages no resource (a pure,

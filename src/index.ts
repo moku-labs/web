@@ -81,7 +81,7 @@ const core = createCore(coreConfig, {
  *     router: { routes }
  *   }
  * });
- * await app.build.run();   // routes compiled at init; or app.router.set(routes) at runtime
+ * await app.build.run();   // routes compiled at init
  * ```
  */
 export const createApp = core.createApp;

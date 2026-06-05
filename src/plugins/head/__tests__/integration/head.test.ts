@@ -31,10 +31,10 @@ function buildApp(headConfig: Record<string, unknown> = {}) {
     pluginConfigs: {
       site: siteConfig,
       i18n: i18nConfig,
-      head: headConfig
+      head: headConfig,
+      router: { routes: defineRoutes({ article: route("/{lang:?}/{slug}/") }) }
     }
   });
-  app.router.set(defineRoutes({ article: route("/{lang:?}/{slug}/") }));
   return app;
 }
 

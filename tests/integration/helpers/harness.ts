@@ -199,9 +199,9 @@ export function buildBlogApp(options: {
         images: false,
         ogImage: false,
         minify: false
-      }
+      },
+      router: { routes: blogRoutes(options.byLocale, localized) }
     }
   });
-  app.router.set(blogRoutes(options.byLocale, localized));
   return app;
 }

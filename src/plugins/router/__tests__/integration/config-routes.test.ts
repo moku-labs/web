@@ -1,10 +1,9 @@
 /**
  * @file Integration: routes registered the normal config way via
- * `pluginConfigs.router.routes`. Proves the router compiles the table at init
- * (manifest/match/toUrl), reads the render mode from the GLOBAL config, accepts an
- * `import * as` namespace, throws fail-fast on an empty map, and that `app.router.set()`
- * still works at runtime (both as a fallback when no config routes are given and to
- * replace config routes).
+ * `pluginConfigs.router.routes` — the SOLE registration path. Proves the router compiles
+ * the table at init (manifest/match/toUrl), reads the render mode from the GLOBAL config,
+ * accepts an `import * as` namespace, throws fail-fast on an empty map, and that reading
+ * before any routes are registered throws a clear error.
  */
 import { createCoreConfig } from "@moku-labs/core";
 import { describe, expect, it } from "vitest";
@@ -31,7 +30,7 @@ function makeApp(routes: RouteMap, mode: "ssg" | "spa" | "hybrid" = "hybrid") {
   });
 }
 
-/** Build the same app with NO router config routes (table stays empty until `set()`). */
+/** Build the same app with NO router config routes (table stays empty; every read throws). */
 function makeAppNoRoutes() {
   const coreConfig = createCoreConfig("web", {
     config: { isDevelopment: false, mode: "hybrid" },
@@ -74,20 +73,9 @@ describe("pluginConfigs.router.routes", () => {
     expect(() => makeApp(defineRoutes({}))).toThrow(/route map is empty/);
   });
 
-  it("without config routes, reading throws until app.router.set() registers them", () => {
+  it("without config routes, every read throws a clear 'routes not registered' error", () => {
     const app = makeAppNoRoutes();
     expect(() => app.router.match("/")).toThrow(/routes not registered/);
-
-    app.router.set(defineRoutes({ home: route("/") }));
-    expect(app.router.manifest().map(d => d.pattern)).toEqual(["/"]);
-  });
-
-  it("config routes can be replaced at runtime via app.router.set() (last write wins)", () => {
-    const app = makeApp(defineRoutes({ home: route("/") }));
-    expect(app.router.manifest().map(d => d.pattern)).toEqual(["/"]);
-
-    app.router.set(defineRoutes({ home: route("/"), about: route("/about/") }));
-    expect(app.router.manifest().map(d => d.pattern)).toEqual(["/", "/about/"]);
-    expect(app.router.toUrl("about", {})).toBe("/about/");
+    expect(() => app.router.toUrl("home", {})).toThrow(/routes not registered/);
   });
 });

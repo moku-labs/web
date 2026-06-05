@@ -65,7 +65,6 @@ const app = createApp({
 });
 
 await app.build.run();   // → static site in dist/ (HTML, feed.xml, sitemap.xml); routes compiled at init
-// Runtime (re-)registration alternative: app.router.set(routes)
 ```
 
 Content lives on disk as `content/{slug}/{locale}.md` with YAML frontmatter
@@ -132,7 +131,7 @@ import * as routes from "./routes"; // render shells only — no node-only conte
 
 // env works with no wiring — browserEnv is the default provider
 const app = createApp({ plugins: [dataPlugin], config: { mode: "spa" }, pluginConfigs: { router: { routes } } });
-await app.start(); // routes compiled at init (or app.router.set(routes) at runtime)
+await app.start(); // routes compiled at init
 ```
 
 ## Plugins
@@ -141,7 +140,7 @@ await app.start(); // routes compiled at init (or app.router.set(routes) at runt
 |---|---|---|
 | `site` | ✅ isomorphic | Site identity (name, URL, author) + canonical URL helper |
 | `i18n` | ✅ isomorphic | Locales, default-locale fallback, translations, hreflang/ogLocale maps |
-| `router` | ✅ isomorphic | Type-safe route DSL (`route`) — optional `.load` (gets `ctx.require`/`has`), `.render`/`.head` (get `ctx.url`), `.generate`; routes registered via `pluginConfigs.router.routes` (or `app.router.set(routes)` at runtime); matching, `mode()` (from global config), URL/file derivation |
+| `router` | ✅ isomorphic | Type-safe route DSL (`route`) — optional `.load` (gets `ctx.require`/`has`), `.render`/`.head` (get `ctx.url`), `.generate`; routes registered via `pluginConfigs.router.routes`; matching, `mode()` (from global config), URL/file derivation |
 | `head` | ✅ isomorphic | SEO `<head>` composition: title template, canonical, OG/Twitter, JSON-LD, hreflang |
 | `spa` | ✅ isomorphic | Client runtime: island hydration + intercepted navigation (inert on Node) |
 | `content` | ➕ node-only | Markdown pipeline → sanitized HTML, frontmatter, reading time, locale model |

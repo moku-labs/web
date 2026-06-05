@@ -64,10 +64,10 @@ function buildApp(root: string, overrides: { notFound?: boolean; cliPort?: numbe
         notFound: overrides.notFound ?? true
       },
       deploy: { target: "cloudflare-pages" as const, outDir, scrubAllowlist: [] },
-      cli: { outDir, port: overrides.cliPort ?? 4173, watchDirs: ["content", "src"] }
+      cli: { outDir, port: overrides.cliPort ?? 4173, watchDirs: ["content", "src"] },
+      router: { routes }
     }
   });
-  app.router.set(routes);
   return app;
 }
 

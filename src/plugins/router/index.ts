@@ -15,8 +15,8 @@ const defaultConfig: RouterConfig = {};
 /**
  * Router plugin — typed, named route definitions with locale-aware URL generation
  * and matching. Author routes with {@link route}, then register them the normal config
- * way via `pluginConfigs.router.routes` (compiled at init) or imperatively at runtime
- * with `app.router.set(routes)`. Depends on site (base URL) and i18n (locales).
+ * way via `pluginConfigs.router.routes` (compiled at init). Depends on site (base URL)
+ * and i18n (locales).
  *
  * @example Register routes via config, then start/build
  * ```ts

@@ -284,11 +284,10 @@ export interface Urls<T extends RouteMap> {
  * @remarks
  * `routes` is the declarative route map — registered the normal config way via
  * `createApp({ pluginConfigs: { router: { routes } } })` and compiled into the matcher
- * table in the router's `onInit`. An `import * as routes` namespace is a valid value. It
- * is OPTIONAL: omit it and register imperatively at runtime with `app.router.set(routes)`
- * instead (e.g. a browser app that builds routes dynamically). The render `mode` is NOT
- * here — it is a GLOBAL framework option (`createApp({ config: { mode } })`), read by the
- * router via `ctx.global`.
+ * table in the router's `onInit`. An `import * as routes` namespace is a valid value. It is
+ * the SOLE registration path: omitting it leaves the matcher table empty, so every read
+ * (`match`/`toUrl`/`entries`/…) throws. The render `mode` is NOT here — it is a GLOBAL
+ * framework option (`createApp({ config: { mode } })`), read by the router via `ctx.global`.
  */
 export type RouterConfig = {
   /** Declarative route map (route name → `route(...)`); compiled at init. An `import * as` namespace works. */
@@ -343,12 +342,12 @@ export interface MatcherTable {
 
 /**
  * Router plugin state — a mutable holder whose `table` is `null` until the router's
- * `onInit` compiles `config.routes` (or `app.router.set(routes)` registers them). The
- * render `mode` is NOT stored here; it is read from the global framework config via the
- * API context. Keeps all mutable state in `ctx.state` (no singletons).
+ * `onInit` compiles `config.routes`. The render `mode` is NOT stored here; it is read
+ * from the global framework config via the API context. Keeps all mutable state in
+ * `ctx.state` (no singletons).
  */
 export interface RouterState {
-  /** Compiled matcher table; `null` until `onInit`/`set(routes)` compiles it. */
+  /** Compiled matcher table; `null` until `onInit` compiles `config.routes`. */
   table: MatcherTable | null;
 }
 
@@ -387,20 +386,6 @@ export interface ClientRoute {
 
 /** Public API exposed via `ctx.require(routerPlugin)` and `app.router`. */
 export type RouterApi = {
-  /**
-   * Register the route map and compile the matcher table at runtime. The declarative
-   * path is `pluginConfigs.router.routes` (compiled in `onInit`); use `set()` for
-   * imperative (re-)registration — e.g. a browser app building routes dynamically.
-   * Re-calling recompiles (last write wins). A route map is any `{ name: route(...) }`
-   * object, including an `import * as routes` namespace.
-   *
-   * @param routes - The route map to register (route name → `route(...)` definition).
-   * @throws {Error} On an empty or invalid route map.
-   * @example
-   * import * as routes from "./routes";
-   * app.router.set(routes);
-   */
-  set(routes: RouteMap): void;
   /**
    * Match a pathname against the compiled route table (specificity-sorted).
    *

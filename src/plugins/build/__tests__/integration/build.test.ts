@@ -84,10 +84,10 @@ function buildApp(outDir: string, bySlug: Map<string, Article>, extraPlugins: un
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
       content: { providers: [fileSystemContent({ contentDir: FIXTURE_DIR })] },
-      build: { outDir, feeds: true, sitemap: true, images: false, ogImage: false, minify: false }
+      build: { outDir, feeds: true, sitemap: true, images: false, ogImage: false, minify: false },
+      router: { routes }
     }
   });
-  app.router.set(routes);
   return app;
 }
 
@@ -236,6 +236,7 @@ describe("build integration", () => {
       plugins: [sitePlugin, i18nPlugin, routerPlugin, contentPlugin, headPlugin, buildPlugin],
       pluginConfigs: {
         site: SITE,
+        router: { routes },
         i18n: { locales: ["en", "uk"], defaultLocale: "en" },
         content: { providers: [fileSystemContent({ contentDir: FIXTURE_DIR })] },
         build: {
@@ -253,7 +254,6 @@ describe("build integration", () => {
         }
       }
     });
-    app.router.set(routes);
 
     await app.build.run();
 
