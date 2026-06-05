@@ -28,9 +28,9 @@ describe("build/phases/not-found", () => {
     expect(html.toLowerCase()).toContain("<!doctype html>");
   });
 
-  it("emits the configured route content when notFound.route is set", async () => {
+  it("emits the configured body content when notFound.body is set", async () => {
     const ctx = makeCtx({
-      config: { outDir: tmp, notFound: { route: "<h1>Custom Missing</h1>" } }
+      config: { outDir: tmp, notFound: { body: "<h1>Custom Missing</h1>" } }
     });
     await generateNotFound(ctx);
     const html = readFileSync(path.join(tmp, "404.html"), "utf8");

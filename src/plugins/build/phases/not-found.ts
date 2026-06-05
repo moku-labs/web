@@ -38,8 +38,9 @@ function wrap(body: string): string {
 
 /**
  * Emits `outDir/404.html`. When `config.notFound` is `true`, writes the built-in
- * default page; when it is `{ route }`, writes the supplied route content verbatim
- * inside the document shell. No-op (returns `null`) when `notFound` is false/unset.
+ * default page; when it is `{ body }`, writes the supplied HTML body content
+ * verbatim inside the document shell. No-op (returns `null`) when `notFound` is
+ * false/unset.
  *
  * @param ctx - Plugin context (provides `config`, `log`).
  * @returns The written file path, or `null` when disabled.
@@ -57,7 +58,7 @@ export async function generateNotFound(
     // eslint-disable-next-line unicorn/no-null -- `null` signals a disabled phase
     return null;
   }
-  const body = typeof notFound === "object" && notFound.route ? notFound.route : DEFAULT_BODY;
+  const body = typeof notFound === "object" && notFound.body ? notFound.body : DEFAULT_BODY;
   await mkdir(outDir, { recursive: true });
   const file = path.join(outDir, "404.html");
   await writeFile(file, wrap(body), "utf8");

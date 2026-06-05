@@ -207,10 +207,10 @@ export type Config = {
   publicDir?: string;
   /**
    * Emit `outDir/404.html`. `true` for the built-in default page, or
-   * `{ route }` to supply the page's literal HTML body content (NOT a route
-   * path/slug — the string is written into the 404 page verbatim). Default `false`.
+   * `{ body }` to supply the page's literal HTML body content (written into the
+   * 404 page verbatim). Default `false`.
    */
-  notFound?: boolean | { route?: string };
+  notFound?: boolean | { body?: string };
   /** Emit per-path i18n bare-path redirect HTML pages. Default `false`. */
   localeRedirects?: boolean;
   /** Authoritative client bundle entry path (overrides the conventional scan). */

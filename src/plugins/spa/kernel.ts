@@ -7,6 +7,7 @@
  * @see README.md
  */
 
+import { dataPlugin } from "../data";
 import { headPlugin } from "../head";
 import { routerPlugin } from "../router";
 import type { RouteContext, RouteDefinition, RouteState } from "../router/types";
@@ -33,7 +34,6 @@ import type {
   ComponentDef,
   SpaConfig,
   SpaContext,
-  SpaDataReader,
   SpaEmitFunction,
   SpaKernel,
   SpaKernelDeps,
@@ -372,36 +372,12 @@ export function createSpaKernel(
 }
 
 /**
- * Structural by-name handle for the OPTIONAL `data` plugin. `ctx.require` resolves
- * a plugin by its `name` at runtime, so this lets `spa` obtain the `data` reader
- * WITHOUT importing the `data` plugin or its types — keeping `spa` decoupled and
- * its `depends` at `[router, head]`. The phantom types only the `at` slice it uses.
- */
-const dataPluginHandle: {
-  readonly name: "data";
-  readonly spec: unknown;
-  readonly _phantom: {
-    readonly config: unknown;
-    readonly state: unknown;
-    readonly api: { at: SpaDataReader };
-    readonly events: Record<string, unknown>;
-  };
-} = {
-  name: "data",
-  spec: undefined,
-  _phantom: {
-    config: undefined,
-    state: undefined,
-    api: undefined as unknown as { at: SpaDataReader },
-    events: {}
-  }
-};
-
-/**
  * Builds the shared kernel from the plugin context, stores it on `ctx.state`,
  * and runs its init step (validate config, register config.components, seed
  * currentUrl). Captures the OPTIONAL `data` reader when the `data` plugin is
- * composed (enabling client DATA navigation).
+ * composed (enabling client DATA navigation) — resolved by instance via
+ * `ctx.require(dataPlugin)`, guarded by `ctx.has("data")` so `data` stays optional
+ * (`spa`'s `depends` is `[router, head]`).
  *
  * @param ctx - The plugin context (state/config/emit/require/has/log).
  * @example
@@ -414,7 +390,7 @@ export function initSpa(ctx: SpaContext): void {
   };
   // OPTIONAL: enable client DATA navigation only when the `data` plugin is composed.
   if (ctx.has("data")) {
-    const reader = ctx.require(dataPluginHandle);
+    const reader = ctx.require(dataPlugin);
     // eslint-disable-next-line jsdoc/require-jsdoc -- thin adapter binding the reader's `at`
     deps.dataAt = (path: string) => reader.at(path);
   }
