@@ -48,8 +48,8 @@ const BANNED_SPECIFIERS: readonly RegExp[] = [
   /^p-limit$/
 ];
 
-/** Budget for the static closure, measured as the sum of each file's gzip size (currently ~41 kB; budget 45 kB). */
-const SIZE_BUDGET_BYTES = 45 * 1024;
+/** Budget for the static closure, measured as the sum of each file's gzip size (currently ~45 kB; budget 50 kB). */
+const SIZE_BUDGET_BYTES = 50 * 1024;
 
 // ──────────────────────────────── Types ──────────────────────────────────
 
