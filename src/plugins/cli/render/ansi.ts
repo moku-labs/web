@@ -98,7 +98,8 @@ export function supportsColor(
   stream: ColorStream = process.stdout,
   noColor: string | undefined = process.env.NO_COLOR
 ): boolean {
-  return stream.isTTY === true && noColor === undefined;
+  const isColorCapable = stream.isTTY === true && noColor === undefined;
+  return isColorCapable;
 }
 
 /**

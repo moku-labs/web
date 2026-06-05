@@ -88,12 +88,14 @@ function crossCheckPublicPrefix(config: EnvConfig): void {
   const { schema, publicPrefix } = config;
   for (const [key, spec] of Object.entries(schema)) {
     const hasPrefix = key.startsWith(publicPrefix);
-    if (spec.public === true && !hasPrefix) {
+    const isPublicMissingPrefix = spec.public === true && !hasPrefix;
+    if (isPublicMissingPrefix) {
       throw new Error(
         `${ERROR_PREFIX} env: "${key}" is marked public but does not start with "${publicPrefix}".`
       );
     }
-    if (hasPrefix && spec.public !== true) {
+    const isPrefixedNotPublic = hasPrefix && spec.public !== true;
+    if (isPrefixedNotPublic) {
       throw new Error(
         `${ERROR_PREFIX} env: "${key}" starts with "${publicPrefix}" but is not marked public:true.`
       );

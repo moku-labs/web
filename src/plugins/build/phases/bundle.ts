@@ -134,7 +134,8 @@ function resolveEntrypoints(candidates: readonly string[]): string[] {
  */
 function resolveJsEntrypoints(ctx: Pick<PhaseContext, "config" | "log">): string[] {
   const { clientEntry } = ctx.config;
-  if (typeof clientEntry === "string" && clientEntry.length > 0) return [clientEntry];
+  const isClientEntrySet = typeof clientEntry === "string" && clientEntry.length > 0;
+  if (isClientEntrySet) return [clientEntry];
   const scanned = resolveEntrypoints(JS_ENTRY_CANDIDATES);
   if (scanned.length === 0) {
     ctx.log.warn("build:bundle", { clientEntry: "none", scanned: JS_ENTRY_CANDIDATES });

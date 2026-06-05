@@ -17,6 +17,9 @@ import type {
   WatchHandle
 } from "./types";
 
+/** Matches an explicit affirmative answer (`y`/`yes`, case-insensitive). */
+const YES_PATTERN = /^y(es)?$/i;
+
 /** The minimal `Bun` global surface the static-server seams use. */
 type BunRuntime = {
   serve(options: { port: number; fetch(request: Request): Response | Promise<Response> }): {
@@ -92,7 +95,7 @@ function defaultConfirm(question: string): Promise<boolean> {
     const readline = createInterface({ input: process.stdin, output: process.stdout });
     readline.question(`${question} [y/N] `, answer => {
       readline.close();
-      resolve(/^y(es)?$/i.test(answer.trim()));
+      resolve(YES_PATTERN.test(answer.trim()));
     });
   });
 }

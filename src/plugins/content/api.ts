@@ -289,6 +289,22 @@ function toCard(article: Article): ArticleCard {
 }
 
 /**
+ * Whether an article belongs in a locale collection: every article is published
+ * outside production, and in production all non-`draft` articles are published.
+ *
+ * @param article - The candidate article.
+ * @param isProduction - Whether the deployment stage is production.
+ * @returns `true` when the article should be included.
+ * @example
+ * ```ts
+ * isPublished(article, true); // false for a draft in production
+ * ```
+ */
+function isPublished(article: Article, isProduction: boolean): boolean {
+  return !isProduction || article.computed.status !== "draft";
+}
+
+/**
  * Resolve every slug for one locale, then narrow to the articles that belong in the
  * locale collection: existing files only, drafts dropped in production, sorted
  * date-descending. The single load+filter+sort step behind {@link createContentApi.loadAll}.
@@ -313,7 +329,7 @@ async function loadAndFilterArticles(
 
   return resolved
     .filter((article): article is Article => article !== null)
-    .filter(article => isProduction === false || article.computed.status !== "draft")
+    .filter(article => isPublished(article, isProduction))
     .toSorted(byDateDescending);
 }
 

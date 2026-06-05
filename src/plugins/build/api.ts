@@ -66,6 +66,20 @@ export function createApi(ctx: PhaseContext): Api {
 }
 
 /**
+ * Whether an OG `fontDir` value is unusable: not a string, empty, or non-existent on disk.
+ *
+ * @param fontDir - The configured `fontDir` value to check.
+ * @returns `true` when `fontDir` is not a non-empty string pointing at an existing path.
+ * @example
+ * ```ts
+ * isMissingFontDir("./fonts"); // false when ./fonts exists
+ * ```
+ */
+function isMissingFontDir(fontDir: unknown): boolean {
+  return typeof fontDir !== "string" || fontDir.length === 0 || !existsSync(fontDir);
+}
+
+/**
  * Validate that an OG `fontDir` exists and contains at least one font file.
  *
  * @param og - The enabled OG-image config object.
@@ -76,7 +90,7 @@ export function createApi(ctx: PhaseContext): Api {
  * ```
  */
 function validateFonts(og: OgImageConfig): void {
-  if (typeof og.fontDir !== "string" || og.fontDir.length === 0 || !existsSync(og.fontDir)) {
+  if (isMissingFontDir(og.fontDir)) {
     throw new Error(
       `${ERROR_PREFIX}.ogImage: fontDir "${og.fontDir}" does not exist — provide a directory with at least one font.`
     );

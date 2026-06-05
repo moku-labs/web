@@ -41,11 +41,18 @@ async function writeEntry(
   outDir: string,
   outputDir: string
 ): Promise<{ relative: string; bytes: number }> {
+  // Mirror the page URL into its `outDir`-relative JSON path.
   const relative = relativeDataFile(outputDir, entry.path);
   const filePath = path.join(outDir, relative);
+
+  // Ensure the parent directory exists before writing.
   await mkdir(path.dirname(filePath), { recursive: true });
+
+  // Serialize the entry's data and write it as one JSON file.
   const body = JSON.stringify(entry.data);
   await writeFile(filePath, body, "utf8");
+
+  // Report the written file's relative path and byte length.
   return { relative, bytes: Buffer.byteLength(body, "utf8") };
 }
 

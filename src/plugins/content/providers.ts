@@ -141,9 +141,13 @@ export function fileSystemContent(options: FileSystemContentOptions): ContentPro
         return null;
       }
       state.dirtyPaths.delete(filePath);
+
+      // Parse frontmatter and render the Markdown body through the pipeline.
       const { frontmatter, body } = parseFrontmatter(raw, options);
       const processor = ensureProcessor(state, options);
       const html = rewriteImageUrls(String(await processor.process(body)), slug);
+
+      // Derive computed metadata and assemble the Article.
       const { readingTime, wordCount } = calculateReadingTime(body);
       const status: "published" | "draft" = frontmatter.draft ? "draft" : "published";
       return {

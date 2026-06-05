@@ -63,12 +63,28 @@ function shannonBitsPerChar(token: string): number {
   if (token.length === 0) return 0;
   const counts = new Map<string, number>();
   for (const char of token) counts.set(char, (counts.get(char) ?? 0) + 1);
+
+  // Accumulate -Σ p·log2(p) across the per-character frequencies.
   let entropy = 0;
   for (const count of counts.values()) {
     const p = count / token.length;
     entropy -= p * Math.log2(p);
   }
   return entropy;
+}
+
+/**
+ * Test whether a token looks like a high-entropy secret. A token qualifies only
+ * when it is **both** ≥ `MIN_SECRET_LENGTH` chars **and** has ≥ `MIN_SECRET_ENTROPY`
+ * bits/char of Shannon entropy.
+ *
+ * @param token - The candidate token.
+ * @returns `true` when the token is long and random enough to mask.
+ * @example
+ * isHighEntropyToken("aZ9...long...Qx"); // true
+ */
+function isHighEntropyToken(token: string): boolean {
+  return token.length >= MIN_SECRET_LENGTH && shannonBitsPerChar(token) >= MIN_SECRET_ENTROPY;
 }
 
 /**
@@ -89,11 +105,23 @@ export function scrubSecrets(text: string, allowlist: string[]): string {
     if (allowlist.some(allowed => allowed.length > 0 && token.includes(allowed))) {
       return token;
     }
-    if (token.length >= MIN_SECRET_LENGTH && shannonBitsPerChar(token) >= MIN_SECRET_ENTROPY) {
-      return MASK;
-    }
+    if (isHighEntropyToken(token)) return MASK;
     return token;
   });
+}
+
+/**
+ * Test whether a branch name fails the deploy guard. A branch is invalid when it
+ * does not match `BRANCH_REGEX` or has a leading `-` (which wrangler would parse
+ * as a flag).
+ *
+ * @param branch - The candidate branch name.
+ * @returns `true` when the branch must be rejected.
+ * @example
+ * isInvalidBranch("--config"); // true
+ */
+function isInvalidBranch(branch: string): boolean {
+  return !BRANCH_REGEX.test(branch) || branch.startsWith("-");
 }
 
 /**
@@ -110,13 +138,27 @@ export function scrubSecrets(text: string, allowlist: string[]): string {
 export function guardBranch(branch: string): string {
   // A leading `-` would be parsed by wrangler as a flag (e.g. `--config`), so it
   // is rejected even though `-` is a valid interior character.
-  if (!BRANCH_REGEX.test(branch) || branch.startsWith("-")) {
+  if (isInvalidBranch(branch)) {
     throw deployError(
       "ERR_DEPLOY_INVALID_BRANCH",
       `${ERROR_PREFIX}: branch ${JSON.stringify(branch)} is invalid.\n  Branches must match /^[a-zA-Z0-9/_.-]+$/ so they cannot inject wrangler flags.`
     );
   }
   return branch;
+}
+
+/**
+ * Test whether a resolved path stays within the resolved project root. The path
+ * is contained when it equals the root or sits beneath it (`root` + separator).
+ *
+ * @param resolved - The resolved absolute candidate path.
+ * @param rootResolved - The resolved absolute project root.
+ * @returns `true` when `resolved` is the root or nested inside it.
+ * @example
+ * isWithinRoot("/app/dist", "/app"); // true
+ */
+function isWithinRoot(resolved: string, rootResolved: string): boolean {
+  return resolved === rootResolved || resolved.startsWith(rootResolved + path.sep);
 }
 
 /**
@@ -133,7 +175,7 @@ export function guardBranch(branch: string): string {
 export function assertWithinRoot(outDir: string, root: string): string {
   const resolved = path.isAbsolute(outDir) ? path.resolve(outDir) : path.resolve(root, outDir);
   const rootResolved = path.resolve(root);
-  if (resolved !== rootResolved && !resolved.startsWith(rootResolved + path.sep)) {
+  if (!isWithinRoot(resolved, rootResolved)) {
     throw deployError(
       "ERR_DEPLOY_PATH_TRAVERSAL",
       `${ERROR_PREFIX}: outDir ${JSON.stringify(outDir)} resolves outside the project root.\n  Point outDir at a directory inside ${JSON.stringify(rootResolved)}.`

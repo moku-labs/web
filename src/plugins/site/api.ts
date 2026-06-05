@@ -6,6 +6,9 @@ import type { Api, Config } from "./types";
 /** Error prefix for all site lifecycle/validation failures. */
 const ERROR_PREFIX = "[web]";
 
+/** URL protocols that qualify a parsed URL as an absolute http/https URL. */
+const HTTP_PROTOCOLS = new Set(["http:", "https:"]);
+
 /** Plugin context surface (`{ config }`) consumed by the site onInit + API factory. */
 type SiteContext = {
   readonly config: Config;
@@ -97,7 +100,7 @@ export function isNonEmpty(value: string): boolean {
 export function isAbsoluteUrl(value: string): boolean {
   try {
     const parsed = new URL(value);
-    return parsed.protocol === "http:" || parsed.protocol === "https:";
+    return HTTP_PROTOCOLS.has(parsed.protocol);
   } catch {
     return false;
   }
