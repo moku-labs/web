@@ -418,7 +418,7 @@ async function renderInstance(
   const { definition, entry, params, locale } = instance;
   const router = ctx.require(routerPlugin);
 
-  // 1. Load build-only data + 2. build the route context (params/data/locale + link builder).
+  // Load build-only data and assemble the route context the handlers receive.
   const data = await loadRouteData(definition, params, locale, ctx);
   const url = entry.toUrl(params);
   const routeContext: RouteContext<RouteState> = {
@@ -429,18 +429,20 @@ async function renderInstance(
     url: (routeName, routeParams = {}) => router.toUrl(routeName, routeParams)
   };
 
-  // 3. Compose head + body, then 4. assemble the document (template fill or in-code shell).
+  // Compose the page's head and body into the document parts.
   const parts: DocumentParts = {
     head: composeHeadHtml(ctx, instance, url, routeContext, data),
     body: renderBody(definition, routeContext),
     assets: shell.assets,
     locale
   };
+
+  // Assemble the full document — shell template when configured, else the in-code shell.
   const html =
     shell.template === null ? renderDocument(parts) : fillTemplate(shell.template, parts);
 
-  // 5. Write to disk. A route with a `.render()` is client-navigable (the build re-runs
-  //    it on client nav) and so always gets a data sidecar — see writeDataSidecars.
+  // Persist the document. A route with a `.render()` is client-navigable and so always
+  // gets a data sidecar (see writeDataSidecars).
   await writeDocument(ctx.config.outDir, entry, params, html);
   return { url, html, data, clientNavigable: definition._handlers.render !== undefined };
 }

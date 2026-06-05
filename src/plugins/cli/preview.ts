@@ -84,6 +84,7 @@ export function resolveCleanUrl(
   pathname: string,
   isFile: FileProbe = statIsFile
 ): ResolvedFile {
+  // Serve the direct match first: a clean URL maps to a file or its index.html.
   const relative = safePath(pathname);
   const base = path.join(rootDir, relative);
   const candidates = pathname.endsWith("/")
@@ -93,11 +94,14 @@ export function resolveCleanUrl(
     if (isFile(candidate)) return { file: candidate, status: 200 };
   }
 
+  // No file matched — climb from the deepest directory toward the root for a 404.html.
   const segments = path.join(rootDir, relative).split(path.sep).filter(Boolean);
   for (let depth = segments.length; depth >= 1; depth--) {
     const candidate = path.join(segments.slice(0, depth).join(path.sep), "404.html");
     if (isFile(candidate)) return { file: candidate, status: 404 };
   }
+
+  // Fall back to the root 404.html; a null file signals not even that exists.
   const root = path.join(rootDir, "404.html");
   // eslint-disable-next-line unicorn/no-null -- contract: file is null when nothing (not even a 404) matched.
   return isFile(root) ? { file: root, status: 404 } : { file: null, status: 404 };

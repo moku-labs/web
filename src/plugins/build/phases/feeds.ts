@@ -8,6 +8,7 @@ import { Feed } from "feed";
 import type { Article } from "../../content/types";
 import { i18nPlugin } from "../../i18n";
 import { sitePlugin } from "../../site";
+import type { Api as SiteApi } from "../../site/types";
 import type { PhaseContext } from "../types";
 import { readCachedContent } from "./content";
 
@@ -41,6 +42,78 @@ function selectArticles(byLocale: Map<string, Article[]>, defaultLocale: string)
 }
 
 /**
+ * Build the feed channel — the site-wide metadata that every item hangs off.
+ *
+ * @param site - The site plugin API (name, description, url, author).
+ * @param defaultLocale - The default locale code, used as the feed language.
+ * @returns A `Feed` carrying the channel metadata, with no items yet.
+ * @example
+ * ```ts
+ * const feed = createFeedChannel(site, "en");
+ * ```
+ */
+function createFeedChannel(site: SiteApi, defaultLocale: string): Feed {
+  return new Feed({
+    title: site.name(),
+    description: site.description(),
+    id: site.url(),
+    link: site.url(),
+    language: defaultLocale,
+    copyright: site.author(),
+    author: { name: site.author() }
+  });
+}
+
+/**
+ * Append one article to the feed and return its canonical GUID. The canonical
+ * URL is the article's single stable identity — it is the item's id, guid, and
+ * link at once.
+ *
+ * @param feed - The feed channel to append to (mutated in place).
+ * @param article - The published article to add.
+ * @param site - The site plugin API (canonical URL + default author).
+ * @returns The article's canonical (absolute) URL, used as its GUID.
+ * @example
+ * ```ts
+ * const guid = addArticleItem(feed, article, site);
+ * ```
+ */
+function addArticleItem(feed: Feed, article: Article, site: SiteApi): string {
+  const canonicalUrl = site.canonical(article.url);
+  feed.addItem({
+    title: article.frontmatter.title,
+    id: canonicalUrl,
+    guid: canonicalUrl,
+    link: canonicalUrl,
+    description: article.frontmatter.description,
+    content: article.html,
+    date: new Date(article.frontmatter.date),
+    author: [{ name: article.frontmatter.author ?? site.author() }]
+  });
+  return canonicalUrl;
+}
+
+/**
+ * Write the three serialized feeds into `outDir`, creating it if needed.
+ *
+ * @param outDir - The build output directory.
+ * @param result - The serialized feed payloads to persist.
+ * @returns Resolves once `feed.xml`, `atom.xml`, and `feed.json` are written.
+ * @example
+ * ```ts
+ * await writeFeedFiles(ctx.config.outDir, result);
+ * ```
+ */
+async function writeFeedFiles(outDir: string, result: FeedsResult): Promise<void> {
+  await mkdir(outDir, { recursive: true });
+  await Promise.all([
+    writeFile(path.join(outDir, "feed.xml"), result.rss, "utf8"),
+    writeFile(path.join(outDir, "atom.xml"), result.atom, "utf8"),
+    writeFile(path.join(outDir, "feed.json"), result.json, "utf8")
+  ]);
+}
+
+/**
  * Generates RSS, Atom, and JSON feeds from the cached default-locale content set
  * and the `site`/`i18n` metadata pulled via `ctx.require`. Each item's GUID is its
  * canonical (absolute) article URL. Writes `feed.xml`, `atom.xml`, and `feed.json`
@@ -56,50 +129,29 @@ function selectArticles(byLocale: Map<string, Article[]>, defaultLocale: string)
 export async function generateFeeds(
   ctx: Pick<PhaseContext, "require" | "state" | "config" | "log">
 ): Promise<FeedsResult | null> {
+  // Feeds are opt-in — a disabled build skips the phase entirely.
   if (!ctx.config.feeds) {
     ctx.log.debug("build:feeds", { skipped: true });
     // eslint-disable-next-line unicorn/no-null -- `null` signals a disabled phase (asserted via toBeNull)
     return null;
   }
+
+  // Gather the inputs: site/i18n metadata and the published default-locale articles.
   const site = ctx.require(sitePlugin);
-  const i18n = ctx.require(i18nPlugin);
-  const articles = selectArticles(readCachedContent(ctx), i18n.defaultLocale());
-  const feed = new Feed({
-    title: site.name(),
-    description: site.description(),
-    id: site.url(),
-    link: site.url(),
-    language: i18n.defaultLocale(),
-    copyright: site.author(),
-    author: { name: site.author() }
-  });
+  const defaultLocale = ctx.require(i18nPlugin).defaultLocale();
+  const articles = selectArticles(readCachedContent(ctx), defaultLocale);
+
+  // Build the channel, then add one item per article, collecting GUIDs in order.
+  const feed = createFeedChannel(site, defaultLocale);
   const guids: string[] = [];
   for (const article of articles) {
-    const canonicalUrl = site.canonical(article.url);
-    guids.push(canonicalUrl);
-    feed.addItem({
-      title: article.frontmatter.title,
-      id: canonicalUrl,
-      guid: canonicalUrl,
-      link: canonicalUrl,
-      description: article.frontmatter.description,
-      content: article.html,
-      date: new Date(article.frontmatter.date),
-      author: [{ name: article.frontmatter.author ?? site.author() }]
-    });
+    guids.push(addArticleItem(feed, article, site));
   }
-  const result: FeedsResult = {
-    rss: feed.rss2(),
-    atom: feed.atom1(),
-    json: feed.json1(),
-    guids
-  };
-  await mkdir(ctx.config.outDir, { recursive: true });
-  await Promise.all([
-    writeFile(path.join(ctx.config.outDir, "feed.xml"), result.rss, "utf8"),
-    writeFile(path.join(ctx.config.outDir, "atom.xml"), result.atom, "utf8"),
-    writeFile(path.join(ctx.config.outDir, "feed.json"), result.json, "utf8")
-  ]);
+
+  // Serialize the channel to all three formats and persist them to outDir.
+  const result: FeedsResult = { rss: feed.rss2(), atom: feed.atom1(), json: feed.json1(), guids };
+  await writeFeedFiles(ctx.config.outDir, result);
+
   ctx.log.debug("build:feeds", { items: guids.length });
   return result;
 }

@@ -163,8 +163,11 @@ export function buildWranglerArgs(input: {
   branch: string;
   root: string;
 }): string[] {
+  // Reject an injectable branch and an out-of-root outDir before touching argv.
   const branch = guardBranch(input.branch);
   assertWithinRoot(input.outDir, input.root);
+
+  // Assemble the no-shell argv for `wrangler pages deploy`.
   return [
     "bunx",
     "wrangler",
@@ -222,6 +225,7 @@ export function classifyWranglerError(
   exitCode: number,
   scrubbedStderr: string
 ): { code: WranglerErrorKind; message: string } {
+  // Match the scrubbed stderr against the taxonomy and surface the first hit's advice.
   const haystack = scrubbedStderr.toLowerCase();
   for (const signature of ERROR_SIGNATURES) {
     if (signature.match.some(needle => haystack.includes(needle))) {
@@ -231,6 +235,8 @@ export function classifyWranglerError(
       };
     }
   }
+
+  // Fallback: no signature matched — report a generic failure with the stderr tail.
   const tail = scrubbedStderr.trim().slice(-STDERR_TAIL_LENGTH);
   return {
     code: "ERR_DEPLOY_WRANGLER_FAILED",
@@ -284,6 +290,7 @@ export async function runWrangler(input: {
   token: string;
   allowlist: string[];
 }): Promise<{ stdout: string; scrubbedStderr: string; exitCode: number }> {
+  // Spawn wrangler with the token in env (never argv) and drain both streams.
   const proc = input.spawn(input.args, {
     stdout: "pipe",
     stderr: "pipe",
@@ -292,7 +299,8 @@ export async function runWrangler(input: {
   const stdout = await new Response(proc.stdout as ReadableStream<Uint8Array>).text();
   const stderr = await new Response(proc.stderr as ReadableStream<Uint8Array>).text();
   const exitCode = await proc.exited;
-  // Scrub BEFORE returning — only scrubbed* names may reach ctx.log downstream.
+
+  // Scrub stderr BEFORE returning — only scrubbed* names may reach ctx.log downstream.
   const scrubbedStderr = scrubSecrets(stderr, input.allowlist);
   return { stdout, scrubbedStderr, exitCode };
 }

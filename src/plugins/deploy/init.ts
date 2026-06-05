@@ -14,6 +14,9 @@ const WRANGLER_PATH = "wrangler.jsonc";
 /** Relative path of the generated GitHub Actions workflow. */
 const WORKFLOW_PATH = ".github/workflows/deploy.yml";
 
+/** Wrangler `compatibility_date` used when the deploy config does not pin one. */
+const DEFAULT_COMPATIBILITY_DATE = "2024-01-01";
+
 /**
  * Read a file relative to `cwd`, returning `null` when it does not exist.
  *
@@ -54,19 +57,22 @@ export async function writeScaffolding(input: {
   cwd: string;
   options: DeployInitOptions;
 }): Promise<InitResult> {
+  // Resolve the orchestration inputs and the two opt-in toggles (ci, drift-check).
   const { config, slug, cwd, options } = input;
   const ci = options.ci ?? config.ci ?? false;
   const check = options.check ?? false;
 
+  // Render the wrangler config that every run reconciles against disk.
   const wranglerContents = generateWranglerConfig({
     slug,
     outDir: config.outDir,
-    compatibilityDate: config.compatibilityDate ?? "2024-01-01"
+    compatibilityDate: config.compatibilityDate ?? DEFAULT_COMPATIBILITY_DATE
   });
 
+  // Start an empty tally that each reconcile step accumulates into.
   const result: InitResult = { written: [], skipped: [], drifted: [] };
 
-  // wrangler.jsonc — idempotent: never overwritten.
+  // Reconcile wrangler.jsonc — idempotent, so an existing file is never overwritten.
   await reconcile({
     relativePath: WRANGLER_PATH,
     expected: wranglerContents,
@@ -76,7 +82,7 @@ export async function writeScaffolding(input: {
     result
   });
 
-  // .github/workflows/deploy.yml — only when ci is enabled.
+  // Reconcile the CI workflow only when CI scaffolding was requested.
   if (ci) {
     const workflowContents = generateGithubWorkflow({ slug });
     await reconcile({

@@ -118,6 +118,31 @@ function describePartial(partial?: Record<string, unknown>): string {
 }
 
 /**
+ * Find the first entry with `event` at or after `startIndex`, scanning forward.
+ *
+ * @param entries - The trace array to scan.
+ * @param event - Event name to find.
+ * @param startIndex - Index to begin scanning from (inclusive).
+ * @returns The index of the first match, or `-1` when none exists from `startIndex` on.
+ * @example
+ * ```ts
+ * findEventAtOrAfter([{ event: "a" }, { event: "b" }] as LogEntry[], "b", 0); // 1
+ * ```
+ */
+function findEventAtOrAfter(
+  entries: readonly LogEntry[],
+  event: string,
+  startIndex: number
+): number {
+  for (let index = startIndex; index < entries.length; index++) {
+    if (entries[index]?.event === event) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+/**
  * Create a fluent assertion chain bound to the live `entries` array. Each method
  * reads `entries` at call time, so assertions reflect later logging.
  *
@@ -163,22 +188,21 @@ export function createExpectChain(entries: readonly LogEntry[]): ExpectChain {
      * ```
      */
     toHaveEventInOrder(events: string[]): ExpectChain {
+      // Walk the trace once, advancing the cursor past each matched event so the
+      // next search can only succeed strictly later — enforcing relative order.
       let cursor = 0;
       for (const [position, event] of events.entries()) {
-        let nextIndex = -1;
-        for (let index = cursor; index < entries.length; index++) {
-          if (entries[index]?.event === event) {
-            nextIndex = index;
-            break;
-          }
-        }
-        if (nextIndex === -1) {
+        const matchIndex = findEventAtOrAfter(entries, event, cursor);
+
+        if (matchIndex === -1) {
           throw new LogExpectAssertionError(
             `Expected events in order ${JSON.stringify(events)}, but "${event}" (index ${position}) was not found at or after position ${cursor}.`
           );
         }
-        cursor = nextIndex + 1;
+
+        cursor = matchIndex + 1;
       }
+
       return chain;
     },
     /**

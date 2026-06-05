@@ -7,6 +7,8 @@ import type { EnvConfig, EnvState } from "./types";
 const FROZEN_MESSAGE = "env: map is frozen and cannot be mutated";
 /** Error prefix for all resolution-pipeline failures. */
 const ERROR_PREFIX = "[web]";
+/** The `Map` mutators redefined as throwers when a map is frozen. */
+const FROZEN_METHODS = ["set", "clear", "delete"] as const;
 
 /** Core-plugin context surface (`{ config, state }`) consumed by `validateSchema`. */
 type EnvValidationContext = {
@@ -28,6 +30,22 @@ function frozenThrower(): never {
 }
 
 /**
+ * Coerces a raw provider value to its effective presence: an empty string counts
+ * as "absent" so a `KEY=""` falls through to later providers.
+ *
+ * @param raw - The raw value a provider supplied for a key (possibly `undefined`).
+ * @returns The value, or `undefined` when it is missing or an empty string.
+ * @example
+ * ```ts
+ * coerceEmpty(""); // => undefined
+ * coerceEmpty("3000"); // => "3000"
+ * ```
+ */
+function coerceEmpty(raw: string | undefined): string | undefined {
+  return raw === "" ? undefined : raw;
+}
+
+/**
  * Merges providers in array order, coercing empty strings to `undefined` before
  * precedence so a `KEY=""` falls through to later providers. First non-empty
  * value wins.
@@ -41,15 +59,17 @@ function frozenThrower(): never {
  */
 function mergeProviders(config: EnvConfig): Record<string, string> {
   const merged: Record<string, string> = {};
+
+  // Walk providers in precedence order, keeping the first non-empty value per key.
   for (const provider of config.providers) {
-    const values = provider.load();
-    for (const [key, raw] of Object.entries(values)) {
-      const value = raw === "" ? undefined : raw;
+    for (const [key, raw] of Object.entries(provider.load())) {
+      const value = coerceEmpty(raw);
       if (value !== undefined && merged[key] === undefined) {
         merged[key] = value;
       }
     }
   }
+
   return merged;
 }
 
@@ -93,7 +113,8 @@ function crossCheckPublicPrefix(config: EnvConfig): void {
  * ```
  */
 export function freezeMap(map: Map<string, string>): void {
-  for (const method of ["set", "clear", "delete"] as const) {
+  // Seal the mutators: redefine each as a non-writable, non-configurable thrower.
+  for (const method of FROZEN_METHODS) {
     Object.defineProperty(map, method, {
       value: frozenThrower,
       writable: false,
@@ -101,7 +122,53 @@ export function freezeMap(map: Map<string, string>): void {
       enumerable: false
     });
   }
+
+  // Freeze the object itself for defense in depth.
   Object.freeze(map);
+}
+
+/**
+ * Populates `state.publicMap` with the schema-driven public subset: every
+ * `public:true` schema key that resolved to a defined value. This map is the only
+ * sanctioned input to a browser-facing `define`, so it stays schema-scoped (never
+ * includes non-schema provider keys).
+ *
+ * @param schema - The per-variable schema from {@link EnvConfig}.
+ * @param merged - The merged provider values keyed by variable name.
+ * @param publicMap - The mutable public map to fill in place.
+ * @example
+ * ```ts
+ * populatePublicMap(config.schema, merged, state.publicMap);
+ * ```
+ */
+function populatePublicMap(
+  schema: EnvConfig["schema"],
+  merged: Record<string, string>,
+  publicMap: EnvState["publicMap"]
+): void {
+  for (const [key, spec] of Object.entries(schema)) {
+    const value = merged[key];
+    const isExposablePublic = spec.public === true && value !== undefined;
+    if (isExposablePublic) publicMap.set(key, value);
+  }
+}
+
+/**
+ * Populates `state.resolved` with EVERY merged key that carries a defined value
+ * (spec/02 Lifecycle §5), including non-schema provider keys so
+ * `ctx.env.require()` works for dynamic keys.
+ *
+ * @param merged - The merged provider values keyed by variable name.
+ * @param resolved - The mutable resolved map to fill in place.
+ * @example
+ * ```ts
+ * populateResolved(merged, state.resolved);
+ * ```
+ */
+function populateResolved(merged: Record<string, string>, resolved: EnvState["resolved"]): void {
+  for (const [key, value] of Object.entries(merged)) {
+    resolved.set(key, value);
+  }
 }
 
 /**
@@ -124,12 +191,15 @@ export function freezeMap(map: Map<string, string>): void {
 export function validateSchema(ctx: EnvValidationContext): void {
   const { config, state } = ctx;
   const { schema } = config;
-  const merged = mergeProviders(config);
 
+  // Collapse the ordered providers into one value table and enforce the PUBLIC_ convention.
+  const merged = mergeProviders(config);
   crossCheckPublicPrefix(config);
 
+  // Backfill schema defaults, then fail fast on any required variable still missing.
   for (const [key, spec] of Object.entries(schema)) {
-    if (merged[key] === undefined && spec.default !== undefined) {
+    const isUnset = merged[key] === undefined;
+    if (isUnset && spec.default !== undefined) {
       merged[key] = spec.default;
     }
     if (merged[key] === undefined && spec.required === true) {
@@ -139,19 +209,11 @@ export function validateSchema(ctx: EnvValidationContext): void {
     }
   }
 
-  // publicMap is the schema-driven subset (public:true keys with a value) — the
-  // only sanctioned input to a browser-facing `define`, so it stays schema-scoped.
-  for (const [key, spec] of Object.entries(schema)) {
-    const value = merged[key];
-    if (spec.public === true && value !== undefined) state.publicMap.set(key, value);
-  }
+  // Publish both views: the browser-safe public subset and the full resolved table.
+  populatePublicMap(schema, merged, state.publicMap);
+  populateResolved(merged, state.resolved);
 
-  // resolved holds EVERY merged key with a defined value (spec/02 Lifecycle §5),
-  // including non-schema provider keys so `ctx.env.require()` works for dynamic keys.
-  for (const [key, value] of Object.entries(merged)) {
-    state.resolved.set(key, value);
-  }
-
+  // Lock both maps so post-onInit code can only read them.
   freezeMap(state.resolved);
   freezeMap(state.publicMap);
 }

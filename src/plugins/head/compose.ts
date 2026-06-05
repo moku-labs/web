@@ -88,6 +88,34 @@ function resolveImage(image: string, site: SiteSlice): string {
 }
 
 /**
+ * Build the per-locale `hreflang` alternates for a route, plus the `x-default`
+ * fallback (the route's URL with no `lang` override). Each alternate URL is the
+ * route's canonical URL for that locale, absolutized against the site base URL.
+ *
+ * @param locales - The supported locale codes (drives the alternate set).
+ * @param route - The resolved route descriptor (provides `name` + `params`).
+ * @param router - The router slice used to build each locale's URL.
+ * @param site - The site slice used to absolutize each locale's URL.
+ * @returns The ordered `hreflang` element set: one per locale, then `x-default`.
+ * @example buildHreflangAlternates(["en", "fr"], route, router, site)
+ */
+function buildHreflangAlternates(
+  locales: readonly string[],
+  route: ResolvedRoute,
+  router: RouterSlice,
+  site: SiteSlice
+): HeadElement[] {
+  const alternates: HeadElement[] = locales.map(locale => {
+    const href = site.canonical(router.toUrl(route.name, { ...route.params, lang: locale }));
+    return hreflang(locale, href);
+  });
+
+  const xDefaultHref = site.canonical(router.toUrl(route.name, { ...route.params }));
+  alternates.push(hreflang(X_DEFAULT, xDefaultHref));
+  return alternates;
+}
+
+/**
  * Build the canonical, og, twitter, and hreflang elements for the route from
  * the resolved title/description, defaults, and dependency slices.
  *
@@ -105,7 +133,8 @@ function buildBaseElements(
 ): HeadElement[] {
   const { route, defaults, site, i18n, router } = input;
   const head: HeadConfig = route.head ?? {};
-  const image = head.image ?? defaults.defaultOgImage;
+
+  // Core title/description across the title tag, Open Graph, and Twitter cards.
   const elements: HeadElement[] = [
     { tag: "title", children: resolved.title, key: "title" },
     meta("description", resolved.description),
@@ -116,20 +145,25 @@ function buildBaseElements(
     twitter("twitter:title", head.title ?? resolved.title),
     twitter("twitter:description", resolved.description)
   ];
+
+  // Share image (route override or default) added to both og and Twitter.
+  const image = head.image ?? defaults.defaultOgImage;
   if (image) {
     const abs = resolveImage(image, site);
     elements.push(og("og:image", abs), twitter("twitter:image", abs));
   }
+
+  // Optional social attribution: Twitter site handle and Open Graph locale.
   if (defaults.twitterHandle) elements.push(twitter("twitter:site", defaults.twitterHandle));
   const ogLocale = route.locale ? i18n.ogLocale(route.locale) : undefined;
   if (ogLocale) elements.push(og("og:locale", ogLocale));
-  elements.push(canonical(resolved.canonicalUrl));
-  for (const locale of i18n.locales()) {
-    const href = site.canonical(router.toUrl(route.name, { ...route.params, lang: locale }));
-    elements.push(hreflang(locale, href));
-  }
-  const xDefaultHref = site.canonical(router.toUrl(route.name, { ...route.params }));
-  elements.push(hreflang(X_DEFAULT, xDefaultHref));
+
+  // Canonical link plus the cross-locale hreflang alternates.
+  elements.push(
+    canonical(resolved.canonicalUrl),
+    ...buildHreflangAlternates(i18n.locales(), route, router, site)
+  );
+
   return elements;
 }
 
@@ -193,6 +227,20 @@ function escapeHtml(raw: string): string {
 }
 
 /**
+ * Serialize an element's attribute map to a space-joined `name="value"` string,
+ * HTML-escaping each value. Returns `""` when there are no attributes.
+ *
+ * @param attributes - The element's attribute map (may be `undefined`).
+ * @returns The serialized attribute string (no leading/trailing space).
+ * @example serializeAttrs({ name: "robots", content: "index" }) // 'name="robots" content="index"'
+ */
+function serializeAttributes(attributes: Record<string, string> | undefined): string {
+  return Object.entries(attributes ?? {})
+    .map(([name, value]) => `${name}="${escapeHtml(value)}"`)
+    .join(" ");
+}
+
+/**
  * Serialize a single `HeadElement` to its HTML string form. Attribute values are
  * HTML-escaped; `script` children are emitted verbatim (already unicode-escaped by
  * `jsonLd`); `title` text is HTML-escaped.
@@ -202,12 +250,16 @@ function escapeHtml(raw: string): string {
  * @example serializeElement(meta("robots", "index"))
  */
 function serializeElement(element: HeadElement): string {
-  const attributes = Object.entries(element.attrs ?? {})
-    .map(([k, v]) => `${k}="${escapeHtml(v)}"`)
-    .join(" ");
-  const open = attributes.length === 0 ? element.tag : `${element.tag} ${attributes}`;
+  const attributes = serializeAttributes(element.attrs);
+
+  // `script` keeps its (already unicode-escaped) children between explicit tags.
   if (element.tag === "script") return `<script ${attributes}>${element.children ?? ""}</script>`;
+
+  // `title` carries HTML-escaped text rather than attributes.
   if (element.tag === "title") return `<title>${escapeHtml(element.children ?? "")}</title>`;
+
+  // Every other element is a self-closing void tag carrying only its attributes.
+  const open = attributes.length === 0 ? element.tag : `${element.tag} ${attributes}`;
   return `<${open}>`;
 }
 

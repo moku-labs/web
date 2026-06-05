@@ -143,6 +143,26 @@ function resolveJsEntrypoints(ctx: Pick<PhaseContext, "config" | "log">): string
 }
 
 /**
+ * Convert an artifact's on-disk path into the web URL the page phase will embed:
+ * relative to the publish root with POSIX separators (e.g. "assets/main-abc123.css"),
+ * which `buildAssetTags` then prefixes with "/". `Bun.build` reports absolute output
+ * paths, so embedding `output.path` verbatim would yield a broken protocol-relative
+ * URL like "//Users/.../main.css" — relativizing against `outDir` is what keeps it
+ * a site-rooted path.
+ *
+ * @param absolutePath - The artifact's on-disk output path (may be absolute).
+ * @param outDir - The publish root the web path is relativized against.
+ * @returns The publish-root-relative path with forward-slash separators.
+ * @example
+ * ```ts
+ * normalizeAssetPath("/abs/dist/assets/main-abc123.css", "dist"); // "assets/main-abc123.css"
+ * ```
+ */
+function normalizeAssetPath(absolutePath: string, outDir: string): string {
+  return path.relative(path.resolve(outDir), path.resolve(absolutePath)).split(path.sep).join("/");
+}
+
+/**
  * Run one bundler pass for a single asset kind and record the hashed output
  * paths under `state.buildCache` keyed by the original entry basename.
  *
@@ -167,23 +187,22 @@ async function runOne(
   outdir: string,
   minify: boolean
 ): Promise<void> {
+  // Nothing to bundle for this kind — skip the pass entirely.
   if (entrypoints.length === 0) return;
+
+  // Run the bundler pass; a failed build aborts the whole phase.
   const result = await runner({ entrypoints, outdir, minify });
   if (!result.success) {
     throw new Error(`[web] build.bundle ${kind} build failed`);
   }
+
+  // Map each hashed artifact basename to its embeddable web path.
   const hashed: BuildCacheEntry = {};
   for (const output of result.outputs) {
-    // Store the path RELATIVE to the publish root (`outDir`) with POSIX separators, e.g.
-    // "assets/main-abc123.css". `buildAssetTags` prepends "/" → "/assets/main-abc123.css".
-    // The runner may return an absolute path (Bun.build does), so a raw `output.path` here
-    // would inject a broken `//Users/.../main.css` (protocol-relative) URL.
-    const webPath = path
-      .relative(path.resolve(outDir), path.resolve(output.path))
-      .split(path.sep)
-      .join("/");
-    hashed[path.basename(output.path)] = webPath;
+    hashed[path.basename(output.path)] = normalizeAssetPath(output.path, outDir);
   }
+
+  // Publish the kind's asset map for downstream phases and record the count.
   ctx.state.buildCache.set(kind, hashed);
   ctx.log.debug("build:bundle", { kind, count: result.outputs.length });
 }

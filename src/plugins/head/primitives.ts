@@ -110,6 +110,29 @@ export function feedLink(title: string, url: string, type = "application/rss+xml
 }
 
 /**
+ * Build the schema.org `Article` structured-data object for the JSON-LD block,
+ * carrying only the fields the article actually provides (optional fields are
+ * omitted rather than emitted as `undefined`).
+ *
+ * @param articleMeta - Article metadata (title, description, author, dates, image…).
+ * @returns A JSON-serializable `Article` object ready to hand to {@link jsonLd}.
+ * @example buildArticleJsonLd({ title: "Hi", author: "A", published: "2026-01-01" })
+ */
+function buildArticleJsonLd(articleMeta: ArticleMeta): Record<string, unknown> {
+  const ld: Record<string, unknown> = {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    headline: articleMeta.title
+  };
+  if (articleMeta.description) ld.description = articleMeta.description;
+  if (articleMeta.author) ld.author = articleMeta.author;
+  if (articleMeta.published) ld.datePublished = articleMeta.published;
+  if (articleMeta.modified) ld.dateModified = articleMeta.modified;
+  if (articleMeta.image) ld.image = articleMeta.image;
+  return ld;
+}
+
+/**
  * Compose the full head element set for an article page: og:type=article, published/
  * modified times, author, section, tags, plus a JSON-LD `Article` block and canonical.
  *
@@ -121,7 +144,10 @@ export function feedLink(title: string, url: string, type = "application/rss+xml
  * @example buildArticleHead({ title: "Hi", author: "A", published: "2026-01-01" }, "https://x/p")
  */
 export function buildArticleHead(articleMeta: ArticleMeta, canonicalUrl: string): HeadElement[] {
+  // Start from the always-present base: canonical link + og:type=article.
   const elements: HeadElement[] = [canonical(canonicalUrl), og("og:type", "article")];
+
+  // Add the OG article meta the article actually carries (dates, author, section, tags).
   if (articleMeta.published) {
     elements.push(og(`${ARTICLE_PREFIX}published_time`, articleMeta.published));
   }
@@ -133,17 +159,11 @@ export function buildArticleHead(articleMeta: ArticleMeta, canonicalUrl: string)
   for (const tag of articleMeta.tags ?? []) {
     elements.push(og(`${ARTICLE_PREFIX}tag`, tag));
   }
+
+  // Advertise the social preview image when one is supplied.
   if (articleMeta.image) elements.push(og("og:image", articleMeta.image));
-  const ld: Record<string, unknown> = {
-    "@context": "https://schema.org",
-    "@type": "Article",
-    headline: articleMeta.title
-  };
-  if (articleMeta.description) ld.description = articleMeta.description;
-  if (articleMeta.author) ld.author = articleMeta.author;
-  if (articleMeta.published) ld.datePublished = articleMeta.published;
-  if (articleMeta.modified) ld.dateModified = articleMeta.modified;
-  if (articleMeta.image) ld.image = articleMeta.image;
-  elements.push(jsonLd(ld));
+
+  // Close with the JSON-LD `Article` block built from the same metadata.
+  elements.push(jsonLd(buildArticleJsonLd(articleMeta)));
   return elements;
 }

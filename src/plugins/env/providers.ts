@@ -8,6 +8,8 @@ import type { EnvProvider } from "./types";
 const DEFAULT_DOTENV_PATH = ".env.local";
 /** Property on `globalThis` that the consumer sets per Cloudflare request. */
 const CLOUDFLARE_GLOBAL = "__CLOUDFLARE_ENV__";
+/** `String.indexOf` sentinel meaning "no `=` separator on this line". */
+const NO_SEPARATOR = -1;
 
 /**
  * Strips a single matching pair of surrounding double or single quotes from a
@@ -33,6 +35,23 @@ function stripQuotes(value: string): string {
 }
 
 /**
+ * Reports whether a trimmed line carries no assignment — a blank line or a
+ * full-line `#` comment — and should be skipped by the parser.
+ *
+ * @param trimmed - A whitespace-trimmed line from the dotenv text.
+ * @returns `true` when the line is empty or a comment.
+ * @example
+ * ```ts
+ * isIgnoredLine(""); // true
+ * isIgnoredLine("# note"); // true
+ * isIgnoredLine("A=1"); // false
+ * ```
+ */
+function isIgnoredLine(trimmed: string): boolean {
+  return trimmed === "" || trimmed.startsWith("#");
+}
+
+/**
  * Parses `.env`-style text into a flat record. Handles CRLF/LF, blank lines,
  * full-line `#` comments, first-`=` splitting, key/value trimming, and a single
  * outer quote pair. Does not strip trailing inline comments on unquoted values.
@@ -47,10 +66,15 @@ function stripQuotes(value: string): string {
 function parseDotenv(text: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const line of text.split(/\r?\n/)) {
+    // Skip lines that hold no assignment: blanks and full-line comments.
     const trimmed = line.trim();
-    if (trimmed === "" || trimmed.startsWith("#")) continue;
+    if (isIgnoredLine(trimmed)) continue;
+
+    // The first `=` is the key/value boundary; a line without one is malformed.
     const eq = trimmed.indexOf("=");
-    if (eq === -1) continue;
+    if (eq === NO_SEPARATOR) continue;
+
+    // Trim both sides, strip one outer quote pair off the value, and record it.
     const key = trimmed.slice(0, eq).trim();
     const value = stripQuotes(trimmed.slice(eq + 1).trim());
     out[key] = value;

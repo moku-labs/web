@@ -76,6 +76,84 @@ export async function inspectOutdir(dir: string): Promise<OutdirStats> {
 }
 
 /**
+ * Assert that `wrangler.jsonc` exists at the project root (cheap stat), throwing
+ * the scaffolding hint if it is missing.
+ *
+ * @param root - Absolute project root the config is expected at.
+ * @returns Resolves when `wrangler.jsonc` is present.
+ * @throws {Error} `ERR_DEPLOY_NO_WRANGLER_CONFIG` when the file is absent.
+ * @example
+ * await checkWranglerConfig("/project");
+ */
+async function checkWranglerConfig(root: string): Promise<void> {
+  try {
+    await stat(path.join(root, "wrangler.jsonc"));
+  } catch {
+    throw deployError(
+      "ERR_DEPLOY_NO_WRANGLER_CONFIG",
+      `${ERROR_PREFIX}: wrangler.jsonc not found.\n  Run \`app.deploy.init()\` to scaffold it, then retry.`
+    );
+  }
+}
+
+/**
+ * Assert that the walked outDir is non-empty, throwing the build-first hint when
+ * it has no files.
+ *
+ * @param stats - The outDir walk aggregate from {@link inspectOutdir}.
+ * @param outDir - The configured outDir (used verbatim in the error message).
+ * @throws {Error} `ERR_DEPLOY_EMPTY_OUTDIR` when the outDir contains no files.
+ * @example
+ * checkOutdirNonEmpty({ fileCount: 12, oversizePath: null }, "dist");
+ */
+function checkOutdirNonEmpty(stats: OutdirStats, outDir: string): void {
+  if (stats.fileCount === 0) {
+    throw deployError(
+      "ERR_DEPLOY_EMPTY_OUTDIR",
+      `${ERROR_PREFIX}: outDir ${JSON.stringify(outDir)} is empty — nothing to deploy.`
+    );
+  }
+}
+
+/**
+ * Assert that the outDir file count is within the effective (env-overridable)
+ * tier limit, throwing the raise-the-cap hint when it overflows.
+ *
+ * @param fileCount - The number of files found in the outDir walk.
+ * @param env - Environment used to resolve the file-limit override.
+ * @throws {Error} `ERR_DEPLOY_TOO_MANY_FILES` when the count exceeds the limit.
+ * @example
+ * checkFileCount(150, { MOKU_DEPLOY_MAX_FILES: "100000" });
+ */
+function checkFileCount(fileCount: number, env: NodeJS.ProcessEnv): void {
+  const limit = resolveFileLimit(env);
+  if (fileCount > limit) {
+    throw deployError(
+      "ERR_DEPLOY_TOO_MANY_FILES",
+      `${ERROR_PREFIX}: outDir contains ${fileCount} files; the limit is ${limit}.\n  Raise it with ${MAX_FILES_ENV} (paid tier) or reduce the output.`
+    );
+  }
+}
+
+/**
+ * Assert that no single file exceeded the per-file size cap, throwing for the
+ * first oversize path flagged by the walk.
+ *
+ * @param oversizePath - The first oversize file path, or null when none.
+ * @throws {Error} `ERR_DEPLOY_FILE_TOO_LARGE` when an oversize file exists.
+ * @example
+ * checkFileSize(null);
+ */
+function checkFileSize(oversizePath: string | null): void {
+  if (oversizePath !== null) {
+    throw deployError(
+      "ERR_DEPLOY_FILE_TOO_LARGE",
+      `${ERROR_PREFIX}: file ${JSON.stringify(oversizePath)} exceeds the 25 MiB per-file limit.`
+    );
+  }
+}
+
+/**
  * Run the deploy preflight validators in cheap → expensive order, throwing a
  * coded deploy error on the first failure:
  * 1. wrangler.jsonc exists, 2. outDir exists and is non-empty,
@@ -95,17 +173,9 @@ export async function runPreflight(
   env: NodeJS.ProcessEnv = process.env
 ): Promise<void> {
   // 1. wrangler.jsonc exists (cheap stat).
-  const wranglerPath = path.join(root, "wrangler.jsonc");
-  try {
-    await stat(wranglerPath);
-  } catch {
-    throw deployError(
-      "ERR_DEPLOY_NO_WRANGLER_CONFIG",
-      `${ERROR_PREFIX}: wrangler.jsonc not found.\n  Run \`app.deploy.init()\` to scaffold it, then retry.`
-    );
-  }
+  await checkWranglerConfig(root);
 
-  // 2. outDir exists and is non-empty.
+  // 2. outDir exists (walkable) and is non-empty.
   const outDirAbs = path.isAbsolute(config.outDir)
     ? path.resolve(config.outDir)
     : path.resolve(root, config.outDir);
@@ -115,27 +185,11 @@ export async function runPreflight(
       `${ERROR_PREFIX}: outDir ${JSON.stringify(config.outDir)} is missing.\n  Run your build first, then retry.`
     );
   });
-  if (stats.fileCount === 0) {
-    throw deployError(
-      "ERR_DEPLOY_EMPTY_OUTDIR",
-      `${ERROR_PREFIX}: outDir ${JSON.stringify(config.outDir)} is empty — nothing to deploy.`
-    );
-  }
+  checkOutdirNonEmpty(stats, config.outDir);
 
   // 3. File count within the tier limit (env-overridable).
-  const limit = resolveFileLimit(env);
-  if (stats.fileCount > limit) {
-    throw deployError(
-      "ERR_DEPLOY_TOO_MANY_FILES",
-      `${ERROR_PREFIX}: outDir contains ${stats.fileCount} files; the limit is ${limit}.\n  Raise it with ${MAX_FILES_ENV} (paid tier) or reduce the output.`
-    );
-  }
+  checkFileCount(stats.fileCount, env);
 
   // 4. No single file over the per-file size cap.
-  if (stats.oversizePath !== null) {
-    throw deployError(
-      "ERR_DEPLOY_FILE_TOO_LARGE",
-      `${ERROR_PREFIX}: file ${JSON.stringify(stats.oversizePath)} exceeds the 25 MiB per-file limit.`
-    );
-  }
+  checkFileSize(stats.oversizePath);
 }

@@ -110,35 +110,99 @@ export type DeployPluginContext = {
  */
 export function validateConfig(ctx: DeployPluginContext): void {
   const { config } = ctx;
+
+  // Reject any deploy target other than the one this version supports.
   if (config.target !== "cloudflare-pages") {
     throw deployError(
       "ERR_DEPLOY_CONFIG",
       `${ERROR_PREFIX}: target ${JSON.stringify(config.target)} is unsupported.\n  Only "cloudflare-pages" is supported in this version.`
     );
   }
-  if (typeof config.outDir !== "string" || config.outDir.length === 0) {
+
+  // The build output directory must name a real, non-empty path.
+  const hasUsableOutDir = typeof config.outDir === "string" && config.outDir.length > 0;
+  if (!hasUsableOutDir) {
     throw deployError(
       "ERR_DEPLOY_CONFIG",
       `${ERROR_PREFIX}: outDir must be a non-empty string.\n  Set pluginConfigs.deploy.outDir to your build output directory (e.g. "dist").`
     );
   }
-  if (
-    !Array.isArray(config.scrubAllowlist) ||
-    !config.scrubAllowlist.every(item => typeof item === "string")
-  ) {
+
+  // The scrub allowlist must be a homogeneous string array.
+  const isStringArray =
+    Array.isArray(config.scrubAllowlist) &&
+    config.scrubAllowlist.every(item => typeof item === "string");
+  if (!isStringArray) {
     throw deployError(
       "ERR_DEPLOY_CONFIG",
       `${ERROR_PREFIX}: scrubAllowlist must be an array of strings.`
     );
   }
-  if (config.compatibilityDate !== undefined && !COMPAT_DATE_REGEX.test(config.compatibilityDate)) {
+
+  // When supplied, the compatibility date must be a YYYY-MM-DD calendar string.
+  const hasMalformedCompatDate =
+    config.compatibilityDate !== undefined && !COMPAT_DATE_REGEX.test(config.compatibilityDate);
+  if (hasMalformedCompatDate) {
     throw deployError(
       "ERR_DEPLOY_CONFIG",
       `${ERROR_PREFIX}: compatibilityDate ${JSON.stringify(config.compatibilityDate)} must be in YYYY-MM-DD form.`
     );
   }
+
   // Ensure the site dependency resolves (slug is derived from site.name()).
   ctx.require(sitePlugin);
+}
+
+/**
+ * Run wrangler for the prepared argv and surface its scrubbed result, translating
+ * a non-zero exit into the classified deploy error. The API token is read from env
+ * here so it never crosses a logging boundary; only scrubbed output is returned.
+ *
+ * @param ctx - Plugin context (provides `state.spawn`, `config`, `env`).
+ * @param args - The fully-built, pre-validated wrangler argv.
+ * @returns The wrangler `stdout` plus the scrubbed `stderr` to log on success.
+ * @throws {Error} With a `code` from the deploy error taxonomy on a non-zero exit.
+ * @example
+ * const { stdout, scrubbedStderr } = await executeDeploy(ctx, args);
+ */
+async function executeDeploy(
+  ctx: DeployPluginContext,
+  args: string[]
+): Promise<{ stdout: string; scrubbedStderr: string }> {
+  const token = ctx.env.require("CLOUDFLARE_API_TOKEN"); // never logged
+  const { stdout, scrubbedStderr, exitCode } = await runWrangler({
+    spawn: ctx.state.spawn,
+    args,
+    token,
+    allowlist: ctx.config.scrubAllowlist
+  });
+
+  if (exitCode !== 0) {
+    const { code, message } = classifyWranglerError(exitCode, scrubbedStderr);
+    throw deployError(code, message);
+  }
+
+  return { stdout, scrubbedStderr };
+}
+
+/**
+ * Assemble the public {@link DeployResult} from wrangler's stdout, parsing the
+ * deployed URL and deployment id and stamping the elapsed wall-clock duration.
+ *
+ * @param stdout - The wrangler `stdout` carrying the URL + deployment id.
+ * @param branch - The branch the deploy targeted.
+ * @param startedAt - The `Date.now()` timestamp captured before the subprocess ran.
+ * @returns The fully-populated deploy result.
+ * @example
+ * const result = buildDeployResult(stdout, "main", start);
+ */
+function buildDeployResult(stdout: string, branch: string, startedAt: number): DeployResult {
+  return {
+    url: parseDeployUrl(stdout),
+    deploymentId: parseDeploymentId(stdout),
+    branch,
+    durationMs: Date.now() - startedAt
+  };
 }
 
 /**
@@ -166,37 +230,22 @@ export function createApi(ctx: DeployPluginContext): Api {
      * await api.run();
      */
     async run(options = {}) {
+      // Derive the deploy inputs: project root, site-derived slug, target branch.
       const root = process.cwd();
       const slug = toSlug(ctx.require(sitePlugin).name());
       const branch = options.branch ?? ctx.config.productionBranch ?? "main";
 
-      // Preflight (cheap → expensive) before any subprocess work.
+      // Preflight (cheap → expensive), then build the guarded, validated argv.
       await runPreflight(ctx.config, root);
-      // Branch guard + path-traversal re-validation, baked into the argv builder.
       const args = buildWranglerArgs({ outDir: ctx.config.outDir, slug, branch, root });
 
-      const token = ctx.env.require("CLOUDFLARE_API_TOKEN"); // never logged
+      // Spawn wrangler and capture its scrubbed output (throws on a failed deploy).
       const start = Date.now();
-      const { stdout, scrubbedStderr, exitCode } = await runWrangler({
-        spawn: ctx.state.spawn,
-        args,
-        token,
-        allowlist: ctx.config.scrubAllowlist
-      });
+      const { stdout, scrubbedStderr } = await executeDeploy(ctx, args);
+      ctx.log.info(scrubbedStderr); // only scrubbed* values reach ctx.log
 
-      if (exitCode !== 0) {
-        const { code, message } = classifyWranglerError(exitCode, scrubbedStderr);
-        throw deployError(code, message);
-      }
-      // Only scrubbed* values reach ctx.log.
-      ctx.log.info(scrubbedStderr);
-
-      const result: DeployResult = {
-        url: parseDeployUrl(stdout),
-        deploymentId: parseDeploymentId(stdout),
-        branch,
-        durationMs: Date.now() - start
-      };
+      // Record the result as lastDeployment and announce it, then return it.
+      const result = buildDeployResult(stdout, branch, start);
       ctx.state.lastDeployment = result;
       ctx.emit("deploy:complete", {
         url: result.url,

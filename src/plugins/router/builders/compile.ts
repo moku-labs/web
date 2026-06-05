@@ -20,6 +20,56 @@ import { createMatchFunction } from "./match";
 /** Shared `[web]` error prefix for router validation failures. */
 const ERROR_PREFIX = "[web] router";
 
+/** Maximum number of optional `{lang:?}` segments a single pattern may declare. */
+const MAX_LANG_SEGMENTS = 1;
+
+/**
+ * Whether a pattern is rooted — every route pattern must be absolute (start
+ * with `/`) so it composes cleanly with the locale prefix and base URL.
+ *
+ * @param pattern - The user pattern to check.
+ * @returns `true` when the pattern starts with `/`.
+ * @example
+ * ```ts
+ * isPatternRooted("/{slug}/"); // true
+ * ```
+ */
+function isPatternRooted(pattern: string): boolean {
+  return pattern.startsWith("/");
+}
+
+/**
+ * Whether a pattern's `{` and `}` braces are balanced — every placeholder must
+ * be closed so segment parsing cannot drift.
+ *
+ * @param pattern - The user pattern to check.
+ * @returns `true` when open and close brace counts are equal.
+ * @example
+ * ```ts
+ * hasBalancedBraces("/{slug}/"); // true
+ * ```
+ */
+function hasBalancedBraces(pattern: string): boolean {
+  const open = (pattern.match(/\{/g) ?? []).length;
+  const close = (pattern.match(/\}/g) ?? []).length;
+  return open === close;
+}
+
+/**
+ * Whether a pattern declares at most one optional `{lang:?}` segment — the
+ * locale prefix is single-slot, so a second occurrence is ambiguous.
+ *
+ * @param pattern - The user pattern to check.
+ * @returns `true` when the pattern has zero or one `{lang:?}` segments.
+ * @example
+ * ```ts
+ * hasValidLangCount("/{lang:?}/{slug}/"); // true
+ * ```
+ */
+function hasValidLangCount(pattern: string): boolean {
+  return (pattern.match(/\{lang:\?\}/g) ?? []).length <= MAX_LANG_SEGMENTS;
+}
+
 /**
  * Validate the route map (fail-fast in `onInit`). Throws with the `[web]` prefix
  * naming the offending route/pattern on any failure: empty map, a pattern not
@@ -33,28 +83,28 @@ const ERROR_PREFIX = "[web] router";
  * ```
  */
 export function validateRoutes(routes: RouteMap): void {
+  // A map with no routes is unusable — fail before per-route checks.
   const names = Object.keys(routes);
   if (names.length === 0) {
     throw new Error(
       `${ERROR_PREFIX}: route map is empty.\n  Register at least one route via pluginConfigs.router.routes.`
     );
   }
+
+  // Reject the first malformed pattern, naming the offending route.
   for (const name of names) {
-    const definition = routes[name];
-    const pattern = definition?.pattern ?? "";
-    if (!pattern.startsWith("/")) {
+    const pattern = routes[name]?.pattern ?? "";
+    if (!isPatternRooted(pattern)) {
       throw new Error(
         `${ERROR_PREFIX}: route "${name}" pattern must start with "/" (got "${pattern}").`
       );
     }
-    const open = (pattern.match(/\{/g) ?? []).length;
-    const close = (pattern.match(/\}/g) ?? []).length;
-    if (open !== close) {
+    if (!hasBalancedBraces(pattern)) {
       throw new Error(
         `${ERROR_PREFIX}: route "${name}" pattern has unbalanced braces ("${pattern}").`
       );
     }
-    if ((pattern.match(/\{lang:\?\}/g) ?? []).length > 1) {
+    if (!hasValidLangCount(pattern)) {
       throw new Error(
         `${ERROR_PREFIX}: route "${name}" pattern has more than one {lang:?} segment ("${pattern}").`
       );
@@ -84,14 +134,20 @@ export function patternToUrlPattern(
   const out: string[] = [];
   for (const segment of pattern.split("/")) {
     const placeholder = parsePlaceholder(segment);
+
+    // Static segment — copy it through verbatim.
     if (!placeholder) {
       out.push(segment);
       continue;
     }
+
+    // Optional `{lang:?}` — keep it (with the locale regex) only in the withLang variant.
     if (placeholder.name === "lang" && placeholder.optional) {
       if (variant === "withLang") out.push(`:lang${langRegex}`);
       continue;
     }
+
+    // Regular dynamic param — emit as a named URLPattern group.
     out.push(`:${placeholder.name}`);
   }
   return out.join("/");
@@ -145,6 +201,69 @@ export function buildFilePath(pattern: string, params: Record<string, string>): 
 }
 
 /**
+ * Build both URLPattern matchers for a route — the `withLang` variant (locale
+ * prefix injected) and the `bare` variant (optional `{lang:?}` stripped) — from
+ * the user pattern and the active locale alternation.
+ *
+ * @param pattern - The user pattern, e.g. `/{lang:?}/{slug}/`.
+ * @param locales - Active locale codes, joined into the alternation regex.
+ * @returns The frozen `{ withLang, bare }` matcher pair.
+ * @example
+ * ```ts
+ * const matchers = buildMatchers("/{lang:?}/{slug}/", ["en", "uk"]);
+ * ```
+ */
+function buildMatchers(
+  pattern: string,
+  locales: readonly string[]
+): { readonly withLang: URLPattern; readonly bare: URLPattern } {
+  const langRegex = `(${locales.join("|")})`;
+  return {
+    withLang: new URLPattern({ pathname: patternToUrlPattern(pattern, "withLang", langRegex) }),
+    bare: new URLPattern({ pathname: patternToUrlPattern(pattern, "bare", langRegex) })
+  } as const;
+}
+
+/**
+ * Build the `toUrl` closure for a route — resolves the pattern against params
+ * into a relative URL. Captured per-route so callers need not re-supply the
+ * pattern.
+ *
+ * @param pattern - The route pattern bound into the closure.
+ * @returns A function mapping params to the resolved relative URL.
+ * @example
+ * ```ts
+ * const toUrl = createToUrlFn("/{slug}/");
+ * toUrl({ slug: "x" }); // "/x/"
+ * ```
+ */
+function createToUrlFunction(pattern: string): (params: Record<string, string>) => string {
+  return (params: Record<string, string>): string => buildUrl(pattern, params);
+}
+
+/**
+ * Build the `toFile` closure for a route — resolves the output file path from
+ * params. Honors a custom `.toFile()` override (captured in `_handlers.toFile`)
+ * when present, falling back to the pattern-derived `…/index.html` path.
+ *
+ * @param pattern - The route pattern bound into the closure.
+ * @param definition - The route definition carrying any `toFile` override.
+ * @returns A function mapping params to the output file path.
+ * @example
+ * ```ts
+ * const toFile = createToFileFn("/{slug}/", definition);
+ * toFile({ slug: "x" }); // "x/index.html"
+ * ```
+ */
+function createToFileFunction(
+  pattern: string,
+  definition: RouteDefinition
+): (params: Record<string, string>) => string {
+  return (params: Record<string, string>): string =>
+    definition._handlers.toFile?.(params) ?? buildFilePath(pattern, params);
+}
+
+/**
  * Compile a single route definition into its `CompiledRoute` entry.
  *
  * @param name - The route name key.
@@ -161,46 +280,23 @@ function compileRoute(
   definition: RouteDefinition,
   input: CompileInput
 ): CompiledRoute {
+  // Build the URLPattern matchers (both locale variants) from the user pattern.
   const { pattern } = definition;
-  const langRegex = `(${input.locales.join("|")})`;
-  const matchers = {
-    withLang: new URLPattern({ pathname: patternToUrlPattern(pattern, "withLang", langRegex) }),
-    bare: new URLPattern({ pathname: patternToUrlPattern(pattern, "bare", langRegex) })
-  } as const;
+  const matchers = buildMatchers(pattern, input.locales);
+
+  // Capture the per-route URL/file builders that close over the pattern.
+  const toUrl = createToUrlFunction(pattern);
+  const toFile = createToFileFunction(pattern, definition);
+
+  // Assemble the compiled entry: matchers, match fn, builders, and metadata.
   return {
     name,
     pattern,
     dynamicSegmentCount: dynamicSegmentCount(pattern),
     matchers,
     matchFn: createMatchFunction(matchers, input.defaultLocale),
-    /**
-     * Build a URL for this route from params.
-     *
-     * @param params - Param values to substitute.
-     * @returns The resolved relative URL.
-     * @example
-     * ```ts
-     * entry.toUrl({ slug: "x" });
-     * ```
-     */
-    toUrl(params: Record<string, string>): string {
-      return buildUrl(pattern, params);
-    },
-    /**
-     * Build the output file path for this route from params. Honors a custom
-     * `.toFile()` override (captured in `_handlers.toFile`) when present, falling
-     * back to the pattern-derived `…/index.html` path otherwise.
-     *
-     * @param params - Param values to substitute.
-     * @returns The output file path.
-     * @example
-     * ```ts
-     * entry.toFile({ slug: "x" });
-     * ```
-     */
-    toFile(params: Record<string, string>): string {
-      return definition._handlers.toFile?.(params) ?? buildFilePath(pattern, params);
-    },
+    toUrl,
+    toFile,
     definition,
     meta: { ...definition._meta }
   };

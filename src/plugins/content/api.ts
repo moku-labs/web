@@ -25,6 +25,12 @@ import type {
 const NO_PROVIDER =
   "[web] content: no provider composed.\n  Add fileSystemContent(...) to pluginConfigs.content.providers.";
 
+/** Zero-pad width for the per-locale ordinal in a `contentId` (e.g. `0001`). */
+const ID_PADDING = 4;
+
+/** Path segment offset of the article slug — the parent directory of the source file. */
+const PATH_SLUG_INDEX = -2;
+
 /**
  * Minimal structural shape of the plugin context that {@link contentApi} consumes —
  * shell state, config (providers), global, emit, and the typed `require` accessor used
@@ -283,6 +289,52 @@ function toCard(article: Article): ArticleCard {
 }
 
 /**
+ * Resolve every slug for one locale, then narrow to the articles that belong in the
+ * locale collection: existing files only, drafts dropped in production, sorted
+ * date-descending. The single load+filter+sort step behind {@link createContentApi.loadAll}.
+ *
+ * @param ctx - Kernel-free domain context (provider + i18n helpers + stage).
+ * @param slugs - Every known article slug from the provider.
+ * @param locale - The locale to resolve and collect.
+ * @returns The published (date-descending) articles for this locale.
+ * @example
+ * ```ts
+ * const present = await loadAndFilterArticles(ctx, slugs, "en");
+ * ```
+ */
+async function loadAndFilterArticles(
+  ctx: ContentApiContext,
+  slugs: readonly string[],
+  locale: string
+): Promise<Article[]> {
+  const isProduction = ctx.global.stage === "production";
+
+  const resolved = await Promise.all(slugs.map(slug => resolveArticle(ctx, slug, locale)));
+
+  return resolved
+    .filter((article): article is Article => article !== null)
+    .filter(article => isProduction === false || article.computed.status !== "draft")
+    .toSorted(byDateDescending);
+}
+
+/**
+ * Derive the article slug from a source file path — the parent directory name
+ * (`content/intro/en.md` → `intro`). Returns `undefined` when the path has no
+ * parent segment.
+ *
+ * @param filePath - The (possibly stale) source file path.
+ * @returns The slug segment, or `undefined` when none exists.
+ * @example
+ * ```ts
+ * extractSlugFromPath("content/intro/en.md"); // "intro"
+ * ```
+ */
+function extractSlugFromPath(filePath: string): string | undefined {
+  const segments = filePath.split(/[/\\]/);
+  return segments.at(PATH_SLUG_INDEX);
+}
+
+/**
  * Creates the content plugin API surface (loadAll, load, renderMarkdown, invalidate,
  * articleToCard, contentDir) over the kernel-free domain context. Delegates all source
  * reads to `ctx.provider`; drafts are excluded only in production; `loadAll` emits
@@ -309,23 +361,20 @@ export function createContentApi(ctx: ContentApiContext): Api {
      * ```
      */
     async loadAll(): Promise<Map<string, Article[]>> {
+      // Gather the inputs: every known slug, expanded across every active locale.
       const slugs = await ctx.provider.slugs();
-      const isProduction = ctx.global.stage === "production";
+      const locales = ctx.locales();
 
+      // Build the per-locale collection, assigning each article its ordered contentId
+      // (post-sort, so the ordinal matches display order) and caching it by slug.
       const result = new Map<string, Article[]>();
       let total = 0;
-      const locales = ctx.locales();
       for (const locale of locales) {
-        const resolved = await Promise.all(slugs.map(slug => resolveArticle(ctx, slug, locale)));
-        const present = resolved
-          .filter((article): article is Article => article !== null)
-          .filter(article => isProduction === false || article.computed.status !== "draft")
-          .toSorted(byDateDescending);
-
+        const present = await loadAndFilterArticles(ctx, slugs, locale);
         const cache = new Map<string, Article>();
         let index = 0;
         for (const article of present) {
-          article.computed.contentId = `${locale}:${String(index).padStart(4, "0")}:${article.computed.slug}`;
+          article.computed.contentId = `${locale}:${String(index).padStart(ID_PADDING, "0")}:${article.computed.slug}`;
           cache.set(article.computed.slug, article);
           index += 1;
         }
@@ -333,6 +382,8 @@ export function createContentApi(ctx: ContentApiContext): Api {
         result.set(locale, present);
         total += present.length;
       }
+
+      // Announce the loaded set so dependents can react, then hand back the map.
       ctx.emit("content:ready", { locales, articleCount: total });
       return result;
     },
@@ -394,17 +445,22 @@ export function createContentApi(ctx: ContentApiContext): Api {
      * ```
      */
     invalidate(paths: readonly string[]): void {
+      // Drop empty/whitespace paths up front so every downstream step is meaningful.
       const accepted = paths.filter(filePath => filePath.trim() !== "");
+
+      // Let the provider clear its own source caches for the stale files.
       ctx.provider.invalidate?.(accepted);
+
+      // Evict each stale article's slug from every locale cache so the next loadAll re-reads it.
       for (const filePath of accepted) {
-        const segments = filePath.split(/[/\\]/);
-        const slug = segments.at(-2);
-        if (slug !== undefined) {
-          for (const cache of ctx.state.articles.values()) {
-            cache.delete(slug);
-          }
+        const slug = extractSlugFromPath(filePath);
+        if (slug === undefined) continue;
+        for (const cache of ctx.state.articles.values()) {
+          cache.delete(slug);
         }
       }
+
+      // Announce the invalidation so dependents (e.g. dev rebuilds) can react.
       ctx.emit("content:invalidated", { paths: accepted });
     },
 

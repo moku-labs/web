@@ -50,6 +50,25 @@ async function writeEntry(
 }
 
 /**
+ * Roll up the per-file write records into the public {@link DataWriteSummary}:
+ * file count, total byte length, and the `outDir`-relative paths in write order.
+ *
+ * @param written - The per-file `{ relative, bytes }` records from {@link writeEntry}.
+ * @returns The aggregated write summary.
+ * @example
+ * ```ts
+ * compileSummary([{ relative: "_data/en/hello/index.json", bytes: 12 }]);
+ * ```
+ */
+function compileSummary(written: readonly { relative: string; bytes: number }[]): DataWriteSummary {
+  return {
+    fileCount: written.length,
+    bytes: written.reduce((total, file) => total + file.bytes, 0),
+    files: written.map(file => file.relative)
+  };
+}
+
+/**
  * The Node write side of the provider. Persists one JSON file per entry (bounded
  * by `p-limit`) — domain-agnostic, no route expansion (`build` already did that).
  * Records the summary in `ctx.state.lastWrite`.
@@ -69,16 +88,17 @@ export async function writeData(
   entries: readonly DataEntry[],
   options?: { outDir?: string }
 ): Promise<DataWriteSummary> {
+  // Resolve the output root, falling back to build's default when unset.
   const outDir = options?.outDir ?? DEFAULT_OUT_DIR;
+
+  // Persist one JSON file per entry, bounded by the write-concurrency limiter.
   const limit = pLimit(WRITE_CONCURRENCY);
   const written = await Promise.all(
     entries.map(entry => limit(() => writeEntry(entry, outDir, ctx.config.outputDir)))
   );
-  const summary: DataWriteSummary = {
-    fileCount: written.length,
-    bytes: written.reduce((total, file) => total + file.bytes, 0),
-    files: written.map(file => file.relative)
-  };
+
+  // Roll up the per-file records and record the summary on state.
+  const summary = compileSummary(written);
   ctx.state.lastWrite = summary;
   return summary;
 }

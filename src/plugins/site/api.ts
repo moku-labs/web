@@ -12,6 +12,40 @@ type SiteContext = {
 };
 
 /**
+ * Strips every trailing "/" from a value, so it can own the single slash that a
+ * join boundary inserts.
+ *
+ * @param value - The string to trim (e.g. an absolute base URL).
+ * @returns The value with all trailing slashes removed.
+ * @example
+ * ```ts
+ * trimTrailingSlashes("https://blog.dev//"); // "https://blog.dev"
+ * ```
+ */
+function trimTrailingSlashes(value: string): string {
+  let trimmed = value;
+  while (trimmed.endsWith("/")) trimmed = trimmed.slice(0, -1);
+  return trimmed;
+}
+
+/**
+ * Strips every leading "/" from a value, so the join boundary is the only slash
+ * separating it from the base.
+ *
+ * @param value - The string to trim (e.g. a relative path).
+ * @returns The value with all leading slashes removed.
+ * @example
+ * ```ts
+ * trimLeadingSlashes("//about/"); // "about/"
+ * ```
+ */
+function trimLeadingSlashes(value: string): string {
+  let trimmed = value;
+  while (trimmed.startsWith("/")) trimmed = trimmed.slice(1);
+  return trimmed;
+}
+
+/**
  * Joins a relative path against an absolute base URL, normalizing the slash
  * boundary to exactly one "/". Returns the base unchanged for an empty or
  * root ("/") path; the supplied path's own trailing slash is preserved.
@@ -25,11 +59,14 @@ type SiteContext = {
  * ```
  */
 export function joinCanonical(base: string, path: string): string {
-  let trimmedBase = base;
-  while (trimmedBase.endsWith("/")) trimmedBase = trimmedBase.slice(0, -1);
+  // Normalize the base to own the join boundary's single slash.
+  const trimmedBase = trimTrailingSlashes(base);
+
+  // An empty or root path adds nothing — the base is already the canonical URL.
   if (path === "" || path === "/") return trimmedBase;
-  let trimmedPath = path;
-  while (trimmedPath.startsWith("/")) trimmedPath = trimmedPath.slice(1);
+
+  // Strip the path's leading slashes, then join across exactly one "/".
+  const trimmedPath = trimLeadingSlashes(path);
   return `${trimmedBase}/${trimmedPath}`;
 }
 
