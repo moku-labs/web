@@ -55,13 +55,12 @@ function setupData(options: DataSetup = {}) {
   return { state, emit, kernel, dataAt };
 }
 
-/** A route with a `parse` validator + a `render` producing a known VNode (no `load` — data is fetched). */
+/** A route whose `render` produces a known VNode from the fetched data (no `load` — data is fetched). */
 function makeDataRoute(extra: Partial<RouteDefinition["_handlers"]> = {}): RouteDefinition {
   return {
     pattern: "/{lang:?}/{slug}/",
     _meta: {},
     _handlers: {
-      parse: (raw: unknown) => raw,
       render: (ctx: { data: unknown }) =>
         h("p", {}, `data:${(ctx.data as { title: string }).title}`),
       head: (ctx: { data: unknown }) => ({ title: (ctx.data as { title: string }).title }),
@@ -256,7 +255,7 @@ describe("component nav lifecycle during processNav", () => {
 });
 
 describe("kernel.processNav — client DATA path (data plugin composed)", () => {
-  it("matches → fetches via dataAt → route.parse → route.render into the swap region", async () => {
+  it("matches → fetches via dataAt → route.render into the swap region", async () => {
     const { state, emit, kernel, dataAt } = setupData({
       route: makeDataRoute(),
       raw: { title: "From Data" }
@@ -278,11 +277,11 @@ describe("kernel.processNav — client DATA path (data plugin composed)", () => 
     expect(fetchSpy).not.toHaveBeenCalled(); // DATA path, not HTML-over-fetch
   });
 
-  it("falls back to HTML-over-fetch when route.parse throws (no partial swap)", async () => {
+  it("falls back to HTML-over-fetch when route.render throws (no partial swap)", async () => {
     const { kernel } = setupData({
       route: makeDataRoute({
-        parse: () => {
-          throw new Error("invalid payload");
+        render: () => {
+          throw new Error("render failed");
         }
       })
     });

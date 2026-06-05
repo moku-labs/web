@@ -59,6 +59,92 @@ export interface RouteContext<S extends RouteState> {
   readonly data: S["data"];
   /** Active locale for this render. */
   readonly locale: string;
+  /**
+   * Build a link to a named route by pattern substitution — the framework delivers
+   * this on the context (same output as `app.router.toUrl`), so render/head build
+   * links with no `app`/`createUrls` reference. Works identically at build and on
+   * client navigation.
+   */
+  readonly url: (name: string, params?: Record<string, string>) => string;
+}
+
+/**
+ * Structural extraction of a plugin instance's public API from its `_phantom`
+ * carrier (mirrors the kernel's `ExtractApi` / spec/09 §3). Lets the loader/generator
+ * `require` resolve a plugin instance to its typed public API.
+ *
+ * @example
+ * type ContentApi = ExtractApi<typeof contentPlugin>;
+ */
+export type ExtractApi<PluginCandidate> = PluginCandidate extends {
+  readonly _phantom: { readonly api: infer PluginApi };
+}
+  ? PluginApi
+  : never;
+
+/**
+ * Generic, instance-only `require` handed to a route's `.load()` / `.generate()` —
+ * the SAME shape as the kernel's `RequireFunction` (spec/08 §7) and the build's
+ * `PhaseRequire`, so the build forwards its own `ctx.require` straight through.
+ * Resolves a plugin INSTANCE to its public API; the consumer supplies the instance
+ * (e.g. `ctx.require(contentPlugin)`), so the router never names a sibling plugin.
+ *
+ * @example
+ * const content = ctx.require(contentPlugin); // ContentApi
+ */
+export type RouteRequire = <
+  PluginCandidate extends {
+    readonly name: string;
+    readonly spec: unknown;
+    readonly _phantom: {
+      readonly config: unknown;
+      readonly state: unknown;
+      readonly api: unknown;
+      readonly events: Record<string, unknown>;
+    };
+  }
+>(
+  plugin: PluginCandidate
+) => ExtractApi<PluginCandidate>;
+
+/**
+ * Build-time context handed to a route's `.load()`. Carries the resolved path
+ * `params` and active `locale`, plus the spec's `require`/`has` so a loader pulls
+ * sibling plugin APIs the canonical way — `ctx.require(contentPlugin)` — with no
+ * module global and no router→content coupling. Loaders run ONLY at build time
+ * (never on the client), inside the build plugin's context, so `require`/`has` are
+ * always live here.
+ *
+ * @example
+ * route("/{slug}/").load((ctx) => ctx.require(contentPlugin).load(ctx.params.slug, ctx.locale));
+ */
+export interface LoadContext<S extends RouteState> {
+  /** Resolved path params for this page instance. */
+  readonly params: S["params"];
+  /** Active locale this page instance is built for. */
+  readonly locale: string;
+  /** Resolve a sibling plugin instance to its public API (spec/08 §7). */
+  readonly require: RouteRequire;
+  /** Whether a plugin is registered (by name) — branch on OPTIONAL plugins. */
+  readonly has: (name: string) => boolean;
+}
+
+/**
+ * Build-time context handed to a route's `.generate()` — the static-param producer.
+ * Carries the active `locale` plus `require`/`has` (no `params` yet — `.generate()`
+ * PRODUCES the param sets). Same build-only guarantee as {@link LoadContext}.
+ *
+ * @example
+ * route("/{slug}/").generate(async (ctx) =>
+ *   [...(await ctx.require(contentPlugin).loadAll()).get(ctx.locale) ?? []].map((a) => ({ slug: a.computed.slug })));
+ */
+export interface GenerateContext {
+  /** Active locale to enumerate param sets for. */
+  readonly locale: string;
+  /** Resolve a sibling plugin instance to its public API (spec/08 §7). */
+  readonly require: RouteRequire;
+  /** Whether a plugin is registered (by name). */
+  readonly has: (name: string) => boolean;
 }
 
 /**
@@ -98,7 +184,7 @@ export interface RouteBuilder<S extends RouteState> extends RouteDefinition {
    * `.render()`/`.head()` see its return. Path params are preserved unchanged.
    */
   load<D>(
-    loader: (params: S["params"], locale: string) => D | Promise<D>
+    loader: (ctx: LoadContext<S>) => D | Promise<D>
   ): RouteBuilder<{ readonly params: S["params"]; readonly data: Awaited<D> }>;
   /**
    * Attach a ctx-aware layout wrapper that frames this route's rendered page in
@@ -110,19 +196,12 @@ export interface RouteBuilder<S extends RouteState> extends RouteDefinition {
   layout(component: (ctx: LayoutContext<S>, children: ComponentChildren) => VNode): RouteBuilder<S>;
   /** Attach the page render handler. */
   render(handler: (ctx: RouteContext<S>) => VNode): RouteBuilder<S>;
-  /**
-   * Attach the client-side validation gate: parse the raw `unknown` fetched from
-   * the persisted data file back into this route's data type `S["data"]`. Runs at
-   * the trust boundary before `render` on the client (and MUST return `S["data"]`,
-   * so a mismatched schema is a compile error). Throw inside it to reject malformed
-   * data — `spa` then falls back to HTML-over-fetch. Use a hand guard or any
-   * Standard-Schema validator (zod/valibot/arktype).
-   */
-  parse(handler: (raw: unknown) => S["data"]): RouteBuilder<S>;
   /** Attach the head/SEO handler. */
   head(handler: (ctx: RouteContext<S>) => HeadConfig): RouteBuilder<S>;
-  /** Attach a static-generation param producer. */
-  generate(handler: (locale: string) => S["params"][] | Promise<S["params"][]>): RouteBuilder<S>;
+  /** Attach a static-generation param producer (receives a {@link GenerateContext}). */
+  generate(
+    handler: (ctx: GenerateContext) => S["params"][] | Promise<S["params"][]>
+  ): RouteBuilder<S>;
   /**
    * Attach an arbitrary metadata bag. The bag MUST be JSON-serializable: it is
    * projected verbatim into `clientManifest()` and shipped to the browser.
@@ -136,18 +215,16 @@ export interface RouteBuilder<S extends RouteState> extends RouteDefinition {
 
 /** Build-only handler bag captured by a `RouteBuilder` (consumed by `build` via `manifest()`). */
 export interface RouteHandlers {
-  /** Data loader. */
-  readonly load?: (params: Record<string, string>, locale: string) => unknown;
+  /** Data loader (receives a {@link LoadContext}: params + locale + require/has). */
+  readonly load?: (ctx: LoadContext<RouteState>) => unknown;
   /** Layout wrapper (ctx-aware): frames the page in persistent chrome. SSG-only. */
   readonly layout?: (ctx: LayoutContext<RouteState>, children: ComponentChildren) => VNode;
   /** Page renderer. */
   readonly render?: (ctx: RouteContext<RouteState>) => VNode;
-  /** Client-side validation gate: `unknown` (fetched JSON) → the route's data type, or throw. */
-  readonly parse?: (raw: unknown) => unknown;
   /** Head/SEO producer. */
   readonly head?: (ctx: RouteContext<RouteState>) => HeadConfig;
-  /** Static-generation param producer. */
-  readonly generate?: (locale: string) => unknown[] | Promise<unknown[]>;
+  /** Static-generation param producer (receives a {@link GenerateContext}). */
+  readonly generate?: (ctx: GenerateContext) => unknown[] | Promise<unknown[]>;
   /** JSON serializer. */
   readonly toJson?: (ctx: RouteContext<RouteState>) => unknown;
   /** Output file-path producer. */
@@ -175,27 +252,47 @@ export interface RouteDefinition {
 export type RouteMap = Record<string, RouteDefinition>;
 
 /**
+ * A pure, app-free URL builder over a route map (the return type of `createUrls`).
+ * `toUrl` builds a route's path by name + params via pattern substitution — it needs
+ * NO running app, router instance, base URL, or i18n: just the route map the consumer
+ * already holds at module scope. Works identically at build, on client navigation,
+ * and inside hydrated islands. Reuses the SAME `buildUrl` as the runtime `RouterApi`,
+ * so the helper and the API can never diverge.
+ *
+ * @example
+ * const url = createUrls(routes);
+ * url.toUrl("article", { lang: "en", slug: "hello" }); // "/en/hello/"
+ */
+export interface Urls<T extends RouteMap> {
+  /**
+   * Build a route's URL path from its name and params. The name is typed to the
+   * route map's keys — only declared routes are accepted.
+   *
+   * @param name - Route name key from the map (e.g. `"home"`, `"article"`).
+   * @param params - Path params to substitute into the pattern. Defaults to `{}`.
+   * @returns The resolved relative URL path.
+   * @throws {Error} If `name` is not present in the route map.
+   * @example
+   * url.toUrl("home", { lang: "en" }); // "/en/"
+   */
+  toUrl<K extends keyof T & string>(name: K, params?: Record<string, string>): string;
+}
+
+/**
  * Configuration for the router plugin.
  *
  * @remarks
- * `routes` is an OPAQUE carrier at the config boundary — the framework `Config`
- * generic erases the per-route element types (spec/05 §8, spec/09 §4). Downstream
- * plugins read the typed route set via `ctx.require(routerPlugin).manifest()`.
+ * `routes` is the declarative route map — registered the normal config way via
+ * `createApp({ pluginConfigs: { router: { routes } } })` and compiled into the matcher
+ * table in the router's `onInit`. An `import * as routes` namespace is a valid value. It
+ * is OPTIONAL: omit it and register imperatively at runtime with `app.router.set(routes)`
+ * instead (e.g. a browser app that builds routes dynamically). The render `mode` is NOT
+ * here — it is a GLOBAL framework option (`createApp({ config: { mode } })`), read by the
+ * router via `ctx.global`.
  */
 export type RouterConfig = {
-  /**
-   * Named route definitions. Element type erases to the base `RouteDefinition`
-   * at this config boundary; per-route call-site types are preserved only through
-   * `defineRoutes()` + `route()` at the consumer and re-exposed via `manifest()`.
-   */
-  routes: RouteMap;
-  /**
-   * Render mode for URL/file resolution. Defaults to `"hybrid"`.
-   * - `"ssg"` static generation only (no client router emitted).
-   * - `"spa"` client-side routing only.
-   * - `"hybrid"` static HTML + client navigation overlay.
-   */
-  mode?: "ssg" | "spa" | "hybrid";
+  /** Declarative route map (route name → `route(...)`); compiled at init. An `import * as` namespace works. */
+  readonly routes?: RouteMap;
 };
 
 /** A resolved route exposing URL utilities with typed params (port of legacy TypedRoute). */
@@ -245,15 +342,14 @@ export interface MatcherTable {
 }
 
 /**
- * Router plugin state. `createState` runs with minimal context and returns a
- * mutable holder whose `table` is `null` until `onInit` (which has full context)
- * compiles and assigns it. Keeps all mutable state in `ctx.state` (no singletons).
+ * Router plugin state — a mutable holder whose `table` is `null` until the router's
+ * `onInit` compiles `config.routes` (or `app.router.set(routes)` registers them). The
+ * render `mode` is NOT stored here; it is read from the global framework config via the
+ * API context. Keeps all mutable state in `ctx.state` (no singletons).
  */
 export interface RouterState {
-  /** Compiled matcher table; `null` until `onInit` assigns it. */
+  /** Compiled matcher table; `null` until `onInit`/`set(routes)` compiles it. */
   table: MatcherTable | null;
-  /** Resolved render mode (single source of truth; set in `onInit`). Defaults `"hybrid"`. */
-  mode: "ssg" | "spa" | "hybrid";
 }
 
 /** Plain-data input to `compileRoutes` — resolved DATA only, never the plugin ctx. */
@@ -289,8 +385,22 @@ export interface ClientRoute {
   readonly meta: Record<string, unknown>;
 }
 
-/** Public API exposed via `ctx.require(routerPlugin)`. */
+/** Public API exposed via `ctx.require(routerPlugin)` and `app.router`. */
 export type RouterApi = {
+  /**
+   * Register the route map and compile the matcher table at runtime. The declarative
+   * path is `pluginConfigs.router.routes` (compiled in `onInit`); use `set()` for
+   * imperative (re-)registration — e.g. a browser app building routes dynamically.
+   * Re-calling recompiles (last write wins). A route map is any `{ name: route(...) }`
+   * object, including an `import * as routes` namespace.
+   *
+   * @param routes - The route map to register (route name → `route(...)` definition).
+   * @throws {Error} On an empty or invalid route map.
+   * @example
+   * import * as routes from "./routes";
+   * app.router.set(routes);
+   */
+  set(routes: RouteMap): void;
   /**
    * Match a pathname against the compiled route table (specificity-sorted).
    *
@@ -325,7 +435,7 @@ export type RouterApi = {
    *
    * @returns Read-only array of the typed route definitions, in declaration order.
    * @example
-   * for (const def of ctx.require(routerPlugin).manifest()) { def._handlers.load?.({}, "en"); }
+   * for (const def of ctx.require(routerPlugin).manifest()) def._handlers.render?.(routeContext);
    */
   manifest(): readonly RouteDefinition[];
   /**

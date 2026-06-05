@@ -35,8 +35,8 @@ scrubs all subprocess output before logging; records `lastDeployment`; and emits
 wrangler error taxonomy and thrown as an `Error` carrying a `code`.
 
 `options.branch` defaults to `config.productionBranch` (or `"main"`) and must match
-`/^[a-zA-Z0-9/_.-]+$/`. `options.build` (default `true`) toggles whether a build runs before
-deploying; when `false`, the existing `outDir` is deployed. On success it returns
+`/^[a-zA-Z0-9/_.-]+$/`. `deploy` does not run a build — it ships whatever already exists in
+`outDir` — so build the site first (e.g. via `app.cli.build()`). On success it returns
 `{ url, deploymentId, branch, durationMs }`.
 
 ```ts
@@ -44,8 +44,8 @@ deploying; when `false`, the existing `outDir` is deployed. On success it return
 const result = await app.deploy.run();
 console.log(result.url); // "https://my-site.pages.dev"
 
-// Preview deploy on a feature branch, skipping the build step.
-await app.deploy.run({ branch: "preview/landing", build: false });
+// Preview deploy on a feature branch.
+await app.deploy.run({ branch: "preview/landing" });
 ```
 
 > `CLOUDFLARE_API_TOKEN` is read via `ctx.env.require("CLOUDFLARE_API_TOKEN")` and passed only

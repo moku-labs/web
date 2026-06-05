@@ -1,10 +1,9 @@
 import type { Root as HastRoot } from "hast";
 import { describe, expect, it } from "vitest";
-import { ensureProcessor } from "../../pipeline/markdown";
-import { createContentState } from "../../state";
-import type { Config } from "../../types";
+import { fileSystemContent } from "../../providers";
+import type { FileSystemContentOptions } from "../../types";
 
-const baseConfig: Config = {
+const baseOptions: FileSystemContentOptions = {
   contentDir: "./src/content",
   trustedContent: false,
   extraRemarkPlugins: [],
@@ -12,11 +11,12 @@ const baseConfig: Config = {
   shikiTheme: "github-dark"
 };
 
-/** Render markdown through a freshly-built processor for the given config. */
-async function render(md: string, config: Config = baseConfig): Promise<string> {
-  const state = createContentState({ global: {}, config });
-  const processor = ensureProcessor(state, config);
-  return String(await processor.process(md));
+/** Render markdown through the node provider's pipeline (exercises ensureProcessor) for the options. */
+async function render(
+  md: string,
+  options: FileSystemContentOptions = baseOptions
+): Promise<string> {
+  return fileSystemContent(options).render(md);
 }
 
 describe("content/pipeline/markdown", () => {
@@ -50,7 +50,7 @@ describe("content/pipeline/markdown", () => {
       tokenColors: [{ scope: ["keyword", "storage.type"], settings: { foreground: "#f97316" } }]
     };
     const html = await render("```ts\nconst x = 1;\n```", {
-      ...baseConfig,
+      ...baseOptions,
       shikiTheme: customTheme
     });
     // The custom theme renders to a <pre class="shiki test-warm"> with its bg + the
@@ -66,8 +66,8 @@ describe("content/pipeline/markdown", () => {
     // strings still type-check via ThemeRegistrationAny's all-optional object arm — same as
     // Shiki's own `StringLiteralUnion<BundledTheme>` — so this documents autocomplete, not
     // typo-rejection.
-    const byName: Config["shikiTheme"] = "dracula";
-    const byObject: Config["shikiTheme"] = {
+    const byName: FileSystemContentOptions["shikiTheme"] = "dracula";
+    const byObject: FileSystemContentOptions["shikiTheme"] = {
       name: "warm",
       type: "dark",
       settings: [{ scope: "keyword", settings: { foreground: "#f97316" } }]
@@ -84,7 +84,7 @@ describe("content/pipeline/markdown", () => {
       "",
       "[click](javascript:alert(3))"
     ].join("\n");
-    const html = await render(md, { ...baseConfig, trustedContent: false });
+    const html = await render(md, { ...baseOptions, trustedContent: false });
     expect(html).not.toContain("<script");
     expect(html).not.toContain("onerror");
     expect(html.toLowerCase()).not.toContain("javascript:");
@@ -92,7 +92,7 @@ describe("content/pipeline/markdown", () => {
 
   it("passes the same XSS payload through when trustedContent is true", async () => {
     const md = "<script>alert(1)</script>";
-    const html = await render(md, { ...baseConfig, trustedContent: true });
+    const html = await render(md, { ...baseOptions, trustedContent: true });
     expect(html).toContain("<script>alert(1)</script>");
   });
 
@@ -106,7 +106,7 @@ describe("content/pipeline/markdown", () => {
       "",
       "---"
     ].join("\n");
-    const html = await render(md, { ...baseConfig, trustedContent: false });
+    const html = await render(md, { ...baseOptions, trustedContent: false });
     expect(html).toContain('class="pull-quote"');
     expect(html).toContain('loading="lazy"');
     expect(html).toContain('class="section-divider"');
@@ -130,7 +130,7 @@ describe("content/pipeline/markdown", () => {
       };
     }
     const html = await render("# Still Works", {
-      ...baseConfig,
+      ...baseOptions,
       extraRemarkPlugins: [markerRemark],
       extraRehypePlugins: [markerRehype]
     });

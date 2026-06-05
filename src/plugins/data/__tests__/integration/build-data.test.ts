@@ -7,6 +7,7 @@ import { h } from "preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildPlugin } from "../../../build";
 import { contentPlugin } from "../../../content";
+import { fileSystemContent } from "../../../content/providers";
 import type { Article, ArticleCard } from "../../../content/types";
 import { headPlugin } from "../../../head";
 import { i18nPlugin } from "../../../i18n";
@@ -32,7 +33,7 @@ function RawArticle(props: { html: string }) {
 /** Preload the production-filtered article set (drafts excluded) for the route loaders. */
 async function loadArticles(): Promise<{ bySlug: Map<string, Article>; cards: ArticleCard[] }> {
   const coreConfig = createCoreConfig("web-test", {
-    config: { mode: "production" as const },
+    config: { isDevelopment: false },
     plugins: [logPlugin],
     pluginConfigs: { log: { mode: "test" as const } }
   });
@@ -41,7 +42,7 @@ async function loadArticles(): Promise<{ bySlug: Map<string, Article>; cards: Ar
     plugins: [i18nPlugin, contentPlugin],
     pluginConfigs: {
       i18n: { locales: ["en"], defaultLocale: "en" },
-      content: { contentDir: FIXTURE_DIR }
+      content: { providers: [fileSystemContent({ contentDir: FIXTURE_DIR })] }
     }
   });
   const bySlug = new Map<string, Article>();
@@ -58,24 +59,37 @@ async function loadArticles(): Promise<{ bySlug: Map<string, Article>; cards: Ar
 function makeApp(outDir: string, bySlug: Map<string, Article>, cards: ArticleCard[]) {
   const home = route("/")
     .load(() => cards) // list view → slim CARDS
-    .parse(raw => raw as ArticleCard[])
     .render(() => h("h1", {}, `Home (${String(cards.length)})`))
     .head(() => ({ title: "Home" }));
   const article = route("/{slug}/")
     .generate(() => [...bySlug.keys()].map(slug => ({ slug })))
-    .load(({ slug }) => bySlug.get(slug ?? "")) // detail view → ONE full article
-    .parse(raw => raw as Article)
+    .load(ctx => bySlug.get(ctx.params.slug ?? "")) // detail view → ONE full article
     .render(ctx => h(RawArticle, { html: (ctx.data as Article).html }) as ReturnType<typeof h>)
     .head(ctx => ({ title: (ctx.data as Article).frontmatter.title }));
-  const routes = defineRoutes({ home, article });
+  // #1 — static route: render + head, NO .load(); still gets an empty {} sidecar.
+  const about = route("/about/")
+    .render(() => h("h1", {}, "About"))
+    .head(() => ({ title: "About" }));
+  // #3b — loader resolves the content API the spec way: ctx.require(contentPlugin).
+  const viaContent = route("/{slug}/via/")
+    .generate(() => [...bySlug.keys()].map(slug => ({ slug })))
+    .load(async ctx => {
+      const found = await ctx.require(contentPlugin).load(ctx.params.slug ?? "", ctx.locale);
+      return { html: found.html };
+    })
+    .render(
+      ctx => h(RawArticle, { html: (ctx.data as { html: string }).html }) as ReturnType<typeof h>
+    )
+    .head(() => ({ title: "Via" }));
+  const routes = defineRoutes({ home, article, about, viaContent });
 
   const coreConfig = createCoreConfig("web-test", {
-    config: { mode: "production" as const },
+    config: { isDevelopment: false, mode: "hybrid" as const },
     plugins: [logPlugin],
     pluginConfigs: { log: { mode: "test" as const } }
   });
   const { createApp } = coreConfig.createCore(coreConfig, { plugins: [] });
-  return createApp({
+  const app = createApp({
     plugins: [
       sitePlugin,
       i18nPlugin,
@@ -88,11 +102,12 @@ function makeApp(outDir: string, bySlug: Map<string, Article>, cards: ArticleCar
     pluginConfigs: {
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
-      router: { routes, mode: "hybrid" as const },
-      content: { contentDir: FIXTURE_DIR },
+      content: { providers: [fileSystemContent({ contentDir: FIXTURE_DIR })] },
       build: { outDir, feeds: false, sitemap: false, images: false, ogImage: false, minify: false }
     }
   });
+  app.router.set(routes);
+  return app;
 }
 
 let outDir: string;
@@ -155,5 +170,32 @@ describe("data provider — build writes per-page data → at() reads it", () =>
     );
     const loaded = await app.data.at("/hello-world/");
     expect(loaded).toEqual(JSON.parse(onDisk));
+  });
+
+  it("#1 emits an empty {} data sidecar for a client-navigable route with no .load()", async () => {
+    const { bySlug, cards } = await loadArticles();
+    const app = makeApp(outDir, bySlug, cards);
+    await app.start();
+    await app.build.run();
+
+    const about = JSON.parse(
+      readFileSync(path.join(outDir, "_data", "about", "index.json"), "utf8")
+    );
+    expect(about).toEqual({});
+    // render + head still work without a loader.
+    const html = readFileSync(path.join(outDir, "about", "index.html"), "utf8");
+    expect(html).toContain("About");
+  });
+
+  it("#3b a loader resolves content via ctx.require(contentPlugin)", async () => {
+    const { bySlug, cards } = await loadArticles();
+    const app = makeApp(outDir, bySlug, cards);
+    await app.start();
+    await app.build.run();
+
+    const via = JSON.parse(
+      readFileSync(path.join(outDir, "_data", "hello-world", "via", "index.json"), "utf8")
+    ) as { html: string };
+    expect(via.html).toContain("Hello World");
   });
 });

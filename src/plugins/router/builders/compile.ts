@@ -7,13 +7,13 @@
  * only (`CompileInput`) — never the plugin ctx.
  */
 
-import { bySpecificity, dynamicSegmentCount } from "../iso-match";
+import { bySpecificity, dynamicSegmentCount, parsePlaceholder } from "../iso-match";
 import type {
   CompiledRoute,
   CompileInput,
   MatcherTable,
   RouteDefinition,
-  RouterConfig
+  RouteMap
 } from "../types";
 import { createMatchFunction } from "./match";
 
@@ -25,18 +25,18 @@ const ERROR_PREFIX = "[web] router";
  * naming the offending route/pattern on any failure: empty map, a pattern not
  * starting with `/`, unbalanced `{…}` braces, or more than one `{lang:?}` segment.
  *
- * @param routes - The route map from config.
- * @throws {Error} If routes are empty, a pattern is malformed, or names collide.
+ * @param routes - The route map registered via `app.router.set(routes)`.
+ * @throws {Error} If routes are empty or a pattern is malformed.
  * @example
  * ```ts
  * validateRoutes({ home: route("/") });
  * ```
  */
-export function validateRoutes(routes: RouterConfig["routes"]): void {
+export function validateRoutes(routes: RouteMap): void {
   const names = Object.keys(routes);
   if (names.length === 0) {
     throw new Error(
-      `${ERROR_PREFIX}: route map is empty — provide at least one route via pluginConfigs.router.routes.`
+      `${ERROR_PREFIX}: route map is empty.\n  Register at least one route via pluginConfigs.router.routes or app.router.set(routes).`
     );
   }
   for (const name of names) {
@@ -60,32 +60,6 @@ export function validateRoutes(routes: RouterConfig["routes"]): void {
       );
     }
   }
-}
-
-/** A parsed `{name}` / `{name:?}` placeholder within one path segment. */
-interface ParsedPlaceholder {
-  /** The placeholder param name (e.g. `slug`). */
-  readonly name: string;
-  /** Whether the placeholder is optional (`{name:?}`). */
-  readonly optional: boolean;
-}
-
-/**
- * Parse a single path segment into its placeholder, or `false` for a static
- * segment. Uses a plain loop over the brace delimiters (no backtracking regex).
- *
- * @param segment - One `/`-delimited segment, e.g. `{slug}` or `about`.
- * @returns The parsed placeholder, or `false` when the segment is static.
- * @example
- * ```ts
- * parsePlaceholder("{slug:?}"); // { name: "slug", optional: true }
- * ```
- */
-function parsePlaceholder(segment: string): ParsedPlaceholder | false {
-  if (!segment.startsWith("{") || !segment.endsWith("}")) return false;
-  const inner = segment.slice(1, -1);
-  if (inner.endsWith(":?")) return { name: inner.slice(0, -2), optional: true };
-  return { name: inner, optional: false };
 }
 
 /**
@@ -125,26 +99,30 @@ export function patternToUrlPattern(
 
 /**
  * Build a URL from a pattern and params (substitutes `{param}` / `{param:?}`).
- * Walks segment-by-segment (no backtracking regex).
+ * Walks segment-by-segment (no backtracking regex). An optional placeholder whose
+ * param is absent has its segment skipped entirely (no empty segment), so a missing
+ * `{lang:?}` collapses cleanly instead of leaving a double slash.
  *
  * @param pattern - The route pattern.
  * @param params - Param values to substitute.
- * @param _baseUrl - Site base URL (reserved for absolute-link construction).
  * @returns The resolved relative URL string.
  * @example
  * ```ts
- * buildUrl("/{slug}/", { slug: "hello" }, "https://blog.dev");
+ * buildUrl("/{slug}/", { slug: "hello" }); // "/hello/"
  * ```
  */
-export function buildUrl(
-  pattern: string,
-  params: Record<string, string>,
-  _baseUrl: string
-): string {
+export function buildUrl(pattern: string, params: Record<string, string>): string {
   const out: string[] = [];
   for (const segment of pattern.split("/")) {
     const placeholder = parsePlaceholder(segment);
-    out.push(placeholder ? (params[placeholder.name] ?? "") : segment);
+    if (!placeholder) {
+      out.push(segment);
+      continue;
+    }
+    const value = params[placeholder.name] ?? "";
+    // Skip an absent optional segment so it collapses (no double slash).
+    if (placeholder.optional && value === "") continue;
+    out.push(value);
   }
   return out.join("/");
 }
@@ -161,26 +139,9 @@ export function buildUrl(
  * ```
  */
 export function buildFilePath(pattern: string, params: Record<string, string>): string {
-  const url = buildUrl(pattern, params, "");
+  const url = buildUrl(pattern, params);
   const cleanPath = url.replace(/^\//, "").replace(/\/$/, "");
   return cleanPath === "" ? "index.html" : `${cleanPath}/index.html`;
-}
-
-/**
- * Count dynamic segments in a pattern (lower = more specific). Thin alias over the
- * isomorphic {@link dynamicSegmentCount} — the single source of the specificity
- * logic shared by the server table and the client matcher — kept for the build-time
- * import surface.
- *
- * @param pattern - The route pattern.
- * @returns The number of dynamic (non-lang) segments.
- * @example
- * ```ts
- * countDynamicSegments("/{lang:?}/{slug}/"); // 1
- * ```
- */
-export function countDynamicSegments(pattern: string): number {
-  return dynamicSegmentCount(pattern);
 }
 
 /**
@@ -223,7 +184,7 @@ function compileRoute(
      * ```
      */
     toUrl(params: Record<string, string>): string {
-      return buildUrl(pattern, params, input.baseUrl);
+      return buildUrl(pattern, params);
     },
     /**
      * Build the output file path for this route from params. Honors a custom
@@ -271,34 +232,4 @@ export function compileRoutes(input: CompileInput): MatcherTable {
   // client reproduces from `clientManifest()` — single source of truth).
   const compiled = declarationOrder.toSorted(bySpecificity);
   return { compiled, byName };
-}
-
-/**
- * onInit orchestrator (data-only seam, keeps `index.ts` wiring-only). Validates
- * the route map then compiles the matcher table from resolved dependency data.
- *
- * @param config - Resolved router config (`routes` + `mode`).
- * @param baseUrl - Site base URL from `ctx.require(sitePlugin).url()`.
- * @param locales - Available locales from `ctx.require(i18nPlugin).locales()`.
- * @param defaultLocale - Default locale from `ctx.require(i18nPlugin).defaultLocale()`.
- * @returns The compiled, immutable matcher table for `ctx.state.table`.
- * @example
- * ```ts
- * ctx.state.table = buildRouterTable(ctx.config, site.url(), i18n.locales(), i18n.defaultLocale());
- * ```
- */
-export function buildRouterTable(
-  config: RouterConfig,
-  baseUrl: string,
-  locales: readonly string[],
-  defaultLocale: string
-): MatcherTable {
-  validateRoutes(config.routes);
-  return compileRoutes({
-    routes: config.routes,
-    mode: config.mode ?? "hybrid",
-    baseUrl,
-    locales,
-    defaultLocale
-  });
 }

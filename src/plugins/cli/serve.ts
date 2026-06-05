@@ -37,20 +37,23 @@ export function injectReloadClient(html: string): string {
 /**
  * A debounced rebuild driver: coalesces a burst of change notifications into a
  * single `runBuild()`, guards against overlapping runs, and reports the changed
- * file + fresh summary once the rebuild settles.
+ * label (the watched directory, in `serve()`) + fresh summary once the rebuild
+ * settles.
  *
  * @example
  * const rebuilder = createRebuilder({ debounceMs: 150, runBuild, onReloaded, onError });
- * rebuilder.schedule("content/a.md");
+ * rebuilder.schedule("content");
  */
 export type Rebuilder = {
   /**
-   * Queue a rebuild for the given changed file (debounced + coalesced).
+   * Queue a rebuild for the given label (debounced + coalesced). `serve()` passes the
+   * watched directory whose subtree changed (the watcher does not surface the per-file
+   * path), so this is a directory rather than a single file.
    *
-   * @param file - The changed path that triggered the rebuild.
+   * @param file - The label reported as `ReloadInfo.file` — the watched directory in `serve()`.
    * @returns Nothing.
    * @example
-   * rebuilder.schedule("src/app.tsx");
+   * rebuilder.schedule("src");
    */
   schedule(file: string): void;
   /**
@@ -96,8 +99,10 @@ async function runOneRebuild(input: {
 
 /**
  * Create a {@link Rebuilder}. The latest changed file within the debounce window
- * wins; while a rebuild is in flight further notifications are dropped (the watcher
- * keeps firing, but only one build runs at a time, matching the blog `dev.ts`).
+ * wins; only one build runs at a time, but a change arriving while a rebuild is in
+ * flight is NOT lost — it sets a `dirty` flag and triggers exactly one coalesced
+ * re-run once the current build settles (matching the blog `dev.ts`, minus its
+ * dropped-change gap).
  *
  * @param input - The rebuild dependencies.
  * @param input.debounceMs - Debounce window in milliseconds.
@@ -117,35 +122,45 @@ export function createRebuilder(input: {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let pendingFile = "";
   let building = false;
+  let dirty = false;
 
   /**
-   * Run the queued rebuild once (skips when one is already in flight), resetting the
-   * in-flight flag when it settles.
+   * Run the queued rebuild once, then — if a change arrived while it was in flight —
+   * re-run exactly once more so no change is dropped. Marks `dirty` (instead of
+   * running) when a rebuild is already underway, resetting the in-flight flag when
+   * each run settles.
    *
-   * @returns Resolves once the rebuild settles (errors are routed, never thrown).
+   * @returns Resolves once the rebuild (and any coalesced re-run) settles (errors are
+   *   routed, never thrown).
    * @example
    * await fire();
    */
   const fire = async (): Promise<void> => {
     timer = undefined;
-    if (building) return;
+    if (building) {
+      dirty = true;
+      return;
+    }
     building = true;
-    await runOneRebuild({
-      runBuild: input.runBuild,
-      onReloaded: input.onReloaded,
-      onError: input.onError,
-      file: pendingFile
-    });
+    do {
+      dirty = false;
+      await runOneRebuild({
+        runBuild: input.runBuild,
+        onReloaded: input.onReloaded,
+        onError: input.onError,
+        file: pendingFile
+      });
+    } while (dirty);
     building = false;
   };
 
   return {
     /**
-     * Queue a rebuild for the changed file (debounced + coalesced).
+     * Queue a rebuild for the given label (debounced + coalesced).
      *
-     * @param file - The changed path that triggered the rebuild.
+     * @param file - The label reported as `ReloadInfo.file` — the watched directory in `serve()`.
      * @example
-     * rebuilder.schedule("a.md");
+     * rebuilder.schedule("content");
      */
     schedule(file) {
       pendingFile = file;

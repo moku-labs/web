@@ -26,13 +26,19 @@ import { routerPlugin } from "./plugins/router";
 import { sitePlugin } from "./plugins/site";
 import { spaPlugin } from "./plugins/spa";
 
-// ─── Plugin instances (browser-safe; node-only content/build/deploy omitted) ──
+// ─── Plugin instances (browser-safe; node-only build/deploy omitted) ──────────
 export { sitePlugin } from "./plugins/site";
 export { i18nPlugin } from "./plugins/i18n";
 export { routerPlugin } from "./plugins/router";
 export { headPlugin } from "./plugins/head";
 export { spaPlugin } from "./plugins/spa";
 export { dataPlugin } from "./plugins/data";
+
+// contentPlugin is the browser-safe SHELL (the node markdown source lives in the
+// `fileSystemContent` provider, which is NOT exported here). Routes import contentPlugin
+// for `ctx.require(contentPlugin)` in build-only loaders; on the client those loaders
+// never run, so no provider is composed and no node code reaches the bundle.
+export { contentPlugin } from "./plugins/content";
 export { envPlugin } from "./plugins/env";
 export { logPlugin } from "./plugins/log";
 
@@ -40,7 +46,7 @@ export { logPlugin } from "./plugins/log";
 export { browserEnv } from "./plugins/env/providers.browser";
 
 // ─── Consumer helpers: route DSL, SPA islands, SEO <head> primitives ──────────
-export { defineRoutes, route } from "./plugins/router";
+export { createUrls, defineRoutes, route } from "./plugins/router";
 export { createComponent } from "./plugins/spa";
 export {
   buildArticleHead,
@@ -53,7 +59,8 @@ export {
   twitter
 } from "./plugins/head";
 
-// ─── Plugin type namespaces (node-only Build/Content/Deploy omitted) ──────────
+// ─── Plugin type namespaces (node-only Build/Deploy omitted) ──────────────────
+export * as Content from "./plugins/content/types";
 export * as Data from "./plugins/data/types";
 export * as Env from "./plugins/env/types";
 export * as Head from "./plugins/head/types";
@@ -83,20 +90,16 @@ const core = createCore(coreConfig, {
  *
  * @param options - Optional configuration:
  *  - `pluginConfigs` — per-plugin overrides, keyed by plugin name.
- *  - `config` — global framework config (e.g. `{ mode: "development" }`).
+ *  - `config` — global framework config (e.g. `{ mode: "spa" }`).
  *  - `plugins` — extra plugins (e.g. `dataPlugin` or your own) merged into the app and its type.
  *  - `onReady` / `onError` / `onStart` / `onStop` — lifecycle callbacks.
  * @returns The initialized app: `start()`, `stop()`, every plugin's API, and `log`.
  * @example
  * ```ts
  * // Client SPA — env works with no wiring (browserEnv is the default provider):
- * const app = createApp({
- *   plugins: [dataPlugin],
- *   pluginConfigs: {
- *     router: { mode: "spa", routes: defineRoutes({ home: route("/"), post: route("/blog/{slug}/") }) }
- *   }
- * });
- * await app.start();
+ * import * as routes from "./routes";
+ * const app = createApp({ config: { mode: "spa" }, pluginConfigs: { router: { routes } } });
+ * await app.start();             // routes compiled at init from config
  * app.env.get("PUBLIC_API_URL"); // resolved from import.meta.env
  * ```
  */

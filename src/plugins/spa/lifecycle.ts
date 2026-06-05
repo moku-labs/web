@@ -8,7 +8,6 @@
  */
 
 import type { LogApi } from "../log/types";
-import { kernelRef } from "./kernel";
 import type { SpaContext } from "./types";
 
 /** Router/instance teardown captured during onStart (undefined when stopped). */
@@ -17,28 +16,21 @@ let teardown: (() => void) | undefined;
 let logRef: LogApi | undefined;
 
 /**
- * Dispose the active kernel (captured as the teardown closure during onStart).
- *
- * @example
- * disposeKernel();
- */
-function disposeKernel(): void {
-  kernelRef.current?.dispose();
-}
-
-/**
  * Capture the teardown + log handles during `onStart` (no-op without a DOM —
- * the SSR/build guard, so onStop has nothing to release). The kernel itself is
- * booted by index.ts after this capture.
+ * the SSR/build guard, so onStop has nothing to release). The kernel built in
+ * `onInit` lives on `ctx.state`; its `dispose` is captured into the teardown
+ * closure here. The kernel itself is booted by index.ts after this capture.
  *
- * @param ctx - The plugin context (used for `log` capture).
+ * @param ctx - The plugin context (used for `state.kernel` + `log` capture).
  * @example
  * captureTeardown(ctx);
  */
 export function captureTeardown(ctx: SpaContext): void {
   if (typeof document === "undefined") return;
   logRef = ctx.log;
-  teardown = disposeKernel;
+  const kernel = ctx.state.kernel;
+  // eslint-disable-next-line jsdoc/require-jsdoc -- teardown closure capturing the kernel for onStop disposal
+  teardown = () => kernel?.dispose();
 }
 
 /**

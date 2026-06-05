@@ -39,14 +39,15 @@ export type ServerInfo = {
 };
 
 /**
- * Information rendered after a single `serve()` rebuild: which file changed plus the
- * fresh build summary used to print the "rebuilt N pages" line.
+ * Information rendered after a single `serve()` rebuild: the watched directory whose
+ * subtree changed plus the fresh build summary used to print the "rebuilt N pages"
+ * line.
  *
  * @example
- * const info: ReloadInfo = { file: "content/post.md", pageCount: 12, durationMs: 84 };
+ * const info: ReloadInfo = { file: "content", pageCount: 12, durationMs: 84 };
  */
 export type ReloadInfo = {
-  /** The changed path that triggered the rebuild. */
+  /** The watched directory whose subtree changed (the rebuild is per-watchDir, not per-file). */
   file: string;
   /** Number of route pages rendered by the rebuild. */
   pageCount: number;
@@ -102,12 +103,13 @@ export type CliRenderer = {
    */
   serverReady(info: ServerInfo): void;
   /**
-   * Render the post-rebuild line ("~ file" + "✓ rebuilt N pages · Xms · reloaded").
+   * Render the post-rebuild line ("~ dir" + "✓ rebuilt N pages · Xms · reloaded"),
+   * where the label is the watched directory whose subtree changed (see {@link ReloadInfo.file}).
    *
-   * @param info - The changed file plus the rebuild's page count and duration.
+   * @param info - The changed watched directory plus the rebuild's page count and duration.
    * @returns Nothing.
    * @example
-   * render.reload({ file: "content/a.md", pageCount: 12, durationMs: 84 });
+   * render.reload({ file: "content", pageCount: 12, durationMs: 84 });
    */
   reload(info: ReloadInfo): void;
   /**

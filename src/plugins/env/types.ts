@@ -7,8 +7,9 @@
  *
  * Providers are walked in array order during resolution; the first provider to
  * return a non-`undefined` (and non-empty-string) value for a key wins. `load()`
- * is called once per resolution at `onInit` time — except for live, per-request
- * sources (e.g. {@link cloudflareBindings}) which read fresh on every call.
+ * is called exactly once per resolution at `onInit` time, after which both env
+ * maps are frozen. A provider like {@link cloudflareBindings} reads `globalThis`
+ * at that single `onInit` call (not per request).
  *
  * @example
  * ```ts
@@ -83,7 +84,8 @@ export type EnvConfig = {
   /**
    * Ordered list of value sources. The first provider yielding a non-`undefined`
    * (and non-empty-string) value for a key wins. The plugin's own spec default is
-   * `[]`; the framework layer supplies the working default `[dotenv(), processEnv()]`.
+   * `[]`; the consumer supplies the providers per target (`[dotenv(), processEnv()]`
+   * on Node) — only the `/browser` entry pre-wires `browserEnv()` out of the box.
    */
   providers: EnvProvider[];
   /**

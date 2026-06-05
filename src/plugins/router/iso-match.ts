@@ -9,7 +9,7 @@
  */
 
 /** A parsed `{name}` / `{name:?}` placeholder within one path segment. */
-interface ParsedPlaceholder {
+export interface ParsedPlaceholder {
   /** The placeholder param name (e.g. `slug`). */
   readonly name: string;
   /** Whether the placeholder is optional (`{name:?}`). */
@@ -28,7 +28,7 @@ interface ParsedPlaceholder {
  * parsePlaceholder("{slug:?}"); // { name: "slug", optional: true }
  * ```
  */
-function parsePlaceholder(segment: string): ParsedPlaceholder | false {
+export function parsePlaceholder(segment: string): ParsedPlaceholder | false {
   if (!segment.startsWith("{") || !segment.endsWith("}")) return false;
   const inner = segment.slice(1, -1);
   if (inner.endsWith(":?")) return { name: inner.slice(0, -2), optional: true };
@@ -120,7 +120,7 @@ function toUrlPatternSource(pattern: string): string {
  * extractGroups({ slug: "hello", "0": "x" }); // { slug: "hello" }
  * ```
  */
-function extractGroups(groups: Record<string, string | undefined>): Record<string, string> {
+export function extractGroups(groups: Record<string, string | undefined>): Record<string, string> {
   const params: Record<string, string> = {};
   for (const [key, value] of Object.entries(groups)) {
     if (/^\d+$/.test(key)) continue;

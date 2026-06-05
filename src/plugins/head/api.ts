@@ -12,7 +12,7 @@ import { composeHead, serializeHead } from "./compose";
 import type { Api, HeadDefaults, State } from "./types";
 
 /** Error prefix for head API invariant failures. */
-const ERROR_PREFIX = "[head]";
+const ERROR_PREFIX = "[web] head";
 
 /**
  * Read the normalized defaults, asserting the post-`onInit` invariant (the slot is

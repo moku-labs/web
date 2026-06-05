@@ -20,21 +20,33 @@
 ## Configuration
 
 ```ts
+import { contentPlugin, fileSystemContent } from "@moku-labs/web";
+
 createApp({
+  plugins: [contentPlugin],
   pluginConfigs: {
     content: {
-      contentDir: "./src/content",   // article root: content/<slug>/<locale>.md
-      trustedContent: false,          // SECURITY GATE — see below
-      shikiTheme: "github-dark",
-      defaultAuthor: "Alex",          // optional; applied when frontmatter omits author
-      extraRemarkPlugins: [],         // additive — concatenated AFTER framework defaults
-      extraRehypePlugins: []          // additive — concatenated AFTER custom transforms
+      // The content plugin SHELL is browser-safe (orchestration only). Source I/O +
+      // the Markdown pipeline live in a provider you compose — mirrors `env` providers.
+      providers: [
+        fileSystemContent({
+          contentDir: "./src/content",  // article root: content/<slug>/<locale>.md
+          trustedContent: false,         // SECURITY GATE — see below
+          shikiTheme: "github-dark",
+          defaultAuthor: "Alex",         // optional; applied when frontmatter omits author
+          extraRemarkPlugins: [],        // additive — concatenated AFTER framework defaults
+          extraRehypePlugins: []         // additive — concatenated AFTER custom transforms
+        })
+      ]
     }
   }
 });
 ```
 
-`pluginConfigs.content` is optional — every field has a default (except `defaultAuthor`, which resolves to `undefined`).
+Compose at least one provider (validated at `onInit`); every `fileSystemContent` option has a
+default except `contentDir` (required) and `defaultAuthor` (resolves to `undefined`). On the browser,
+`contentPlugin` (the shell) is importable from `@moku-labs/web/browser` for `ctx.require(contentPlugin)`
+in build-only loaders, while `fileSystemContent` (node) is exported only from the package root.
 
 ## Key invariants
 
@@ -62,20 +74,23 @@ pipeline. The additive `extraRemarkPlugins` / `extraRehypePlugins` keys avoid th
 defaults are never in config, so they cannot be replaced; consumer extras are
 **concatenated** after the defaults at processor-build time.
 
-### Lazy processor singleton on `ctx.state`
+### Lazy processor singleton (in the provider)
 
-The Shiki/unified processor is a **lazy singleton stored on `ctx.state.processor`** —
-never a module-level cache. It is built on the first `loadAll()` / `renderMarkdown()`
-via `ensureProcessor(state, config)`, then reused for every article in that app. Because
-state is per-app, two apps in one process never share a processor (no cross-app Shiki
-leak). `createState`/`onInit` do no async work, keeping `createApp` synchronous.
+The Shiki/unified processor is a **lazy singleton stored on the provider's private
+`ContentProviderState.processor`** — never on the plugin shell's `ctx.state`, never a
+module-level cache. It is built on the first `loadAll()` / `renderMarkdown()` via
+`ensureProcessor(state, options)` inside the `fileSystemContent` provider, then reused
+for every article. Because the processor lives in the provider closure, two apps in one
+process never share one (no cross-app Shiki leak). `createState`/`onInit` do no async
+work, keeping `createApp` synchronous.
 
 ### Locale fallback & draft filtering
 
 `load(slug, locale)` prefers the native `content/<slug>/<locale>.md`
 (`isFallback: false`); when absent it falls back to the default-locale file
-(`isFallback: true`, requested locale retained on `locale`/`url`). `loadAll()` excludes
-articles whose status is `draft` only when `ctx.global.mode === "production"`.
+(`isFallback: true`, requested locale retained on `locale`/`url`). `loadAll()` and
+`load()` exclude articles whose status is `draft` only when `!global.isDevelopment`
+(i.e. in non-development mode).
 
 ## Structure
 

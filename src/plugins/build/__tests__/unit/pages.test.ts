@@ -256,7 +256,7 @@ describe("build/phases/pages", () => {
 
     await renderPages(ctx);
 
-    expect(load).toHaveBeenCalledWith({}, "en");
+    expect(load).toHaveBeenCalledWith(expect.objectContaining({ params: {}, locale: "en" }));
     const html = readFileSync(path.join(tmp, "post", "index.html"), "utf8");
     expect(html).toContain("<title>Loaded</title>");
     expect(html).toContain("<h1>Loaded</h1>");
@@ -321,8 +321,8 @@ describe("build/phases/pages", () => {
     expect(html).not.toContain("<main>");
   });
 
-  it("required-validator gate: a data-navigable route without .parse fails the build in hybrid mode", async () => {
-    // render + load (so it WOULD be client-data-navigated) but no .parse → build error.
+  it("a hybrid data route builds and renders from its loaded data", async () => {
+    // render + load (client-data-navigable) → builds the HTML + persists the data sidecar.
     const route = makeRoute("/post/", {
       load: async () => ({ title: "X" }),
       render: rctx => h("h1", {}, (rctx.data as { title: string }).title)
@@ -340,10 +340,13 @@ describe("build/phases/pages", () => {
       }
     });
 
-    await expect(renderPages(ctx)).rejects.toThrow(/\[web\] build: route "\/post\/".*\.parse\(\)/);
+    const result = await renderPages(ctx);
+    expect(result.pageCount).toBe(1);
+    const html = readFileSync(path.join(tmp, "post", "index.html"), "utf8");
+    expect(html).toContain("<h1>X</h1>");
   });
 
-  it("ssg mode skips the validator gate (no .parse required)", async () => {
+  it("ssg mode builds a data route", async () => {
     const route = makeRoute("/post/", {
       load: async () => ({ title: "X" }),
       render: rctx => h("h1", {}, (rctx.data as { title: string }).title)

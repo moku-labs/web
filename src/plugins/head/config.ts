@@ -2,13 +2,13 @@
  * @file head plugin — default config, structural validation, and normalization.
  *
  * Kept separate from `index.ts` so the wiring harness stays thin: the default
- * config object, the `[head] config: …` validation, and the frozen-snapshot
+ * config object, the `[web] head: …` validation, and the frozen-snapshot
  * normalization all live here and are referenced by name from `index.ts`.
  */
 import type { Config, HeadDefaults } from "./types";
 
 /** Error prefix for all head config-validation failures. */
-const ERROR_PREFIX = "[head] config:";
+const ERROR_PREFIX = "[web] head";
 
 /** The allowed `twitterCard` literals (also the runtime guard set). */
 const VALID_TWITTER_CARDS = ["summary", "summary_large_image"] as const;
@@ -27,7 +27,7 @@ export const defaultConfig: Config = { twitterCard: "summary_large_image" };
 
 /**
  * Structurally validate the resolved head config (no I/O). Throws a standard
- * `[head] config: …` error when `titleTemplate` is provided without the `%s`
+ * `[web] head: …` error when `titleTemplate` is provided without the `%s`
  * token, or when `twitterCard` is present but not one of the two allowed literals.
  *
  * @param config - The resolved head {@link Config} to validate.
@@ -40,12 +40,12 @@ export const defaultConfig: Config = { twitterCard: "summary_large_image" };
 export function validateHeadConfig(config: Config): void {
   if (config.titleTemplate !== undefined && !config.titleTemplate.includes("%s")) {
     throw new Error(
-      `${ERROR_PREFIX} titleTemplate must contain the "%s" token (replaced by the route title), received ${JSON.stringify(config.titleTemplate)}.`
+      `${ERROR_PREFIX}: titleTemplate must contain the "%s" token (replaced by the route title), received ${JSON.stringify(config.titleTemplate)}.`
     );
   }
   if (config.twitterCard !== undefined && !VALID_TWITTER_CARDS.includes(config.twitterCard)) {
     throw new Error(
-      `${ERROR_PREFIX} twitterCard must be one of [${VALID_TWITTER_CARDS.join(", ")}], received ${JSON.stringify(config.twitterCard)}.`
+      `${ERROR_PREFIX}: twitterCard must be one of [${VALID_TWITTER_CARDS.join(", ")}], received ${JSON.stringify(config.twitterCard)}.`
     );
   }
 }

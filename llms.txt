@@ -7,53 +7,55 @@ Requires Node 24+ (the router uses the global `URLPattern`). Package manager: `b
 ## Mental model
 
 - **Layer 3 (consumer):** call `createApp({ plugins?, pluginConfigs })`. Never import `@moku-labs/core` directly.
-- **Two entries:** `@moku-labs/web` (`.`) is dual ESM+CJS with the full surface (Node SSG build). `@moku-labs/web/browser` is the ESM-only browser-safe entry — same `createApp`/`createPlugin` over the same isomorphic defaults, plus `dataPlugin`/`defineRoutes`/`route`/`createComponent`/`browserEnv` + the SEO head primitives, with all node-only plugins/providers excluded and `browserEnv()` pre-wired as the default env provider.
+- **Two entries:** `@moku-labs/web` (`.`) is dual ESM+CJS with the full surface (Node SSG build). `@moku-labs/web/browser` is the ESM-only browser-safe entry — same `createApp`/`createPlugin` over the same isomorphic defaults, plus `dataPlugin`/`defineRoutes`/`route`/`createUrls`/`createComponent`/`browserEnv` + the SEO head primitives, with all node-only plugins/providers excluded and `browserEnv()` pre-wired as the default env provider.
 - **Defaults are isomorphic** (run on Node AND in the browser): `site`, `i18n`, `router`, `head`, `spa` + the `log`/`env` core.
 - **Node-only plugins** (`content`, `build`, `deploy`, `data`, `cli`) are exported but NOT defaults — add them for a Node build. For a browser bundle import from **`@moku-labs/web/browser`** instead: an ESM-only entry whose static import graph references zero node-only modules, so node/native code can NEVER reach the client bundle regardless of bundler/tree-shaking (stronger than relying on `sideEffects`/tree-shaking). It also pre-wires `browserEnv()` as the default env provider, so env works with zero config (no `pluginConfigs.env.providers` needed).
-- **The route is the contract:** `route(pattern).load(→D).parse(unknown→D).render(ctx:D→VNode).head(→HeadConfig).generate(→params[])`. The SAME `load`/`render` run at build (SSG→HTML) and on the client (DATA nav) → structural parity.
+- **The route is the contract:** `route(pattern).load(ctx→D)?.render(ctx:D→VNode).head(→HeadConfig).generate(ctx→params[])`. `.load` is OPTIONAL and BUILD-ONLY; `.load`/`.generate` receive `{ params, locale, require, has }` so a loader pulls sibling APIs the spec way — `ctx.require(contentPlugin)` (instance-only, no module global). `.render`/`.head` receive `ctx.url(name, params)` (link builder). `ctx.data` is typed from `.load()`'s return; on a client nav the fetched JSON is used directly as `ctx.data` (no validation step). The SAME `render` runs at build (SSG→HTML) and on the client (DATA nav) → structural parity. Routes are registered via `pluginConfigs.router.routes` (compiled at init) or `app.router.set(routes)` at runtime; render `mode` is a global config option.
 - **One switch:** `router.mode` = `"ssg" | "spa" | "hybrid"`. `build` writes per-page data + `spa` data-renders only when it is not `"ssg"`.
 
 ## Quickstart
 
 ```ts
-import { createApp, defineRoutes, route, contentPlugin, buildPlugin, dataPlugin, processEnv } from "@moku-labs/web";
+import { createApp, route, contentPlugin, fileSystemContent, buildPlugin, dataPlugin, processEnv } from "@moku-labs/web";
 
-const routes = defineRoutes({
-  home: route("/{lang:?}/").load((_p, l) => listCards(l)).parse(r => r as Card[]).render(c => <Home cards={c.data} />),
-  post: route("/{lang:?}/{slug}/").generate(l => slugs(l).map(slug => ({ slug }))).load((p, l) => getPost(p.slug, l)).parse(r => PostSchema.parse(r)).render(c => <Post post={c.data} />).head(c => ({ title: c.data.title }))
-});
+// routes.ts — loaders pull sibling APIs via ctx.require(pluginInstance); links via ctx.url
+export const home = route("/{lang:?}/").load(c => listCards(c.require(contentPlugin), c.locale)).render(c => <Home cards={c.data} url={c.url} />);
+export const post = route("/{lang:?}/{slug}/").generate(c => slugs(c.locale).map(slug => ({ slug }))).load(c => c.require(contentPlugin).load(c.params.slug, c.locale)).render(c => <Post post={c.data} url={c.url} />).head(c => ({ title: c.data.title }));
 
+// app.ts — create (routes via config) → run
+import * as routes from "./routes";
 const app = createApp({
   plugins: [contentPlugin, buildPlugin, dataPlugin],          // node-only, composed for the build
+  config: { mode: "hybrid" },                                 // global SSG/DATA/SPA switch
   pluginConfigs: {
     site: { name: "Blog", url: "https://blog.dev", author: "A", description: "…" },
     i18n: { locales: ["en"], defaultLocale: "en" },
-    router: { routes, mode: "hybrid" },                        // the single SSG/DATA/SPA switch
-    content: { contentDir: "./content" },
+    content: { providers: [fileSystemContent({ contentDir: "./content" })] },
+    router: { routes },                                        // declarative route map (a namespace works)
     env: { providers: [processEnv()] }
   }
 });
-await app.start();
 await app.build.run();   // writes dist/<path>/index.html + (mode!==ssg) dist/_data/<path>/index.json
+// Runtime (re-)registration alternative: app.router.set(routes)
 ```
 
 ## Plugins (one-liner each; see each plugin's README)
 
 - [site](src/plugins/site/README.md): site identity (name/url/author) + canonical URL helper. Default.
 - [i18n](src/plugins/i18n/README.md): locales, default-locale fallback, translations, hreflang/ogLocale maps. Default.
-- [router](src/plugins/router/README.md): typed route DSL (`route`/`defineRoutes`) with `.load`/`.parse`/`.render`/`.head`/`.generate`; `match`/`toUrl`/`entries`/`manifest`/`mode`. Default.
+- [router](src/plugins/router/README.md): typed route DSL (`route`/`defineRoutes`) — optional `.load` (takes one `ctx`), `.render`/`.head`/`.generate`; pure `createUrls(routes)` link builder; routes registered via `pluginConfigs.router.routes` (or `app.router.set`); `match`/`toUrl`/`entries`/`manifest`/`mode`. Default.
 - [head](src/plugins/head/README.md): SEO `<head>` composition (title template, canonical, OG/Twitter, JSON-LD, hreflang). Default.
 - [spa](src/plugins/spa/README.md): client runtime — island hydration + intercepted navigation (HTML-over-fetch, or DATA nav when `data` is composed). Inert on Node. Default.
-- [content](src/plugins/content/README.md): markdown → sanitized HTML, frontmatter, reading time, locale model. Node-only.
+- [content](src/plugins/content/README.md): provider-driven Markdown model (markdown → sanitized HTML, frontmatter, reading time, locale fallback). The plugin SHELL is browser-safe (isomorphic, like `env`); compose the node `fileSystemContent` provider for a build. `ctx.require(contentPlugin)` in loaders.
 - [build](src/plugins/build/README.md): SSG orchestrator — pages, feeds, sitemap, OG images; persists per-page data when `mode!=="ssg"`. Node-only.
 - [deploy](src/plugins/deploy/README.md): Cloudflare Pages scaffolding + deploy. Node-only.
 - [cli](src/plugins/cli/README.md): developer CLI — `build`/`serve`/`preview`/`deploy` with a boxed Panel renderer + live build progress (via hooks on `build:phase`/`build:complete`/`deploy:complete`); driven from thin per-command scripts. Deploy confirm is TTY-only (CI auto-proceeds). Node-only. `depends: [build, deploy]`.
-- [data](src/plugins/data/README.md): agnostic data provider — `write(entries)` (Node) persists per-page JSON keyed by URL; `at(path)` (browser) fetches it for `spa` DATA nav (validated via `route.parse`). Optional, isomorphic.
+- [data](src/plugins/data/README.md): agnostic data provider — `write(entries)` (Node) persists per-page JSON keyed by URL; `at(path)` (browser) fetches it for `spa` DATA nav (used directly as `ctx.data`). Optional, isomorphic.
 - log, env: structured logging + validated environment access (`dotenv`/`processEnv`/`cloudflareBindings` on Node, `browserEnv()` in the browser). Core.
 
 ## Consumer helpers
 
-- `createApp`, `createPlugin`, `defineRoutes`, `route`, `createComponent` (spa islands).
+- `createApp`, `createPlugin`, `defineRoutes`, `route`, `createUrls` (pure name→URL builder), `createComponent` (spa islands), `fileSystemContent` (node content provider).
 - env providers: `dotenv`, `processEnv`, `cloudflareBindings` (Node), `browserEnv` (browser — pre-wired as the default when importing `@moku-labs/web/browser`).
 - SEO primitives for `.head()`: `meta`, `og`, `twitter`, `jsonLd`, `canonical`, `hreflang`, `feedLink`, `buildArticleHead`.
 - Type namespaces: `Site`, `I18n`, `Router`, `Head`, `Spa`, `Content`, `Build`, `Deploy`, `Data`, `Log`, `Env`.

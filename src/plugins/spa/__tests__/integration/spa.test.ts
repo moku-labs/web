@@ -21,7 +21,7 @@ const SITE = {
 /** Build the core (router+head+spa over happy-dom) exposing createPlugin for probes. */
 function makeCore() {
   const coreConfig = createCoreConfig("web-test", {
-    config: { mode: "production" as const },
+    config: { isDevelopment: false, mode: "spa" as const },
     plugins: [logPlugin],
     pluginConfigs: { log: { mode: "test" as const } }
   });
@@ -41,7 +41,7 @@ function makeApp(
       .render(() => undefined as never)
       .head(() => ({ title: "About" }))
   });
-  return createApp({
+  const app = createApp({
     plugins: [
       sitePlugin,
       i18nPlugin,
@@ -53,11 +53,12 @@ function makeApp(
     pluginConfigs: {
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
-      router: { routes, mode: "spa" as const },
       head: {},
       spa: { progressBar: false }
     }
   });
+  app.router.set(routes);
+  return app;
 }
 
 /** HTML returned by the mocked fetch for the navigated page. */
@@ -149,7 +150,7 @@ describe("spa integration", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("client DATA path: composing dataPlugin fetches the page data, validates via parse, and renders", async () => {
+  it("client DATA path: composing dataPlugin fetches the page data and renders it directly", async () => {
     const { createApp } = makeCore();
     const routes = defineRoutes({
       home: route("/")
@@ -157,7 +158,6 @@ describe("spa integration", () => {
         .head(() => ({ title: "Home" })),
       doc: route("/doc/")
         .load(() => ({ body: "from-data" }))
-        .parse(raw => raw as { body: string })
         .render(
           ctx =>
             h(
@@ -173,11 +173,11 @@ describe("spa integration", () => {
       pluginConfigs: {
         site: SITE,
         i18n: { locales: ["en"], defaultLocale: "en" },
-        router: { routes, mode: "spa" as const },
         head: {},
         spa: { progressBar: false }
       }
     });
+    app.router.set(routes);
     await app.start();
     // The client fetches the PERSISTED page data (not an HTML page) via data.at →
     // the data URL. Serve it; assert the fetch targeted the data file, then render.

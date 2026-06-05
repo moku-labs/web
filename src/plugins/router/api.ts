@@ -4,11 +4,16 @@
  * Closures over `ctx.state.table` exposing `match` / `toUrl` / `entries` /
  * `manifest`. Returns values/copies, never the raw `ctx.state` reference (spec/11 §2.4).
  */
+import { i18nPlugin } from "../i18n";
+import { sitePlugin } from "../site";
+import { compileRoutes, validateRoutes } from "./builders/compile";
 import { matchRoute } from "./builders/match";
 import type {
   ClientRoute,
   CompiledRoute,
   MatcherTable,
+  RouteMap,
+  RouteRequire,
   RouterApi,
   RouterState,
   TypedRoute
@@ -17,10 +22,44 @@ import type {
 /** Error prefix for router API failures. */
 const ERROR_PREFIX = "[web] router";
 
-/** Plugin context surface consumed by the router API factory. */
-interface RouterApiContext {
+/**
+ * Minimal context shared by the router's `onInit` and its `set()` API: the mutable
+ * state holder, the global render `mode`, and `require` (to resolve site/i18n while
+ * compiling). Both `registerRoutes` entry points consume exactly this surface.
+ */
+interface RouterRegisterContext {
   /** Mutable router state holding the compiled matcher table. */
   readonly state: RouterState;
+  /** Global framework config — the render mode is read here (not router config). */
+  readonly global: Readonly<{ mode: "ssg" | "spa" | "hybrid" }>;
+  /** Resolve a dependency plugin's API (site/i18n) while compiling. */
+  readonly require: RouteRequire;
+}
+
+/**
+ * Validate a route map and compile it into the matcher table on `ctx.state`,
+ * resolving the global render `mode` + site base URL + i18n locales at call time.
+ * Shared by the router's `onInit` (config routes) and its `set()` API (runtime
+ * registration), so both paths compile identically. Re-calling replaces the table.
+ *
+ * @param ctx - The router register context (state + global mode + require).
+ * @param routes - The route map to compile (an `import * as routes` namespace works).
+ * @throws {Error} If the route map is empty or a pattern is malformed.
+ * @example
+ * ```ts
+ * registerRoutes(ctx, { home: route("/") });
+ * ```
+ */
+export function registerRoutes(ctx: RouterRegisterContext, routes: RouteMap): void {
+  validateRoutes(routes);
+  const i18n = ctx.require(i18nPlugin);
+  ctx.state.table = compileRoutes({
+    routes,
+    mode: ctx.global.mode,
+    baseUrl: ctx.require(sitePlugin).url(),
+    locales: i18n.locales(),
+    defaultLocale: i18n.defaultLocale()
+  });
 }
 
 /**
@@ -37,7 +76,9 @@ interface RouterApiContext {
  */
 function readTable(state: RouterState): MatcherTable {
   if (state.table === null) {
-    throw new Error(`${ERROR_PREFIX}: matcher table accessed before onInit compiled it.`);
+    throw new Error(
+      `${ERROR_PREFIX}: routes not registered.\n  Set pluginConfigs.router.routes, or call app.router.set(routes), before app.start() / app.build.run().`
+    );
   }
   return state.table;
 }
@@ -91,9 +132,25 @@ function toClientRoute(entry: CompiledRoute): ClientRoute {
  * api.match("/en/hello/");
  * ```
  */
-export function createApi(ctx: RouterApiContext): RouterApi {
+export function createApi(ctx: RouterRegisterContext): RouterApi {
   const { state } = ctx;
   return {
+    /**
+     * Register the route map and compile the matcher table at runtime. The declarative
+     * path is `pluginConfigs.router.routes` (compiled in `onInit`); call `set()` for
+     * imperative (re-)registration — e.g. a browser app building routes dynamically.
+     * Resolves `site`/`i18n` and the global render `mode` at call time. Last write wins.
+     *
+     * @param routes - The route map (route name → `route(...)`); an `import * as` namespace works.
+     * @throws {Error} If the route map is empty or a pattern is malformed.
+     * @example
+     * ```ts
+     * app.router.set(routes);
+     * ```
+     */
+    set(routes: RouteMap) {
+      registerRoutes(ctx, routes);
+    },
     /**
      * Match a pathname against the compiled route table (specificity-sorted).
      *
@@ -122,7 +179,9 @@ export function createApi(ctx: RouterApiContext): RouterApi {
     toUrl(routeName, params) {
       const entry = readTable(state).byName.get(routeName);
       if (!entry) {
-        throw new Error(`${ERROR_PREFIX}: unknown route name "${routeName}".`);
+        throw new Error(
+          `${ERROR_PREFIX}: unknown route name "${routeName}".\n  Check the name matches a key in the route map registered via pluginConfigs.router.routes or app.router.set(routes).`
+        );
       }
       return entry.toUrl(params);
     },
@@ -145,7 +204,7 @@ export function createApi(ctx: RouterApiContext): RouterApi {
      * @returns A fresh read-only array of the typed route definitions.
      * @example
      * ```ts
-     * for (const def of api.manifest()) def._handlers.load?.({}, "en");
+     * for (const def of api.manifest()) def._handlers.render?.(routeContext);
      * ```
      */
     manifest() {
@@ -165,7 +224,8 @@ export function createApi(ctx: RouterApiContext): RouterApi {
       return Object.freeze(readTable(state).compiled.map(entry => toClientRoute(entry)));
     },
     /**
-     * The resolved render mode (single source of truth for static/hybrid/spa).
+     * The resolved render mode — read from the global framework config (the single
+     * source of truth for static/hybrid/spa). `build`/`spa` gate data nav on it.
      *
      * @returns `"ssg" | "spa" | "hybrid"`.
      * @example
@@ -174,7 +234,7 @@ export function createApi(ctx: RouterApiContext): RouterApi {
      * ```
      */
     mode() {
-      return state.mode;
+      return ctx.global.mode;
     }
   };
 }

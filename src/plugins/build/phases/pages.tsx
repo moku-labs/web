@@ -2,10 +2,16 @@
  * @file build phase 3 — pages. Pulls `router.manifest()` + `head.render(route, data)`
  * and SSR-renders each route to static HTML (preact-render-to-string). Appends the
  * build-id meta tag after `head.render()` returns. Does NOT compose `<head>` itself.
+ *
+ * Pipeline (top-down): {@link renderPages} orchestrates → {@link expandAllInstances}
+ * (manifest → per-locale {@link PageInstance}s) → {@link renderInstance} (one page:
+ * {@link loadRouteData} → {@link composeHeadHtml} → {@link renderBody} →
+ * {@link writeDocument}) → {@link writeDataSidecars} (hybrid/spa data) →
+ * {@link findRootHtml}.
  */
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import path from "node:path";
 import { renderToString } from "preact-render-to-string";
 import { dataPlugin } from "../../data";
 import type { DataEntry } from "../../data/types";
@@ -18,8 +24,10 @@ import type {
 import { i18nPlugin } from "../../i18n";
 import { routerPlugin } from "../../router";
 import type {
+  GenerateContext,
   HeadConfig,
   LayoutContext,
+  LoadContext,
   RouteContext,
   RouteDefinition,
   RouteState,
@@ -61,6 +69,18 @@ type PageInstance = {
   readonly locale: string;
 };
 
+/** A rendered page: its canonical URL, HTML, loaded data, and client-nav flag. */
+type RenderedPage = {
+  /** The page's canonical URL (from `entry.toUrl`). */
+  readonly url: string;
+  /** The complete rendered HTML document. */
+  readonly html: string;
+  /** The route's loaded data (`{}` when it has no `.load()`); reused for the sidecar. */
+  readonly data: unknown;
+  /** Whether the route is client-navigable (has a `.render()` → always gets a sidecar). */
+  readonly clientNavigable: boolean;
+};
+
 /** The pieces composed into a page document (shared by in-code shell + template fill). */
 type DocumentParts = {
   /** Composed `<head>` inner HTML from `head.render` + the build-id meta. */
@@ -71,6 +91,14 @@ type DocumentParts = {
   assets: string;
   /** Page locale for the `<html lang>` attribute / shell. */
   locale: string;
+};
+
+/** Shared per-build render wiring: precomputed asset tags + the optional shell template. */
+type RenderShell = {
+  /** The injected asset `<link>`/`<script>` tags (computed once). */
+  readonly assets: string;
+  /** The shell template HTML, or `null` to use the in-code shell. */
+  readonly template: string | null;
 };
 
 /**
@@ -149,22 +177,26 @@ function fillTemplate(template: string, parts: DocumentParts): string {
 }
 
 /**
- * Expand one route definition into its concrete page instances across all
- * locales, using `generate?.(locale)` when present (else a single empty-params
- * instance per locale).
+ * Expand one route definition into its concrete page instances across all locales,
+ * using `generate?.(ctx)` when present (else a single empty-params instance per
+ * locale). The generate context is the spec `{ locale, require, has }`, so a
+ * `.generate()` handler pulls sibling APIs the spec way.
  *
  * @param definition - The route definition from the manifest.
  * @param locales - Active locale codes from i18n.
+ * @param byPattern - Pattern→compiled-`TypedRoute` map (see {@link makeEntryMap}).
+ * @param ctx - Plugin context (provides `require`/`has` for the generate context).
  * @returns The flattened list of page instances for this route.
  * @example
  * ```ts
- * await expandRoute(def, ["en"]);
+ * await expandRoute(def, ["en"], byPattern, ctx);
  * ```
  */
 async function expandRoute(
   definition: RouteDefinition,
   locales: readonly string[],
-  byPattern: Map<string, TypedRoute>
+  byPattern: Map<string, TypedRoute>,
+  ctx: Pick<PhaseContext, "require" | "has">
 ): Promise<PageInstance[]> {
   const entry = byPattern.get(definition.pattern);
   if (!entry) {
@@ -176,8 +208,9 @@ async function expandRoute(
   const { name } = entry;
   const instances: PageInstance[] = [];
   for (const locale of locales) {
+    const generateContext: GenerateContext = { locale, require: ctx.require, has: ctx.has };
     const generated = definition._handlers.generate
-      ? await definition._handlers.generate(locale)
+      ? await definition._handlers.generate(generateContext)
       : [{}];
     for (const raw of generated) {
       instances.push({
@@ -201,6 +234,7 @@ async function expandRoute(
  * mocks); `expandRoute` then throws for any uncorrelated pattern.
  *
  * @param router - The router plugin API (`entries` may be absent in test mocks).
+ * @param router.entries - The optional `entries()` accessor (absent in some test mocks).
  * @returns A map from route pattern to its compiled `TypedRoute`.
  * @example
  * ```ts
@@ -240,149 +274,306 @@ function adaptHeadConfig(config: HeadConfig): ComposedHeadConfig {
   return adapted;
 }
 
+// ── Per-instance render steps (one PageInstance → one written document) ──────────
+
 /**
- * Render one page instance to its static HTML document and write it to disk. Uses
- * the configured shell `template` (filled at build time) when supplied, otherwise
- * the in-code shell; injects the precomputed asset tags + build-id meta.
+ * Run a route's optional, build-only `.load(ctx)` for one instance. The loader
+ * receives a {@link LoadContext} (`params` + `locale` + `require`/`has`) so it pulls
+ * sibling plugin APIs the spec way (`ctx.require(contentPlugin)`) with no module
+ * global. Returns `{}` when the route declares no `.load()`. Never runs on the client.
  *
- * @param ctx - Plugin context (provides `require`, `state`, `config`).
+ * @param definition - The route definition for this instance.
+ * @param params - The resolved params for this instance.
+ * @param locale - The active locale for this instance.
+ * @param ctx - Plugin context (provides `require`/`has` for the load context).
+ * @returns The loaded data, or `{}` when the route has no loader.
+ * @example
+ * ```ts
+ * const data = await loadRouteData(def, { slug: "x" }, "en", ctx);
+ * ```
+ */
+async function loadRouteData(
+  definition: RouteDefinition,
+  params: Record<string, string>,
+  locale: string,
+  ctx: Pick<PhaseContext, "require" | "has">
+): Promise<unknown> {
+  if (!definition._handlers.load) return {};
+  const loadContext: LoadContext<RouteState> = {
+    params,
+    locale,
+    require: ctx.require,
+    has: ctx.has
+  };
+  return definition._handlers.load(loadContext);
+}
+
+/**
+ * Compose one page's `<head>` inner HTML: build the {@link ResolvedRoute} identity,
+ * adapt the route's `.head()` result into the head plugin's config, run
+ * `head.render(resolved, data)`, then append the build-id meta tag (build metadata,
+ * emitted AFTER the composed head — never treated as content).
+ *
+ * @param ctx - Plugin context (provides `require`, `state`).
+ * @param instance - The page instance (name/params/locale identity).
+ * @param url - The instance's canonical URL (from `entry.toUrl`).
+ * @param routeContext - The context passed to the route's `.head()` handler.
+ * @param data - The route's loaded data, forwarded to `head.render`.
+ * @returns The composed `<head>` inner HTML including the build-id meta tag.
+ * @example
+ * ```ts
+ * const head = composeHeadHtml(ctx, instance, "/en/x/", routeContext, data);
+ * ```
+ */
+function composeHeadHtml(
+  ctx: Pick<PhaseContext, "require" | "state">,
+  instance: PageInstance,
+  url: string,
+  routeContext: RouteContext<RouteState>,
+  data: unknown
+): string {
+  const resolved: ResolvedRoute = {
+    path: url,
+    name: instance.name,
+    params: instance.params,
+    locale: instance.locale
+  };
+  const headConfig = instance.definition._handlers.head?.(routeContext);
+  if (headConfig) resolved.head = adaptHeadConfig(headConfig);
+  const headHtml = ctx.require(headPlugin).render(resolved, data);
+  return `${headHtml}<meta name="build-id" content="${ctx.state.runId ?? ""}">`;
+}
+
+/**
+ * Render one page's body to an HTML string: build the page VNode via the route's
+ * `.render()`, wrap it in the route's optional `.layout()` (persistent chrome —
+ * SSG-only: the client keeps the chrome and swaps just the inner region, so the
+ * layout is NOT re-applied on navigation), then serialize with
+ * preact-render-to-string. Returns `""` when the route has no `.render()`.
+ *
+ * @param definition - The route definition (provides `.render()`/`.layout()`/`._meta`).
+ * @param routeContext - The route context (params/data/locale/url) — extended with `meta` for the layout.
+ * @returns The SSR-rendered body HTML, or `""` when the route has no `.render()`.
+ * @example
+ * ```ts
+ * const body = renderBody(definition, routeContext);
+ * ```
+ */
+function renderBody(definition: RouteDefinition, routeContext: RouteContext<RouteState>): string {
+  const vnode = definition._handlers.render?.(routeContext);
+  if (!vnode) return "";
+  const layoutContext: LayoutContext<RouteState> = { ...routeContext, meta: definition._meta };
+  const page = definition._handlers.layout
+    ? definition._handlers.layout(layoutContext, vnode)
+    : vnode;
+  return renderToString(page);
+}
+
+/**
+ * Write a rendered page document to its on-disk path. The path comes from the
+ * compiled `TypedRoute.toFile(params)` (honoring any route-level `.toFile()`
+ * override), resolved under the build `outDir`; parent directories are created first.
+ *
+ * @param outDir - The build output directory.
+ * @param entry - The compiled route (owns `toFile` path derivation).
+ * @param params - The resolved params for this instance.
+ * @param html - The complete HTML document to write.
+ * @returns A promise resolved once the file is written.
+ * @example
+ * ```ts
+ * await writeDocument("dist", entry, { slug: "x" }, "<!DOCTYPE html>…");
+ * ```
+ */
+async function writeDocument(
+  outDir: string,
+  entry: TypedRoute,
+  params: Record<string, string>,
+  html: string
+): Promise<void> {
+  const filePath = path.join(outDir, entry.toFile(params));
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, html, "utf8");
+}
+
+/**
+ * Render one page instance to its static HTML document and write it to disk. Reads
+ * as a five-step pipeline: load data → build the route context → compose
+ * `<head>`/body → assemble the document (template fill or in-code shell) → write.
+ * Uses the configured shell `template` when supplied, otherwise the in-code shell.
+ *
+ * @param ctx - Plugin context (provides `require`, `state`, `config`, `has`).
  * @param instance - The concrete page instance to render.
- * @param shell - Wiring shared across instances (asset tags + optional template).
- * @param shell.assets - The injected asset `<link>`/`<script>` tags.
- * @param shell.template - The shell template HTML, or `null` for the in-code shell.
- * @returns The instance's URL and rendered HTML (HTML reused for the root page).
+ * @param shell - Per-build wiring shared across instances (asset tags + template).
+ * @returns The instance's URL, rendered HTML, loaded data, and client-nav flag.
  * @example
  * ```ts
  * await renderInstance(ctx, instance, { assets: "", template: null });
  * ```
  */
 async function renderInstance(
-  ctx: Pick<PhaseContext, "require" | "state" | "config">,
+  ctx: Pick<PhaseContext, "require" | "state" | "config" | "has">,
   instance: PageInstance,
-  shell: { assets: string; template: string | null }
-): Promise<{ url: string; html: string; data: unknown; hasData: boolean }> {
-  const { definition, entry, params, locale, name } = instance;
-  const hasData = definition._handlers.load !== undefined;
-  const data = definition._handlers.load
-    ? await definition._handlers.load(params, locale)
-    : undefined;
-  const routeContext: RouteContext<RouteState> = { params, data, locale };
-  const headConfig: HeadConfig | undefined = definition._handlers.head?.(routeContext);
+  shell: RenderShell
+): Promise<RenderedPage> {
+  const { definition, entry, params, locale } = instance;
+  const router = ctx.require(routerPlugin);
+
+  // 1. Load build-only data + 2. build the route context (params/data/locale + link builder).
+  const data = await loadRouteData(definition, params, locale, ctx);
   const url = entry.toUrl(params);
-  const resolved: ResolvedRoute = { path: url, name, params, locale };
-  if (headConfig) {
-    resolved.head = adaptHeadConfig(headConfig);
-  }
-  const headHtml = ctx.require(headPlugin).render(resolved, data);
-  const buildIdMeta = `<meta name="build-id" content="${ctx.state.runId ?? ""}">`;
-  const vnode = definition._handlers.render?.(routeContext);
-  // Apply the route's layout wrapper (persistent chrome) around the page VNode.
-  // SSG-only: the client (spa) keeps the chrome and swaps just the inner region,
-  // so the layout is NOT re-applied on navigation. The layout reads `.meta()` (e.g.
-  // activeTab) and `locale` via its LayoutContext.
-  const layoutCtx: LayoutContext<RouteState> = { ...routeContext, meta: definition._meta };
-  const page =
-    vnode && definition._handlers.layout ? definition._handlers.layout(layoutCtx, vnode) : vnode;
-  const bodyHtml = page ? renderToString(page) : "";
+  const routeContext: RouteContext<RouteState> = {
+    params,
+    data,
+    locale,
+    // eslint-disable-next-line jsdoc/require-jsdoc -- inline link builder; delegates to router.toUrl
+    url: (routeName, routeParams = {}) => router.toUrl(routeName, routeParams)
+  };
+
+  // 3. Compose head + body, then 4. assemble the document (template fill or in-code shell).
   const parts: DocumentParts = {
-    head: `${headHtml}${buildIdMeta}`,
-    body: bodyHtml,
+    head: composeHeadHtml(ctx, instance, url, routeContext, data),
+    body: renderBody(definition, routeContext),
     assets: shell.assets,
     locale
   };
   const html =
     shell.template === null ? renderDocument(parts) : fillTemplate(shell.template, parts);
-  const filePath = join(ctx.config.outDir, entry.toFile(params));
-  await mkdir(dirname(filePath), { recursive: true });
-  await writeFile(filePath, html, "utf8");
-  return { url, html, data, hasData };
+
+  // 5. Write to disk. A route with a `.render()` is client-navigable (the build re-runs
+  //    it on client nav) and so always gets a data sidecar — see writeDataSidecars.
+  await writeDocument(ctx.config.outDir, entry, params, html);
+  return { url, html, data, clientNavigable: definition._handlers.render !== undefined };
 }
 
-/**
- * Renders every route in the manifest to `outDir/<path>/index.html`. For each
- * route: expands instances via `route.generate?.(locale)`, loads data via
- * `route.load?.()`, pulls the composed `<head>` via `head.render(route, data)`,
- * renders the body, injects the build-id meta tag, and writes the file. Captures
- * the default (root `/`) page's HTML for the root-index phase. Renders all
- * instances concurrently via `Promise.all` (legal intra-plugin concurrency).
- *
- * @param ctx - Plugin context (provides `require`, `state`, `config`, `log`).
- * @returns The number of pages rendered and the captured default-page HTML.
- * @example
- * ```ts
- * const { pageCount, rootHtml } = await renderPages(ctx);
- * ```
- */
-/**
- * Enforce the data-validation contract: in `hybrid`/`spa` mode, any route that
- * has BOTH a `render` and a `load` (so it will be client-data-navigated) MUST
- * declare a `.parse()` validator — otherwise fetched JSON would reach `render`
- * unvalidated. Converts a runtime safety hole into a build error.
- *
- * @param manifest - The route definitions from `router.manifest()`.
- * @param mode - The resolved render mode.
- * @throws {Error} If a data-navigable route is missing `.parse()` in hybrid/spa mode.
- * @example
- * ```ts
- * assertDataValidators(router.manifest(), router.mode());
- * ```
- */
-function assertDataValidators(
-  manifest: readonly RouteDefinition[],
-  mode: "ssg" | "spa" | "hybrid"
-): void {
-  if (mode === "ssg") return;
-  for (const definition of manifest) {
-    const { render, load, parse } = definition._handlers;
-    if (render && load && !parse) {
-      throw new Error(
-        `[web] build: route "${definition.pattern}" enables client data navigation ` +
-          `(router mode "${mode}") but has no .parse() validator. Add ` +
-          `.parse(raw => /* validate → data */) so fetched JSON is validated before render, ` +
-          `or set router mode "ssg" to disable data navigation.`
-      );
-    }
-  }
-}
+// ── Phase orchestration (manifest → all pages → data sidecars → root capture) ────
 
-export async function renderPages(
-  ctx: Pick<PhaseContext, "require" | "state" | "config" | "log" | "has">
-): Promise<PagesResult> {
-  const router = ctx.require(routerPlugin);
-  const manifest = router.manifest();
-  ctx.state.manifest = [...manifest];
-  const mode = router.mode();
-  assertDataValidators(manifest, mode);
-  const byPattern = makeEntryMap(router);
-  const locales = ctx.require(i18nPlugin).locales();
-  // Read the shell template ONCE and compute asset tags ONCE (O(1) per page).
+/**
+ * Prepare the per-build {@link RenderShell} ONCE (O(1) per page): read the optional
+ * shell `template` from disk when configured + present, and precompute the injected
+ * asset tags. `template` is `null` when unset/missing (use the in-code shell).
+ *
+ * @param ctx - Plugin context (provides `config`, `state`).
+ * @returns The shared shell wiring (asset tags + template-or-null) for every page.
+ * @example
+ * ```ts
+ * const shell = await prepareShell(ctx);
+ * ```
+ */
+async function prepareShell(ctx: Pick<PhaseContext, "state" | "config">): Promise<RenderShell> {
   const templatePath = ctx.config.template;
   const template =
     typeof templatePath === "string" && existsSync(templatePath)
       ? await readFile(templatePath, "utf8")
       : // eslint-disable-next-line unicorn/no-null -- `null` = use the in-code shell
         null;
-  const assets = buildAssetTags(ctx);
-  const shell = { assets, template };
-  const instanceLists = await Promise.all(
-    manifest.map(definition => expandRoute(definition, locales, byPattern))
+  return { assets: buildAssetTags(ctx), template };
+}
+
+/**
+ * Expand every manifest route into its concrete page instances across all locales
+ * (delegating per-route expansion to {@link expandRoute}) and flatten the result.
+ *
+ * @param manifest - The route definitions from `router.manifest()`.
+ * @param locales - Active locale codes from i18n.
+ * @param byPattern - Pattern→compiled-`TypedRoute` map (see {@link makeEntryMap}).
+ * @param ctx - Plugin context (provides `require`/`has` for generate contexts).
+ * @returns The flattened list of page instances to render.
+ * @example
+ * ```ts
+ * const instances = await expandAllInstances(manifest, ["en"], byPattern, ctx);
+ * ```
+ */
+async function expandAllInstances(
+  manifest: readonly RouteDefinition[],
+  locales: readonly string[],
+  byPattern: Map<string, TypedRoute>,
+  ctx: Pick<PhaseContext, "require" | "has">
+): Promise<PageInstance[]> {
+  const lists = await Promise.all(
+    manifest.map(definition => expandRoute(definition, locales, byPattern, ctx))
   );
-  const instances = instanceLists.flat();
+  return lists.flat();
+}
+
+/**
+ * Persist per-page client-data sidecars when the app opts into client navigation
+ * (`mode !== "ssg"`) and the `data` plugin is composed. ONE route expansion feeds
+ * both the HTML and these sidecars — no duplicate loads. Only client-navigable pages
+ * (those with a `.render()`) get a sidecar (`{}` when there is no `.load()`), so
+ * hybrid data-nav resolves cleanly instead of falling back to a full HTML fetch.
+ *
+ * @param ctx - Plugin context (provides `require`, `has`, `config`, `log`).
+ * @param rendered - The rendered pages (url + data + client-navigable flag).
+ * @param mode - The global render mode from `router.mode()`.
+ * @returns A promise resolved once sidecars are written (no-op for `"ssg"`).
+ * @example
+ * ```ts
+ * await writeDataSidecars(ctx, rendered, "hybrid");
+ * ```
+ */
+async function writeDataSidecars(
+  ctx: Pick<PhaseContext, "require" | "has" | "config" | "log">,
+  rendered: readonly RenderedPage[],
+  mode: string
+): Promise<void> {
+  if (mode === "ssg" || !ctx.has("data")) return;
+  const entries: DataEntry[] = rendered
+    .filter(page => page.clientNavigable)
+    .map(page => ({ path: page.url, data: page.data }));
+  if (entries.length === 0) return;
+  const summary = await ctx.require(dataPlugin).write(entries, { outDir: ctx.config.outDir });
+  ctx.log.debug("build:data", { files: summary.fileCount, bytes: summary.bytes });
+}
+
+/**
+ * Find the default (root `/`) page's HTML among the rendered pages, captured for the
+ * root-index phase. Matches the `/` or `""` (empty) root URL.
+ *
+ * @param rendered - The rendered pages.
+ * @returns The root page's HTML, or `null` when no root page was rendered.
+ * @example
+ * ```ts
+ * const rootHtml = findRootHtml(rendered);
+ * ```
+ */
+function findRootHtml(rendered: readonly RenderedPage[]): string | null {
+  const root = rendered.find(page => page.url === "/" || page.url === "");
+  // eslint-disable-next-line unicorn/no-null -- `null` = no root page captured (PagesResult contract)
+  return root?.html ?? null;
+}
+
+/**
+ * Renders every route in the manifest to `outDir/<path>/index.html`. Reads as a
+ * pipeline: resolve deps → prepare the shared shell → expand instances → render all
+ * concurrently (`Promise.all`, legal intra-plugin concurrency) → write data sidecars
+ * (hybrid/spa) → capture the root page's HTML for the root-index phase.
+ *
+ * @param ctx - Plugin context (provides `require`, `state`, `config`, `log`, `has`).
+ * @returns The number of pages rendered and the captured default-page HTML.
+ * @example
+ * ```ts
+ * const { pageCount, rootHtml } = await renderPages(ctx);
+ * ```
+ */
+export async function renderPages(
+  ctx: Pick<PhaseContext, "require" | "state" | "config" | "log" | "has">
+): Promise<PagesResult> {
+  // Resolve dependencies + snapshot the manifest into state for later phases.
+  const router = ctx.require(routerPlugin);
+  const manifest = router.manifest();
+  ctx.state.manifest = [...manifest];
+  const locales = ctx.require(i18nPlugin).locales();
+  const byPattern = makeEntryMap(router);
+
+  // Expand → render every page instance (shell read + asset tags computed once).
+  const shell = await prepareShell(ctx);
+  const instances = await expandAllInstances(manifest, locales, byPattern, ctx);
   const rendered = await Promise.all(
     instances.map(instance => renderInstance(ctx, instance, shell))
   );
-  // Persist per-page client data when the app opts into hybrid/spa navigation.
-  // ONE expansion (above) feeds both the HTML and the data sidecars — no duplication.
-  if (mode !== "ssg" && ctx.has("data")) {
-    const entries: DataEntry[] = rendered
-      .filter(page => page.hasData)
-      .map(page => ({ path: page.url, data: page.data }));
-    if (entries.length > 0) {
-      const summary = await ctx.require(dataPlugin).write(entries, { outDir: ctx.config.outDir });
-      ctx.log.debug("build:data", { files: summary.fileCount, bytes: summary.bytes });
-    }
-  }
-  const root = rendered.find(page => page.url === "/" || page.url === "");
+
+  // Persist client-data sidecars (hybrid/spa) + capture the root page for root-index.
+  await writeDataSidecars(ctx, rendered, router.mode());
   ctx.log.debug("build:pages", { count: rendered.length });
-  return { pageCount: rendered.length, rootHtml: root?.html ?? null };
+  return { pageCount: rendered.length, rootHtml: findRootHtml(rendered) };
 }

@@ -5,7 +5,7 @@ import type { DataConfig } from "./types";
 
 /**
  * Validates the resolved data config: the browser `baseUrl` must be a non-empty,
- * site-root-relative URL path. The emit/read pipelines are wired in build waves 3/4.
+ * site-root-relative URL path.
  *
  * @param config - The resolved plugin configuration.
  * @throws {Error} If `baseUrl` is empty or not a rooted URL path.

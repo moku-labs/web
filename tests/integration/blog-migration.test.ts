@@ -19,6 +19,7 @@ import {
   createApp,
   defineRoutes,
   deployPlugin,
+  fileSystemContent,
   route
 } from "../../src";
 import type { Article } from "../../src/plugins/content/types";
@@ -57,10 +58,8 @@ function makeMigratedBlog(outDir: string, byLocale: ArticlesByLocale) {
     .head(() => ({ title: SITE.name, description: SITE.description }));
 
   const article = route("/{lang:?}/{slug}/")
-    .generate((locale: string) => slugs(locale).map(slug => ({ lang: locale, slug })))
-    .load((params: { lang?: string; slug?: string }, locale: string) =>
-      pick(locale, params.slug ?? "")
-    )
+    .generate(ctx => slugs(ctx.locale).map(slug => ({ lang: ctx.locale, slug })))
+    .load(ctx => pick(ctx.locale, ctx.params.slug ?? ""))
     .render(ctx => h(RawArticle, { html: (ctx.data as Article).html }) as ReturnType<typeof h>)
     .head(ctx => {
       const a = ctx.data as Article;
@@ -82,14 +81,14 @@ function makeMigratedBlog(outDir: string, byLocale: ArticlesByLocale) {
       };
     });
 
-  return createApp({
+  const app = createApp({
     // Node-only SSG plugins — composed by the consumer (not framework defaults).
     plugins: [contentPlugin, buildPlugin, deployPlugin],
+    config: { mode: "ssg" },
     pluginConfigs: {
       site: SITE,
       i18n: { ...I18N },
-      router: { routes: defineRoutes({ home, article }), mode: "ssg" },
-      content: { contentDir: FIXTURE_CONTENT_DIR },
+      content: { providers: [fileSystemContent({ contentDir: FIXTURE_CONTENT_DIR })] },
       head: { titleTemplate: "%s — Moku Blog", twitterHandle: "@moku_labs" },
       build: {
         outDir,
@@ -102,6 +101,8 @@ function makeMigratedBlog(outDir: string, byLocale: ArticlesByLocale) {
       deploy: { target: "cloudflare-pages", outDir: "dist" }
     }
   });
+  app.router.set(defineRoutes({ home, article }));
+  return app;
 }
 
 describe("integration: future blog migration (end-to-end)", () => {

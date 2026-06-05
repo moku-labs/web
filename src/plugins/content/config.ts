@@ -1,13 +1,12 @@
 /**
- * @file content plugin — default configuration skeleton.
+ * @file content plugin — default configuration skeleton (shell).
  */
 import type { Config } from "./types";
 
 /**
- * Typed default content config (R6: no inline `as`). Framework default
- * remark/rehype plugin arrays live in `pipeline/plugins.ts`, NOT here — a config
- * array default would be wiped by the shallow merge; the optional extra arrays
- * default to `[]` so consumer additions concatenate cleanly.
+ * Typed default content config (R6: no inline `as`). The provider list defaults to
+ * `[]`; a build MUST compose at least one (e.g. `fileSystemContent(...)`), enforced at
+ * `onInit`. Source + pipeline options now live on the provider, not here.
  *
  * @example
  * ```ts
@@ -15,9 +14,5 @@ import type { Config } from "./types";
  * ```
  */
 export const defaultContentConfig: Config = {
-  contentDir: "./src/content",
-  trustedContent: false,
-  extraRemarkPlugins: [],
-  extraRehypePlugins: [],
-  shikiTheme: "github-dark"
+  providers: []
 };

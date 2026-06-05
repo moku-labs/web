@@ -1,7 +1,7 @@
 /**
  * @file `loadJson` — the data plugin's isomorphic JSON read primitive (the
  * SSG↔SPA seam). Internal to the `data` plugin (NOT a framework-root export):
- * `data.load(locale)` uses it, and consumers read through `app.data.load(locale)`.
+ * `data.at(path)` uses it, and consumers read through `app.data.at(path)`.
  *
  * A read runs in BOTH worlds: on Node it reads the emitted data file from disk;
  * on the client (browser) it fetches the same data over HTTP. `loadJson` is the
@@ -17,7 +17,7 @@
 /**
  * Read + parse a JSON resource, isomorphically. In a browser (`document`
  * defined) it `fetch`es `pathOrUrl`; on Node it reads the file from disk. Throws
- * on a failed fetch or unreadable file so the caller (`route.load`/`data.load`)
+ * on a failed fetch or unreadable file so the caller (`route.load`/`data.at`)
  * can decide whether to fall back.
  *
  * @template T - The expected shape of the parsed JSON.
@@ -26,9 +26,9 @@
  * @throws {Error} If the browser fetch is not OK, or the Node file read fails.
  * @example
  * ```ts
- * // Browser: fetch("/_data/en/articles.json")
- * // Node:    read "dist/_data/en/articles.json"
- * const articles = await loadJson<Article[]>("/_data/en/articles.json");
+ * // Browser: fetch("/_data/en/hello/index.json")
+ * // Node:    read "dist/_data/en/hello/index.json"
+ * const article = await loadJson<Article>("/_data/en/hello/index.json");
  * ```
  */
 export async function loadJson<T>(pathOrUrl: string): Promise<T> {

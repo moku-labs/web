@@ -11,8 +11,16 @@ import { logPlugin } from "./plugins/log";
  * resolved via `pluginConfigs`, not merged here.
  */
 export type Config = {
-  /** Runtime mode. Drives log sink defaults, content draft filtering, build minify. */
-  mode: "production" | "development";
+  /** Development mode. Drives log sink defaults and content draft visibility. */
+  isDevelopment: boolean;
+  /**
+   * Render mode — the single SSG/DATA/SPA switch, read by the router (`ctx.global`)
+   * and consumed by `build`/`spa` via `router.mode()`.
+   * - `"ssg"` static generation only (no client router emitted).
+   * - `"spa"` client-side routing only.
+   * - `"hybrid"` static HTML + client navigation overlay (default).
+   */
+  mode: "ssg" | "spa" | "hybrid";
 };
 
 /**
@@ -22,10 +30,21 @@ export type Config = {
 // biome-ignore lint/complexity/noBannedTypes: framework declares no global events; plugins own theirs.
 export type Events = {};
 
+/**
+ * Step 1 of the factory chain — captures the framework's `Config`/`Events` contract
+ * and registers the core plugins (`log`, `env`) whose APIs are injected onto every
+ * regular plugin's context. Consumers never use this directly; it backs the exported
+ * {@link createPlugin} and {@link createCore}.
+ *
+ * @example
+ * ```ts
+ * const { createPlugin, createCore } = coreConfig;
+ * ```
+ */
 export const coreConfig = createCoreConfig<Config, Events, [typeof logPlugin, typeof envPlugin]>(
   "web",
   {
-    config: { mode: "production" },
+    config: { isDevelopment: false, mode: "hybrid" },
     plugins: [logPlugin, envPlugin],
     pluginConfigs: {
       // Core-plugin defaults (levels 1–2 of the 4-level core cascade, spec/03 §5).

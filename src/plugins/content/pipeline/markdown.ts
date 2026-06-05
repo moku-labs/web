@@ -6,7 +6,7 @@ import rehypeSanitize from "rehype-sanitize";
 import rehypeStringify from "rehype-stringify";
 import type { Processor } from "unified";
 import { unified } from "unified";
-import type { Config, State } from "../types";
+import type { ContentProviderState, FileSystemContentOptions } from "../types";
 import { defaultRehypePlugins, defaultRemarkPlugins } from "./plugins";
 import { buildSanitizeSchema } from "./sanitize";
 
@@ -30,7 +30,10 @@ import { buildSanitizeSchema } from "./sanitize";
  * const html = String(await processor.process(markdown));
  * ```
  */
-export function ensureProcessor(state: State, config: Config): Processor {
+export function ensureProcessor(
+  state: ContentProviderState,
+  config: FileSystemContentOptions
+): Processor {
   if (state.processor !== null) {
     return state.processor;
   }

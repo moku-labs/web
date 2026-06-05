@@ -28,8 +28,11 @@ export * from "./plugins";
 export { cloudflareBindings, dotenv, processEnv } from "./plugins/env/providers";
 export { browserEnv } from "./plugins/env/providers.browser";
 
+// ─── content providers (compose per source; fileSystemContent is the Node markdown source) ──
+export { fileSystemContent } from "./plugins/content/providers";
+
 // ─── Consumer helpers: route DSL, SPA islands, SEO <head> primitives ──────────
-export { defineRoutes, route } from "./plugins/router";
+export { createUrls, defineRoutes, route } from "./plugins/router";
 export { createComponent } from "./plugins/spa";
 export {
   buildArticleHead,
@@ -63,22 +66,22 @@ const core = createCore(coreConfig, {
  *
  * @param options - Optional configuration:
  *  - `pluginConfigs` — per-plugin overrides, keyed by plugin name.
- *  - `config` — global framework config (e.g. `{ mode: "development" }`).
+ *  - `config` — global framework config (e.g. `{ mode: "spa" }`).
  *  - `plugins` — extra plugins (Node-only built-ins or your own) merged into the app and its type.
  *  - `onReady` / `onError` / `onStart` / `onStop` — lifecycle callbacks.
  * @returns The initialized app: `start()`, `stop()`, every plugin's API, and `log`.
  * @example
  * ```ts
- * // Node SSG build — add the node-only plugins:
+ * // Node SSG build — add the node-only plugins, register routes via config, then build:
+ * import * as routes from "./routes";
  * const app = createApp({
  *   plugins: [contentPlugin, buildPlugin, deployPlugin],
  *   pluginConfigs: {
  *     site: { name: "My Blog", url: "https://blog.dev", author: "Ada", description: "Notes" },
- *     router: { routes: defineRoutes({ home: route("/"), post: route("/blog/{slug}/") }) }
+ *     router: { routes }
  *   }
  * });
- * await app.start();
- * await app.build.run();
+ * await app.build.run();   // routes compiled at init; or app.router.set(routes) at runtime
  * ```
  */
 export const createApp = core.createApp;

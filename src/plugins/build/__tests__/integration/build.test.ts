@@ -6,6 +6,7 @@ import { createCoreConfig } from "@moku-labs/core";
 import { h } from "preact";
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it } from "vitest";
 import { contentPlugin } from "../../../content";
+import { fileSystemContent } from "../../../content/providers";
 import type { Article } from "../../../content/types";
 import { headPlugin } from "../../../head";
 import { i18nPlugin } from "../../../i18n";
@@ -26,7 +27,7 @@ const SITE = {
 /** Load the fixture articles once so route loaders can close over them by slug. */
 async function loadFixtureArticles(): Promise<Map<string, Article>> {
   const coreConfig = createCoreConfig("web-test", {
-    config: { mode: "production" as const },
+    config: { isDevelopment: false, mode: "ssg" as const },
     plugins: [logPlugin],
     pluginConfigs: { log: { mode: "test" as const } }
   });
@@ -35,7 +36,7 @@ async function loadFixtureArticles(): Promise<Map<string, Article>> {
     plugins: [i18nPlugin, contentPlugin],
     pluginConfigs: {
       i18n: { locales: ["en"], defaultLocale: "en" },
-      content: { contentDir: FIXTURE_DIR }
+      content: { providers: [fileSystemContent({ contentDir: FIXTURE_DIR })] }
     }
   });
   const byLocale = await app.content.loadAll();
@@ -55,7 +56,7 @@ function RawArticle(props: { html: string }) {
 function buildApp(outDir: string, bySlug: Map<string, Article>, extraPlugins: unknown[] = []) {
   const articleRoute = route("/{slug}/")
     .generate(() => [...bySlug.keys()].map(slug => ({ slug })))
-    .load(({ slug }) => bySlug.get(slug ?? ""))
+    .load(ctx => bySlug.get(ctx.params.slug ?? ""))
     .render(ctx => h(RawArticle, { html: (ctx.data as Article).html }) as ReturnType<typeof h>)
     .head(ctx => ({ title: (ctx.data as Article).frontmatter.title }));
   const homeRoute = route("/")
@@ -64,12 +65,12 @@ function buildApp(outDir: string, bySlug: Map<string, Article>, extraPlugins: un
   const routes = defineRoutes({ home: homeRoute, article: articleRoute });
 
   const coreConfig = createCoreConfig("web-test", {
-    config: { mode: "production" as const },
+    config: { isDevelopment: false, mode: "ssg" as const },
     plugins: [logPlugin],
     pluginConfigs: { log: { mode: "test" as const } }
   });
   const { createApp } = coreConfig.createCore(coreConfig, { plugins: [] });
-  return createApp({
+  const app = createApp({
     plugins: [
       sitePlugin,
       i18nPlugin,
@@ -82,11 +83,12 @@ function buildApp(outDir: string, bySlug: Map<string, Article>, extraPlugins: un
     pluginConfigs: {
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
-      router: { routes, mode: "ssg" as const },
-      content: { contentDir: FIXTURE_DIR },
+      content: { providers: [fileSystemContent({ contentDir: FIXTURE_DIR })] },
       build: { outDir, feeds: true, sitemap: true, images: false, ogImage: false, minify: false }
     }
   });
+  app.router.set(routes);
+  return app;
 }
 
 describe("build integration", () => {
@@ -114,7 +116,7 @@ describe("build integration", () => {
     const out = path.join(tmp, "dist");
     const events: string[] = [];
     const coreConfig = createCoreConfig("web-test", {
-      config: { mode: "production" as const },
+      config: { isDevelopment: false, mode: "ssg" as const },
       plugins: [logPlugin],
       pluginConfigs: { log: { mode: "test" as const } }
     });
@@ -225,7 +227,7 @@ describe("build integration", () => {
     const routes = defineRoutes({ home: homeRoute, guide: localized });
 
     const coreConfig = createCoreConfig("web-test", {
-      config: { mode: "production" as const },
+      config: { isDevelopment: false, mode: "ssg" as const },
       plugins: [logPlugin],
       pluginConfigs: { log: { mode: "test" as const } }
     });
@@ -235,8 +237,7 @@ describe("build integration", () => {
       pluginConfigs: {
         site: SITE,
         i18n: { locales: ["en", "uk"], defaultLocale: "en" },
-        router: { routes, mode: "ssg" as const },
-        content: { contentDir: FIXTURE_DIR },
+        content: { providers: [fileSystemContent({ contentDir: FIXTURE_DIR })] },
         build: {
           outDir: out,
           feeds: false,
@@ -252,6 +253,7 @@ describe("build integration", () => {
         }
       }
     });
+    app.router.set(routes);
 
     await app.build.run();
 

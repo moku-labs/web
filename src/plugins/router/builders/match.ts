@@ -5,27 +5,13 @@
  * lang-aware/bare `URLPattern` pair, the `matchFn` (withLang first, bare fallback
  * injecting `defaultLocale`), and extract/strip params. No `ctx` here.
  */
+import { extractGroups } from "../iso-match";
 import type { CompiledRoute, RouteDefinition } from "../types";
 
-/**
- * Extract named groups from a `URLPattern` match result, stripping numeric/regex
- * group keys so only declared param names remain.
- *
- * @param groups - The `URLPatternResult.pathname.groups` object.
- * @returns A clean record of named params (numeric keys + undefined values dropped).
- * @example
- * ```ts
- * extractParams({ slug: "hello", "0": "x" }); // { slug: "hello" }
- * ```
- */
-export function extractParams(groups: Record<string, string | undefined>): Record<string, string> {
-  const params: Record<string, string> = {};
-  for (const [key, value] of Object.entries(groups)) {
-    if (/^\d+$/.test(key)) continue;
-    if (value !== undefined) params[key] = value;
-  }
-  return params;
-}
+// The router's runtime param extractor IS the isomorphic `extractGroups`, re-exported
+// under the matching-domain name so the server table (here) and the client matcher
+// (iso-match) share ONE implementation and can never drift.
+export { extractGroups as extractParams } from "../iso-match";
 
 /**
  * Build a pathname matcher for a single route: tries the `withLang` URLPattern,
@@ -47,10 +33,10 @@ export function createMatchFunction(
 ): (pathname: string) => Record<string, string> | null {
   return (pathname: string): Record<string, string> | null => {
     const withLang = matchers.withLang.exec({ pathname });
-    if (withLang) return extractParams(withLang.pathname.groups);
+    if (withLang) return extractGroups(withLang.pathname.groups);
     const bare = matchers.bare.exec({ pathname });
     if (bare) {
-      const params = extractParams(bare.pathname.groups);
+      const params = extractGroups(bare.pathname.groups);
       params.lang = defaultLocale;
       return params;
     }

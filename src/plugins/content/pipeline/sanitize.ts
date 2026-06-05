@@ -14,8 +14,9 @@ import type { Options } from "rehype-sanitize";
  * Clones the library default and additively allowlists the markup our custom
  * transforms emit: `class` values (`pull-quote`, `section-divider`,
  * `section-divider-ornament`) on `aside`/`div`/`span`, and the `loading`
- * attribute on `img`. Shiki's `class`/`style` on `pre`/`code`/`span` are also
- * permitted so highlighted code survives the sanitize pass.
+ * attribute on `img`. `class`/`className`/`style` are allowlisted globally (`*`,
+ * i.e. on every element) — not just on `pre`/`code`/`span` — so Shiki's inline
+ * token colors survive the sanitize pass.
  *
  * @returns The extended, security-hardened sanitize schema.
  * @example

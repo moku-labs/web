@@ -2,7 +2,7 @@
  * @file content pipeline — frontmatter parsing.
  */
 import matter from "gray-matter";
-import type { Config, Frontmatter } from "../types";
+import type { FileSystemContentOptions, Frontmatter } from "../types";
 
 /** Required frontmatter fields; absence throws a `[web] content` error. */
 const REQUIRED_FIELDS = ["title", "date", "description", "tags", "language"] as const;
@@ -25,7 +25,7 @@ const REQUIRED_FIELDS = ["title", "date", "description", "tags", "language"] as 
  */
 export function parseFrontmatter(
   raw: string,
-  config: Config
+  config: FileSystemContentOptions
 ): { frontmatter: Frontmatter; body: string } {
   const parsed = matter(raw);
   // Clone to avoid mutating gray-matter's per-input cache (shared references).

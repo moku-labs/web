@@ -8,7 +8,7 @@
  * and re-mounts islands, and that `stop()` tears the runtime down.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { contentPlugin, createApp, defineRoutes, route } from "../../src";
+import { contentPlugin, createApp, defineRoutes, fileSystemContent, route } from "../../src";
 import { createComponent } from "../../src/plugins/spa";
 import { FIXTURE_CONTENT_DIR, SITE } from "./helpers/harness";
 
@@ -36,18 +36,20 @@ function makeSpaApp() {
       .render(() => undefined as never)
       .head(() => ({ title: "About" }))
   });
-  return createApp({
+  const app = createApp({
     // content is node-only — composed explicitly (not a framework default).
     plugins: [contentPlugin],
+    config: { mode: "spa" },
     pluginConfigs: {
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
-      router: { routes, mode: "spa" },
-      content: { contentDir: FIXTURE_CONTENT_DIR },
+      content: { providers: [fileSystemContent({ contentDir: FIXTURE_CONTENT_DIR })] },
       head: {},
       spa: { progressBar: false, components: [counter] }
     }
   });
+  app.router.set(routes);
+  return app;
 }
 
 /** Full HTML document returned by the mocked fetch for a navigated page. */

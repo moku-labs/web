@@ -89,6 +89,10 @@ function resetRun(ctx: Pick<PhaseContext, "state">): void {
  * others. A disabled output is skipped entirely — it emits NO `build:phase` boundary
  * (the `withPhase` wrapper is gated on the config flag, not just the phase body).
  *
+ * Note: this boundary-gating applies only to these `runOutputs` tasks. The always-on
+ * pipeline phases (`bundle`/`content`/`images`/`pages`/`content-images`/`root-index`,
+ * run unconditionally in `runPipeline`) always emit their boundaries.
+ *
  * @param ctx - The phase context.
  * @example
  * ```ts

@@ -7,7 +7,7 @@
  * `data` for the read side never pulls `node:*`. The read side (`at()`) uses only
  * the isomorphic `loadJson` (whose Node branch is itself lazy).
  */
-import { dataSuffix } from "./convention";
+import { dataSuffix, relativeDataFile } from "./convention";
 import { loadJson } from "./load-json";
 import type { DataConfig, DataEntry, DataProvider, DataState, DataWriteSummary } from "./types";
 
@@ -29,20 +29,6 @@ export type DataPluginContext = {
 };
 
 /**
- * Trim a single trailing slash from a config dir so `fileFor` joins cleanly.
- *
- * @param dir - The configured output dir (e.g. `"_data"` or `"_data/"`).
- * @returns The dir without a trailing slash.
- * @example
- * ```ts
- * trimTrailingSlash("_data/"); // "_data"
- * ```
- */
-function trimTrailingSlash(dir: string): string {
-  return dir.endsWith("/") ? dir.slice(0, -1) : dir;
-}
-
-/**
  * Builds the data provider — the agnostic bridge. `write()` is the Node persist
  * side; `at()` is the browser read side; `urlFor`/`fileFor` are the pure
  * convention. No `onStart`/`onStop` (holds no long-lived resource).
@@ -60,8 +46,9 @@ export function dataApi(ctx: DataPluginContext): DataProvider {
   return {
     /**
      * READ (browser) — fetch (and cache) the persisted data for a page path.
-     * Returns the raw JSON as `unknown` (the caller's `route.parse` validates it),
-     * or `null` if the fetch/parse fails (so `spa` can fall back to HTML).
+     * Returns the raw JSON as `unknown`, which the route uses directly as `ctx.data`
+     * (no route `.parse()`); returns `null` if the fetch or JSON parse fails (so
+     * `spa` can fall back to HTML).
      *
      * @param path - The page URL path (e.g. `/en/hello/`).
      * @returns The page's raw data, or `null` on failure.
@@ -77,7 +64,7 @@ export function dataApi(ctx: DataPluginContext): DataProvider {
         ctx.state.cache.set(path, data);
         return data;
       } catch {
-        // eslint-disable-next-line unicorn/no-null -- "fetch/parse failed → fall back" signal
+        // eslint-disable-next-line unicorn/no-null -- "fetch or JSON parse failed → fall back" signal
         return null;
       }
     },
@@ -126,7 +113,7 @@ export function dataApi(ctx: DataPluginContext): DataProvider {
      * ```
      */
     fileFor(path: string): string {
-      return `${trimTrailingSlash(ctx.config.outputDir)}/${dataSuffix(path)}`;
+      return relativeDataFile(ctx.config.outputDir, path);
     }
   };
 }

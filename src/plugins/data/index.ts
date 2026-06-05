@@ -5,7 +5,7 @@
  * Owns ONE contract — `page path → persisted JSON file` — and nothing about what
  * the data is: `write(entries)` persists per-page JSON on Node (build supplies the
  * entries it already expanded); `at(path)` fetches + caches it in the browser as
- * `unknown`, which the route's `parse` validates before `render`. NOT a framework
+ * `unknown`, which the route uses directly as `ctx.data` in `render`. NOT a framework
  * default — the consumer composes it where needed (Node build AND/OR browser app).
  *
  * **No hard `depends`** — fully browser-composable; the `node:fs` writer is behind
@@ -27,13 +27,14 @@ import { validateDataConfig } from "./validate";
  * @example
  * ```ts
  * // Node build: `build` calls app.data.write(...) during its pages phase when
- * // router.mode !== "ssg". Just compose the plugin:
+ * // router.mode() !== "ssg". Compose the plugin + set the global render mode:
+ * import * as routes from "./routes";
  * const app = createApp({
  *   plugins: [dataPlugin, contentPlugin, buildPlugin],
- *   pluginConfigs: { content: { contentDir: "./content" }, router: { routes, mode: "hybrid" } }
+ *   config: { mode: "hybrid" },
+ *   pluginConfigs: { content: { providers: [fileSystemContent({ contentDir: "./content" })] }, router: { routes } }
  * });
- * await app.start();
- * await app.build.run();   // writes HTML + per-page data sidecars
+ * await app.build.run();   // writes HTML + per-page data sidecars (routes compiled at init)
  *
  * // Browser app: compose `dataPlugin` too; spa fetches via app.data.at(path) on nav.
  * ```

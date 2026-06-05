@@ -47,7 +47,7 @@ Configured via `pluginConfigs.head`. All fields optional.
 | `twitterHandle`  | `string`                               | _(none)_                | Emitted as `twitter:site`.                        |
 
 `onInit` validates structurally (no I/O): `titleTemplate` must contain `%s` and
-`twitterCard` must be one of the two literals, otherwise it throws `[head] config: …`.
+`twitterCard` must be one of the two literals, otherwise it throws `[web] head: …`.
 
 ## Dependencies
 

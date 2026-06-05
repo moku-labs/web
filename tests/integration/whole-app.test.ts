@@ -17,6 +17,7 @@ import {
   createPlugin,
   defineRoutes,
   feedLink,
+  fileSystemContent,
   hreflang,
   jsonLd,
   meta,
@@ -30,22 +31,24 @@ import { FIXTURE_CONTENT_DIR, SITE } from "./helpers/harness";
  * Minimal valid config for the real createApp (site + non-empty routes + contentDir).
  * `content`/`build` are node-only — composed explicitly (not framework defaults).
  */
-function bootConfig(routes: ReturnType<typeof defineRoutes>, mode: "ssg" | "spa" | "hybrid") {
-  return {
+function bootApp(routes: ReturnType<typeof defineRoutes>, mode: "ssg" | "spa" | "hybrid") {
+  const app = createApp({
     plugins: [contentPlugin, buildPlugin],
+    config: { mode },
     pluginConfigs: {
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
-      router: { routes, mode },
-      content: { contentDir: FIXTURE_CONTENT_DIR }
+      content: { providers: [fileSystemContent({ contentDir: FIXTURE_CONTENT_DIR })] }
     }
-  };
+  });
+  app.router.set(routes);
+  return app;
 }
 
 describe("integration: framework boots (whole app)", () => {
   it("constructs through the real factory chain and exposes accessor surfaces", () => {
     const routes = defineRoutes({ home: route("/"), post: route("/{slug}/") });
-    const app = createApp(bootConfig(routes, "ssg"));
+    const app = bootApp(routes, "ssg");
 
     // site
     expect(app.site.name()).toBe(SITE.name);
@@ -65,16 +68,15 @@ describe("integration: framework boots (whole app)", () => {
   });
 
   it("fails fast on an empty route map", () => {
-    expect(() =>
-      createApp({
-        plugins: [contentPlugin],
-        pluginConfigs: {
-          site: SITE,
-          content: { contentDir: FIXTURE_CONTENT_DIR },
-          router: { routes: defineRoutes({}), mode: "ssg" }
-        }
-      })
-    ).toThrow(/\[web\]/);
+    const app = createApp({
+      plugins: [contentPlugin],
+      config: { mode: "ssg" },
+      pluginConfigs: {
+        site: SITE,
+        content: { providers: [fileSystemContent({ contentDir: FIXTURE_CONTENT_DIR })] }
+      }
+    });
+    expect(() => app.router.set(defineRoutes({}))).toThrow(/\[web\]/);
   });
 
   // Different "site variants" all boot through the same shipped wiring.
@@ -100,7 +102,7 @@ describe("integration: framework boots (whole app)", () => {
     routes,
     patterns
   }) => {
-    const app = createApp(bootConfig(routes, "hybrid"));
+    const app = bootApp(routes, "hybrid");
     expect(app.router.manifest().map(d => d.pattern)).toEqual(patterns);
   });
 

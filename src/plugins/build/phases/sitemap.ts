@@ -6,7 +6,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { i18nPlugin } from "../../i18n";
 import { routerPlugin } from "../../router";
-import type { RouteDefinition, TypedRoute } from "../../router/types";
+import type { GenerateContext, RouteDefinition, TypedRoute } from "../../router/types";
 import { sitePlugin } from "../../site";
 import type { PhaseContext } from "../types";
 
@@ -29,21 +29,24 @@ export type SitemapResult = {
  * @param definition - The route definition from the manifest.
  * @param entry - The compiled `TypedRoute` correlated by pattern (owns `toUrl`).
  * @param locales - Active locale codes from i18n.
+ * @param ctx - Phase context slice (`require`/`has`) forwarded into the `generate()` ctx.
  * @returns The relative URLs produced by this route.
  * @example
  * ```ts
- * await expandUrls(def, entry, ["en"]);
+ * await expandUrls(def, entry, ["en"], ctx);
  * ```
  */
 async function expandUrls(
   definition: RouteDefinition,
   entry: TypedRoute,
-  locales: readonly string[]
+  locales: readonly string[],
+  ctx: Pick<PhaseContext, "require" | "has">
 ): Promise<string[]> {
   const urls: string[] = [];
   for (const locale of locales) {
+    const generateContext: GenerateContext = { locale, require: ctx.require, has: ctx.has };
     const generated = definition._handlers.generate
-      ? await definition._handlers.generate(locale)
+      ? await definition._handlers.generate(generateContext)
       : [{}];
     for (const raw of generated) {
       urls.push(entry.toUrl((raw ?? {}) as Record<string, string>));
@@ -80,7 +83,7 @@ function serializeSitemap(urls: readonly string[]): string {
  * ```
  */
 export async function generateSitemap(
-  ctx: Pick<PhaseContext, "require" | "config" | "log">
+  ctx: Pick<PhaseContext, "require" | "config" | "log" | "has">
 ): Promise<SitemapResult | null> {
   if (!ctx.config.sitemap) {
     ctx.log.debug("build:sitemap", { skipped: true });
@@ -102,7 +105,7 @@ export async function generateSitemap(
             "router.manifest() and router.entries() are out of sync."
         );
       }
-      return expandUrls(definition, entry, locales);
+      return expandUrls(definition, entry, locales, ctx);
     })
   );
   const urls = relativeLists.flat().map(relative => site.canonical(relative));

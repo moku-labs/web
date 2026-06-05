@@ -90,8 +90,8 @@ export type PhaseContext = {
   state: State;
   /** Resolved, frozen build config. */
   readonly config: Readonly<Config>;
-  /** Global framework config (mode, etc.). */
-  readonly global: Readonly<{ mode: "production" | "development" }>;
+  /** Global framework config (development flag; render mode is read via `router.mode()`). */
+  readonly global: Readonly<{ isDevelopment: boolean }>;
   /** Resolve a depended-upon plugin instance to its public API. */
   require: PhaseRequire;
   /** Whether a plugin is registered (by name) — used to detect the OPTIONAL `data` plugin. */
@@ -101,18 +101,6 @@ export type PhaseContext = {
   /** Structured logger (core `log` API). */
   readonly log: PhaseLog;
 };
-
-/**
- * Injectable PNG renderer for the og-images phase. Defaults to the real
- * Satori → resvg pipeline; unit tests inject a fake to assert hash-cache skip
- * and the `p-limit` bound without rasterizing real images.
- *
- * @example
- * ```ts
- * const render: OgPngRenderer = async () => new Uint8Array();
- * ```
- */
-export type OgPngRenderer = (input: RichOgInput) => Promise<Uint8Array>;
 
 /**
  * Rich input handed to a custom OG `render` hook for a single article card. Carries
@@ -219,10 +207,10 @@ export type Config = {
   publicDir?: string;
   /**
    * Emit `outDir/404.html`. `true` for the built-in default page, or
-   * `{ route }` to supply the page's literal HTML body content (NOT a route
-   * path/slug — the string is written into the 404 page verbatim). Default `false`.
+   * `{ body }` to supply the page's literal HTML body content (written into the
+   * 404 page verbatim). Default `false`.
    */
-  notFound?: boolean | { route?: string };
+  notFound?: boolean | { body?: string };
   /** Emit per-path i18n bare-path redirect HTML pages. Default `false`. */
   localeRedirects?: boolean;
   /** Authoritative client bundle entry path (overrides the conventional scan). */

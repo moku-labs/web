@@ -1,13 +1,14 @@
 /**
- * @file content plugin — API factory + context-assembly + loader/invalidate logic.
+ * @file content plugin — API factory (browser-safe SHELL).
+ *
+ * Orchestration ONLY: locale fallback, draft filtering, date-descending sort,
+ * `contentId` assignment, the article cache, and events. All source I/O + the
+ * Markdown pipeline live in a {@link ContentProvider} (e.g. `fileSystemContent`),
+ * resolved from `config.providers`. This module imports ZERO node code — so
+ * `contentPlugin` is browser-safe and is exported from `@moku-labs/web/browser`.
  */
-import { readdir, readFile } from "node:fs/promises";
-import path from "node:path";
 import { i18nPlugin } from "../i18n";
 import type { Api as I18nApi } from "../i18n/types";
-import { parseFrontmatter } from "./pipeline/frontmatter";
-import { ensureProcessor } from "./pipeline/markdown";
-import { calculateReadingTime } from "./pipeline/reading-time";
 import type {
   Api,
   Article,
@@ -15,14 +16,19 @@ import type {
   Config,
   ContentApiContext,
   ContentEvents,
+  ContentProvider,
   State
 } from "./types";
 
+/** Actionable error when the content plugin is composed without any provider. */
+const NO_PROVIDER =
+  "[web] content: no provider composed.\n  Add fileSystemContent(...) to pluginConfigs.content.providers.";
+
 /**
- * Minimal structural shape of the plugin context that {@link contentApi}
- * consumes — state, config, global, emit, and the typed `require` accessor used
- * to reach the i18n plugin API. Typed loosely on purpose so api.ts stays free of
- * the kernel's full plugin-context generic machinery.
+ * Minimal structural shape of the plugin context that {@link contentApi} consumes —
+ * shell state, config (providers), global, emit, and the typed `require` accessor used
+ * to reach the i18n plugin API. Typed loosely on purpose so api.ts stays free of the
+ * kernel's full plugin-context generic machinery (and of any node import).
  *
  * @example
  * ```ts
@@ -30,12 +36,12 @@ import type {
  * ```
  */
 export type ContentPluginContext = {
-  /** Mutable plugin state (article cache + lazy processor). */
+  /** Mutable shell state (article cache). */
   state: State;
-  /** Resolved plugin configuration. */
+  /** Resolved plugin configuration (the content providers). */
   config: Config;
-  /** Global framework configuration (mode, etc.). */
-  global: { mode: "production" | "development" };
+  /** Global framework configuration (development flag). */
+  global: { isDevelopment: boolean };
   /** Emit a registered content event. */
   emit: <K extends keyof ContentEvents>(event: K, payload: ContentEvents[K]) => void;
   /** Resolve a depended-upon plugin's API (here the i18n plugin). */
@@ -43,37 +49,92 @@ export type ContentPluginContext = {
 };
 
 /**
- * Build a canonical article URL for a locale + slug.
+ * Collapse the ordered provider list into a single {@link ContentProvider} facade:
+ * `slugs()` are unioned, `readArticle`/`render` use first-match, `invalidate` fans out.
+ * A single-provider list returns that provider directly (the common case).
  *
- * @param locale - Requested locale code.
- * @param slug - Article directory name.
- * @returns The canonical article URL.
+ * @param providers - The ordered content providers from config.
+ * @returns One provider facade over the list.
  * @example
  * ```ts
- * articleToUrl("en", "hello"); // "/en/hello/"
+ * const provider = mergeProviders(ctx.config.providers);
  * ```
  */
-function articleToUrl(locale: string, slug: string): string {
-  return `/${locale}/${slug}/`;
-}
-
-/** Matches an `<img>` `src` that points at the co-located `images/` dir (relative or root-relative). */
-const RELATIVE_IMAGE_SRC = /(<img\b[^>]*?\bsrc=")(?:\.?\/)?images\//g;
-
-/**
- * Rewrite relative co-located image URLs (`./images/x.webp`) in rendered article HTML to the shared
- * absolute path the build copies them to (`/<slug>/images/...`), so they resolve from any locale page.
- *
- * @param html - The rendered article HTML.
- * @param slug - Article directory name.
- * @returns The HTML with image `src`s rewritten to absolute paths.
- * @example
- * ```ts
- * rewriteImageUrls('<img src="./images/a.webp">', "post"); // '<img src="/post/images/a.webp">'
- * ```
- */
-function rewriteImageUrls(html: string, slug: string): string {
-  return html.replaceAll(RELATIVE_IMAGE_SRC, `$1/${slug}/images/`);
+function mergeProviders(providers: readonly ContentProvider[]): ContentProvider {
+  const [first] = providers;
+  if (providers.length === 1 && first !== undefined) return first;
+  // Below runs only for length >= 2 (validate.ts rejects 0; the fast path above
+  // handles 1). The `|| "content:empty"`, `?? ""`, and NO_PROVIDER throw are thus
+  // unreachable defensive guards, kept so the facade is total over its types.
+  return {
+    name: providers.map(provider => provider.name).join("+") || "content:empty",
+    contentDir: first?.contentDir ?? "",
+    /**
+     * Union of every provider's slugs, sorted.
+     *
+     * @returns The merged slug list.
+     * @example
+     * ```ts
+     * await provider.slugs();
+     * ```
+     */
+    async slugs(): Promise<readonly string[]> {
+      const lists = await Promise.all(providers.map(provider => provider.slugs()));
+      return [...new Set(lists.flat())].toSorted();
+    },
+    /**
+     * First provider to supply the article wins.
+     *
+     * @param slug - Article directory name.
+     * @param fileLocale - Locale whose source file is read.
+     * @param outLocale - Locale the resulting Article represents.
+     * @param isFallback - Whether this used the default-locale fallback.
+     * @returns The first non-null Article, or `null`.
+     * @example
+     * ```ts
+     * await provider.readArticle("intro", "en", "en", false);
+     * ```
+     */
+    async readArticle(
+      slug: string,
+      fileLocale: string,
+      outLocale: string,
+      isFallback: boolean
+    ): Promise<Article | null> {
+      const found = await Promise.all(
+        providers.map(provider => provider.readArticle(slug, fileLocale, outLocale, isFallback))
+      );
+      // eslint-disable-next-line unicorn/no-null -- API contract is `Article | null`
+      return found.find((article): article is Article => article !== null) ?? null;
+    },
+    /**
+     * Render via the first provider.
+     *
+     * @param markdown - Raw Markdown source.
+     * @returns The rendered HTML.
+     * @throws {Error} If no provider is composed.
+     * @example
+     * ```ts
+     * await provider.render("# Hi");
+     * ```
+     */
+    async render(markdown: string): Promise<string> {
+      if (first === undefined) throw new Error(NO_PROVIDER);
+      return first.render(markdown);
+    },
+    /**
+     * Fan invalidation out to every provider.
+     *
+     * @param paths - Stale file paths.
+     * @example
+     * ```ts
+     * provider.invalidate(["content/intro/en.md"]);
+     * ```
+     */
+    invalidate(paths: readonly string[]): void {
+      for (const provider of providers) provider.invalidate?.(paths);
+    }
+  };
 }
 
 /**
@@ -98,10 +159,10 @@ function articleNotFound(slug: string, locale: string): Error {
 }
 
 /**
- * Plugin `api` factory: assembles the kernel-free {@link ContentApiContext} from
- * the plugin context (resolving i18n via `ctx.require`) and delegates to
- * {@link createContentApi}. Referenced directly as the plugin's `api` so
- * index.ts stays wiring-only.
+ * Plugin `api` factory: resolves i18n via `ctx.require`, merges `config.providers` into
+ * one source, assembles the kernel-free {@link ContentApiContext}, and delegates to
+ * {@link createContentApi}. Referenced directly as the plugin's `api` so index.ts stays
+ * wiring-only. Imports no node code (the provider owns it).
  *
  * @param ctx - Plugin context (state, config, global, emit, require).
  * @returns The constructed content plugin API surface.
@@ -141,93 +202,20 @@ export function contentApi(ctx: ContentPluginContext): Api {
 
   const apiContext: ContentApiContext = {
     state: ctx.state,
-    config: ctx.config,
     global: ctx.global,
     emit: ctx.emit,
     locales,
     defaultLocale,
-    articleToUrl
+    provider: mergeProviders(ctx.config.providers)
   };
   return createContentApi(apiContext);
 }
 
 /**
- * Discover slug-like subdirectories of the content root (direct children not
- * starting with `.` or `_`), sorted alphabetically for deterministic ordering.
- *
- * @param dir - Content root directory.
- * @returns The sorted slug list.
- * @example
- * ```ts
- * const slugs = await discoverSlugs("./src/content"); // ["about", "intro"]
- * ```
- */
-async function discoverSlugs(dir: string): Promise<string[]> {
-  const entries = await readdir(dir, { withFileTypes: true });
-  const slugs: string[] = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    if (entry.name.startsWith(".") || entry.name.startsWith("_")) continue;
-    slugs.push(entry.name);
-  }
-  return slugs.toSorted();
-}
-
-/**
- * Read and render one article file into an Article, or return `null` when the
- * `{locale}.md` file does not exist. Records the read path so invalidation can
- * target it. The returned `contentId` is provisional (the slug); `loadAll`
- * reassigns it after the date-descending sort.
- *
- * @param ctx - Kernel-free domain context.
- * @param slug - Article directory name.
- * @param fileLocale - Locale whose `{locale}.md` file is read from disk.
- * @param outLocale - Locale the resulting Article represents (requested locale).
- * @param isFallback - Whether this Article was resolved via locale fallback.
- * @returns The constructed Article, or `null` when the file is absent.
- * @example
- * ```ts
- * const article = await readArticle(ctx, "intro", "en", "uk", true);
- * ```
- */
-async function readArticle(
-  ctx: ContentApiContext,
-  slug: string,
-  fileLocale: string,
-  outLocale: string,
-  isFallback: boolean
-): Promise<Article | null> {
-  const filePath = path.join(ctx.config.contentDir, slug, `${fileLocale}.md`);
-  let raw: string;
-  try {
-    raw = await readFile(filePath, "utf8");
-  } catch {
-    // eslint-disable-next-line unicorn/no-null -- readArticle returns `Article | null`; absence is a null miss
-    return null;
-  }
-  ctx.state.dirtyPaths.delete(filePath);
-
-  const { frontmatter, body } = parseFrontmatter(raw, ctx.config);
-  const processor = ensureProcessor(ctx.state, ctx.config);
-  const html = rewriteImageUrls(String(await processor.process(body)), slug);
-  const { readingTime, wordCount } = calculateReadingTime(body);
-  const status: "published" | "draft" = frontmatter.draft ? "draft" : "published";
-
-  return {
-    frontmatter,
-    computed: { slug, readingTime, contentId: slug, status, wordCount },
-    html,
-    locale: outLocale,
-    isFallback,
-    url: ctx.articleToUrl(outLocale, slug)
-  };
-}
-
-/**
- * Resolve one article for `(slug, locale)` with locale fallback: the native
- * `{locale}.md` is preferred (`isFallback: false`); when absent, the
+ * Resolve one article for `(slug, locale)` with locale fallback via the provider: the
+ * native `{locale}` file is preferred (`isFallback: false`); when absent, the
  * default-locale file is used (`isFallback: true`, requested locale retained).
- * Returns `null` when neither file exists.
+ * Returns `null` when neither exists.
  *
  * @param ctx - Kernel-free domain context.
  * @param slug - Article directory name.
@@ -243,14 +231,14 @@ async function resolveArticle(
   slug: string,
   locale: string
 ): Promise<Article | null> {
-  const native = await readArticle(ctx, slug, locale, locale, false);
+  const native = await ctx.provider.readArticle(slug, locale, locale, false);
   if (native !== null) return native;
   const fallbackLocale = ctx.defaultLocale();
   if (fallbackLocale === locale) {
     // eslint-disable-next-line unicorn/no-null -- resolveArticle returns `Article | null`; no fallback possible
     return null;
   }
-  return readArticle(ctx, slug, fallbackLocale, locale, true);
+  return ctx.provider.readArticle(slug, fallbackLocale, locale, true);
 }
 
 /**
@@ -294,13 +282,12 @@ function toCard(article: Article): ArticleCard {
 }
 
 /**
- * Creates the content plugin API surface (loadAll, load, renderMarkdown,
- * invalidate, articleToCard) over the kernel-free domain context. The processor
- * is a lazy singleton on `ctx.state.processor`; drafts are excluded only in
- * production mode; `loadAll` emits `content:ready` and `invalidate` emits
- * `content:invalidated`.
+ * Creates the content plugin API surface (loadAll, load, renderMarkdown, invalidate,
+ * articleToCard, contentDir) over the kernel-free domain context. Delegates all source
+ * reads to `ctx.provider`; drafts are excluded only in production; `loadAll` emits
+ * `content:ready` and `invalidate` emits `content:invalidated`.
  *
- * @param ctx - Kernel-free domain context (state, config, global, emit, i18n helpers).
+ * @param ctx - Kernel-free domain context (state, global, emit, i18n helpers, provider).
  * @returns The content plugin {@link Api} surface.
  * @example
  * ```ts
@@ -311,10 +298,8 @@ function toCard(article: Article): ArticleCard {
 export function createContentApi(ctx: ContentApiContext): Api {
   return {
     /**
-     * Load every article across every active locale, returning a locale-keyed
-     * map of date-descending Article arrays. Lazily builds the processor and
-     * discovers slugs, applies locale fallback, excludes drafts in production,
-     * assigns `contentId` after sorting, then emits `content:ready`.
+     * Load every article across every active locale (locale fallback, production
+     * draft exclusion, date sort, `contentId` after sort), cache them, emit `content:ready`.
      *
      * @returns A locale-keyed map of date-descending articles.
      * @example
@@ -323,9 +308,8 @@ export function createContentApi(ctx: ContentApiContext): Api {
      * ```
      */
     async loadAll(): Promise<Map<string, Article[]>> {
-      const slugs = ctx.state.slugs ?? (await discoverSlugs(ctx.config.contentDir));
-      ctx.state.slugs = slugs;
-      const isProduction = ctx.global.mode === "production";
+      const slugs = await ctx.provider.slugs();
+      const isProduction = !ctx.global.isDevelopment;
 
       const result = new Map<string, Article[]>();
       let total = 0;
@@ -348,24 +332,21 @@ export function createContentApi(ctx: ContentApiContext): Api {
         result.set(locale, present);
         total += present.length;
       }
-      ctx.state.dirtyPaths.clear();
       ctx.emit("content:ready", { locales, articleCount: total });
       return result;
     },
 
     /**
-     * Resolve and render a single article for one locale with locale fallback.
-     * Throws a `[web] content` error when neither the requested nor the
-     * default-locale file exists. In production a `draft` article is suppressed
-     * and throws the SAME not-found error (drafts must be indistinguishable from
-     * missing articles so unpublished content is never disclosed); in
-     * development drafts load normally.
+     * Resolve and render a single article for one locale with locale fallback. Throws a
+     * `[web] content` not-found error when no file matches; in production a `draft` is
+     * suppressed and throws the SAME not-found error (drafts indistinguishable from
+     * missing); in development drafts load normally.
      *
      * @param slug - Article directory name.
      * @param locale - Requested locale code.
      * @returns The resolved Article.
      * @throws {Error} `[web] content` not-found when no file matches, or when the
-     *   resolved article is a draft and `global.mode === "production"`.
+     *   resolved article is a draft and `!global.isDevelopment` (production).
      * @example
      * ```ts
      * const article = await api.load("intro", "uk");
@@ -376,7 +357,7 @@ export function createContentApi(ctx: ContentApiContext): Api {
       if (article === null) {
         throw articleNotFound(slug, locale);
       }
-      const isProduction = ctx.global.mode === "production";
+      const isProduction = !ctx.global.isDevelopment;
       if (isProduction && article.computed.status === "draft") {
         throw articleNotFound(slug, locale);
       }
@@ -387,8 +368,7 @@ export function createContentApi(ctx: ContentApiContext): Api {
     },
 
     /**
-     * Render a raw Markdown string to HTML through the full pipeline (sanitize
-     * last when `trustedContent` is false). Lazily builds the processor.
+     * Render a raw Markdown string to HTML through the provider's pipeline.
      *
      * @param md - Raw Markdown source.
      * @returns The rendered HTML string.
@@ -398,15 +378,13 @@ export function createContentApi(ctx: ContentApiContext): Api {
      * ```
      */
     async renderMarkdown(md: string): Promise<string> {
-      const processor = ensureProcessor(ctx.state, ctx.config);
-      return String(await processor.process(md));
+      return ctx.provider.render(md);
     },
 
     /**
-     * Mark file paths stale for incremental dev rebuilds. Each non-blank path is
-     * added to `dirtyPaths` and its derived slug cache entry is dropped so the
-     * next `loadAll()` re-reads only those files. Empty/whitespace paths are
-     * ignored. Emits `content:invalidated` with the accepted paths.
+     * Mark file paths stale for incremental dev rebuilds: fan invalidation to the
+     * provider and drop the derived slug cache entries so the next `loadAll()` re-reads
+     * only those files. Empty/whitespace paths are ignored. Emits `content:invalidated`.
      *
      * @param paths - File paths to invalidate.
      * @example
@@ -415,12 +393,10 @@ export function createContentApi(ctx: ContentApiContext): Api {
      * ```
      */
     invalidate(paths: readonly string[]): void {
-      const accepted: string[] = [];
-      for (const path of paths) {
-        if (path.trim() === "") continue;
-        accepted.push(path);
-        ctx.state.dirtyPaths.add(path);
-        const segments = path.split(/[/\\]/);
+      const accepted = paths.filter(filePath => filePath.trim() !== "");
+      ctx.provider.invalidate?.(accepted);
+      for (const filePath of accepted) {
+        const segments = filePath.split(/[/\\]/);
         const slug = segments.at(-2);
         if (slug !== undefined) {
           for (const cache of ctx.state.articles.values()) {
@@ -428,14 +404,11 @@ export function createContentApi(ctx: ContentApiContext): Api {
           }
         }
       }
-      // eslint-disable-next-line unicorn/no-null -- `slugs` is `string[] | null`; reset forces a rescan
-      ctx.state.slugs = null;
       ctx.emit("content:invalidated", { paths: accepted });
     },
 
     /**
-     * Project a full Article to a lightweight ArticleCard for list/grid
-     * rendering without shipping rendered HTML.
+     * Project a full Article to a lightweight ArticleCard for list/grid rendering.
      *
      * @param article - The source article.
      * @returns The card projection.
@@ -449,16 +422,16 @@ export function createContentApi(ctx: ContentApiContext): Api {
     },
 
     /**
-     * The configured content source directory (e.g. `"./content"`).
+     * The configured content source directory (from the first provider).
      *
-     * @returns The content directory path from config.
+     * @returns The content directory path.
      * @example
      * ```ts
      * api.contentDir(); // "./content"
      * ```
      */
     contentDir(): string {
-      return ctx.config.contentDir;
+      return ctx.provider.contentDir;
     }
   };
 }

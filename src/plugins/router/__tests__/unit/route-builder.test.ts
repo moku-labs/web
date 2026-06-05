@@ -20,23 +20,6 @@ describe("route() fluent builder", () => {
     expect(r.meta({ activeTab: "blog" })).toBe(r);
     expect(r.toJson(() => ({}))).toBe(r);
     expect(r.toFile(() => "x.html")).toBe(r);
-    expect(r.parse(raw => raw as { title: string })).toBe(r);
-  });
-
-  it("captures the .parse() validator and types it as the loaded data", () => {
-    const parse = (raw: unknown): { title: string } => raw as { title: string };
-    const r = route("/{slug}/")
-      .load(() => ({ title: "hi" }))
-      .parse(parse);
-    expect(r._handlers.parse).toBe(parse);
-  });
-
-  it("parse must return the loaded data type (compile-time gate)", () => {
-    const r = route("/{slug}/")
-      .load(() => ({ title: "hi" }))
-      // @ts-expect-error — parse must return { title: string }, not a number
-      .parse(() => 123);
-    expect(r._handlers.parse).toBeDefined();
   });
 
   it("captures handlers into the _handlers bag", () => {
@@ -122,10 +105,23 @@ describe("route() / defineRoutes() type-level proofs", () => {
       });
   });
 
-  it("a loader receives params typed from the pattern", () => {
-    route("/{lang:?}/{slug}/").load(params => {
-      expectTypeOf(params).toExtend<{ slug: string; lang?: string }>();
+  it("a loader receives a ctx: params typed from the pattern, locale, and require/has", () => {
+    route("/{lang:?}/{slug}/").load(ctx => {
+      expectTypeOf(ctx.params).toExtend<{ slug: string; lang?: string }>();
+      expectTypeOf(ctx.locale).toBeString();
+      // Sibling plugin APIs come the spec way: ctx.require(pluginInstance).
+      expectTypeOf(ctx.require).toBeFunction();
+      expectTypeOf(ctx.has).toBeFunction();
       return { ok: true };
+    });
+  });
+
+  it("the render/head ctx exposes url(name, params) for building links", () => {
+    route("/{slug}/").render(ctx => {
+      // `url` is delivered by the build/spa (backed by router.toUrl) — links with no app ref.
+      expectTypeOf(ctx.url).toBeFunction();
+      expectTypeOf(ctx.url("home")).toBeString();
+      return null as never;
     });
   });
 });

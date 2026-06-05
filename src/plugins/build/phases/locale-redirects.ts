@@ -9,7 +9,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { i18nPlugin } from "../../i18n";
 import { routerPlugin } from "../../router";
-import type { RouteDefinition, TypedRoute } from "../../router/types";
+import type { GenerateContext, RouteDefinition, TypedRoute } from "../../router/types";
 import type { PhaseContext } from "../types";
 
 /** Result of the locale-redirects phase — the number of redirect pages written. */
@@ -76,19 +76,26 @@ function pairRoutes(router: RouterSlice): Array<[RouteDefinition, TypedRoute]> {
  * @param definition - The route definition (carries `generate`).
  * @param entry - The compiled `TypedRoute` (owns `toFile`/`toUrl`).
  * @param defaultLocale - The default locale to redirect bare paths to.
+ * @param ctx - Phase context slice (`require`/`has`) forwarded into the `generate()` ctx.
  * @returns Redirect jobs of `{ file, target }` for this route.
  * @example
  * ```ts
- * await expandRedirects(def, entry, "en");
+ * await expandRedirects(def, entry, "en", ctx);
  * ```
  */
 async function expandRedirects(
   definition: RouteDefinition,
   entry: TypedRoute,
-  defaultLocale: string
+  defaultLocale: string,
+  ctx: Pick<PhaseContext, "require" | "has">
 ): Promise<Array<{ file: string; target: string }>> {
+  const generateContext: GenerateContext = {
+    locale: defaultLocale,
+    require: ctx.require,
+    has: ctx.has
+  };
   const parameterSets = definition._handlers.generate
-    ? await definition._handlers.generate(defaultLocale)
+    ? await definition._handlers.generate(generateContext)
     : [{}];
   const jobs: Array<{ file: string; target: string }> = [];
   for (const raw of parameterSets) {
@@ -121,7 +128,7 @@ async function expandRedirects(
  * ```
  */
 export async function generateLocaleRedirects(
-  ctx: Pick<PhaseContext, "require" | "config" | "log">
+  ctx: Pick<PhaseContext, "require" | "config" | "log" | "has">
 ): Promise<LocaleRedirectsResult | null> {
   if (!ctx.config.localeRedirects) {
     ctx.log.debug("build:locale-redirects", { skipped: true });
@@ -132,7 +139,7 @@ export async function generateLocaleRedirects(
   const defaultLocale = ctx.require(i18nPlugin).defaultLocale();
   const jobLists = await Promise.all(
     pairRoutes(router).map(([definition, entry]) =>
-      expandRedirects(definition, entry, defaultLocale)
+      expandRedirects(definition, entry, defaultLocale, ctx)
     )
   );
   const jobs = jobLists.flat();

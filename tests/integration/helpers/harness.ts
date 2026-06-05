@@ -18,6 +18,7 @@ import {
   createApp,
   defineRoutes,
   deployPlugin,
+  fileSystemContent,
   route
 } from "../../../src";
 import type { Article } from "../../../src/plugins/content/types";
@@ -90,12 +91,11 @@ export async function loadFixtureArticles(
   const app = createApp({
     // content is node-only — added explicitly (not a framework default).
     plugins: [contentPlugin],
-    config: { mode },
+    config: { isDevelopment: mode === "development" },
     pluginConfigs: {
       site: SITE,
       i18n: { locales: [...locales], defaultLocale: locales[0] ?? "en" },
-      router: { routes: defineRoutes({ home: route("/") }), mode: "ssg" },
-      content: { contentDir: FIXTURE_CONTENT_DIR }
+      content: { providers: [fileSystemContent({ contentDir: FIXTURE_CONTENT_DIR })] }
     }
   });
   const byLocale = await app.content.loadAll();
@@ -136,12 +136,8 @@ export function blogRoutes(byLocale: ArticlesByLocale, localized: boolean) {
 
   if (localized) {
     const article = route("/{lang:?}/{slug}/")
-      .generate((locale: string) =>
-        slugsFor(byLocale, locale).map(slug => ({ lang: locale, slug }))
-      )
-      .load((params: { lang?: string; slug?: string }, locale: string) =>
-        pick(byLocale, locale, params.slug ?? "")
-      )
+      .generate(ctx => slugsFor(byLocale, ctx.locale).map(slug => ({ lang: ctx.locale, slug })))
+      .load(ctx => pick(byLocale, ctx.locale, ctx.params.slug ?? ""))
       .render(ctx => h(RawArticle, { html: (ctx.data as Article).html }) as ReturnType<typeof h>)
       .head(ctx => ({
         title: (ctx.data as Article).frontmatter.title,
@@ -151,8 +147,8 @@ export function blogRoutes(byLocale: ArticlesByLocale, localized: boolean) {
   }
 
   const article = route("/{slug}/")
-    .generate((locale: string) => slugsFor(byLocale, locale).map(slug => ({ slug })))
-    .load((params: { slug?: string }, locale: string) => pick(byLocale, locale, params.slug ?? ""))
+    .generate(ctx => slugsFor(byLocale, ctx.locale).map(slug => ({ slug })))
+    .load(ctx => pick(byLocale, ctx.locale, ctx.params.slug ?? ""))
     .render(ctx => h(RawArticle, { html: (ctx.data as Article).html }) as ReturnType<typeof h>)
     .head(ctx => ({
       title: (ctx.data as Article).frontmatter.title,
@@ -187,15 +183,14 @@ export function buildBlogApp(options: {
 }) {
   const locales = options.locales ?? ["en"];
   const localized = options.localized ?? locales.length > 1;
-  return createApp({
+  const app = createApp({
     // Node-only SSG plugins — composed by the consumer (not framework defaults).
     plugins: [contentPlugin, buildPlugin, deployPlugin],
-    config: { mode: options.mode ?? "production" },
+    config: { isDevelopment: (options.mode ?? "production") === "development", mode: "ssg" },
     pluginConfigs: {
       site: SITE,
       i18n: { ...I18N, locales: [...locales], defaultLocale: locales[0] ?? "en" },
-      router: { routes: blogRoutes(options.byLocale, localized), mode: "ssg" },
-      content: { contentDir: FIXTURE_CONTENT_DIR },
+      content: { providers: [fileSystemContent({ contentDir: FIXTURE_CONTENT_DIR })] },
       head: { titleTemplate: "%s — Moku Blog", twitterHandle: "@moku_labs" },
       build: {
         outDir: options.outDir,
@@ -207,4 +202,6 @@ export function buildBlogApp(options: {
       }
     }
   });
+  app.router.set(blogRoutes(options.byLocale, localized));
+  return app;
 }

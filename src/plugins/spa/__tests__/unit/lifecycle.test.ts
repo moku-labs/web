@@ -1,33 +1,29 @@
 // @vitest-environment happy-dom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { kernelRef } from "../../kernel";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { captureTeardown, disposeSpa } from "../../lifecycle";
-import type { SpaContext } from "../../types";
+import type { SpaContext, SpaKernel } from "../../types";
 
-const makeCtx = (log: unknown) => ({ log }) as unknown as SpaContext;
-
-afterEach(() => {
-  delete kernelRef.current;
-  vi.restoreAllMocks();
-  disposeSpa(); // idempotent reset
+const makeKernel = (dispose: () => void): SpaKernel => ({
+  init() {},
+  boot() {},
+  register() {},
+  processNav() {},
+  scan() {},
+  dispose
 });
 
-beforeEach(() => {
-  delete kernelRef.current;
+const makeCtx = (log: unknown, kernel: SpaKernel | null) =>
+  ({ log, state: { kernel } }) as unknown as SpaContext;
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  disposeSpa(); // idempotent reset
 });
 
 describe("lifecycle capture/dispose", () => {
   it("captureTeardown + disposeSpa runs the captured kernel.dispose()", () => {
     const dispose = vi.fn();
-    kernelRef.current = {
-      init() {},
-      boot() {},
-      register() {},
-      processNav() {},
-      scan() {},
-      dispose
-    };
-    captureTeardown(makeCtx({ error: vi.fn() }));
+    captureTeardown(makeCtx({ error: vi.fn() }, makeKernel(dispose)));
     disposeSpa();
     expect(dispose).toHaveBeenCalledTimes(1);
     // Idempotent: a second dispose is a no-op (teardown was nulled).
@@ -37,37 +33,22 @@ describe("lifecycle capture/dispose", () => {
 
   it("logs via the captured ref when teardown throws", () => {
     const error = vi.fn();
-    kernelRef.current = {
-      init() {},
-      boot() {},
-      register() {},
-      processNav() {},
-      scan() {},
-      dispose() {
-        throw new Error("boom");
-      }
-    };
-    captureTeardown(makeCtx({ error }));
+    const kernel = makeKernel(() => {
+      throw new Error("boom");
+    });
+    captureTeardown(makeCtx({ error }, kernel));
     expect(() => disposeSpa()).not.toThrow();
     expect(error).toHaveBeenCalledWith("spa:teardown-failed", {}, expect.any(Error));
   });
 
   it("captureTeardown is a no-op without a DOM", () => {
     const original = globalThis.document;
+    const dispose = vi.fn();
     // @ts-expect-error — simulate a headless environment.
     delete globalThis.document;
-    expect(() => captureTeardown(makeCtx({ error: vi.fn() }))).not.toThrow();
+    expect(() => captureTeardown(makeCtx({ error: vi.fn() }, makeKernel(dispose)))).not.toThrow();
     globalThis.document = original;
     // Nothing was captured → dispose is a no-op.
-    const dispose = vi.fn();
-    kernelRef.current = {
-      init() {},
-      boot() {},
-      register() {},
-      processNav() {},
-      scan() {},
-      dispose
-    };
     disposeSpa();
     expect(dispose).not.toHaveBeenCalled();
   });

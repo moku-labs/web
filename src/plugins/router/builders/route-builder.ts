@@ -8,7 +8,8 @@
  * `pattern`, `_meta`, and `_handlers` live, so a built route is directly usable as
  * a `RouteMap` element while still offering the typed fluent chain.
  */
-import type { RouteBuilder, RouteHandlers, RouteMap, RouteState } from "../types";
+import type { RouteBuilder, RouteHandlers, RouteMap, RouteState, Urls } from "../types";
+import { buildUrl } from "./compile";
 
 /** Mutable handler/meta carrier shared by every method of one builder instance. */
 interface MutableRoute {
@@ -32,7 +33,7 @@ interface MutableRoute {
  * @example
  * ```ts
  * route("/{lang:?}/{slug}/")
- *   .load(({ slug }) => loadArticle(slug))
+ *   .load((ctx) => loadArticle(ctx.params.slug))
  *   .render((ctx) => <Article a={ctx.data} />)
  *   .head((ctx) => ({ title: ctx.data.title }));
  * ```
@@ -68,7 +69,7 @@ export function route<P extends string>(pattern: P): RouteBuilder<RouteState<P>>
      * @returns The same builder, with the data generic widened.
      * @example
      * ```ts
-     * route("/{slug}/").load(({ slug }) => ({ slug }));
+     * route("/{slug}/").load((ctx) => ({ slug: ctx.params.slug }));
      * ```
      */
     load(loader: unknown) {
@@ -106,21 +107,6 @@ export function route<P extends string>(pattern: P): RouteBuilder<RouteState<P>>
      */
     render(handler: unknown) {
       return set("render", handler);
-    },
-    /**
-     * Attach the client-side validation gate (raw `unknown` → this route's data
-     * type). Runs at the trust boundary before `render` on the client; throw to
-     * reject malformed data (spa falls back to HTML-over-fetch).
-     *
-     * @param handler - The validator/parser.
-     * @returns The same builder for chaining.
-     * @example
-     * ```ts
-     * route("/shop/{id}/").parse(raw => ProductSchema.parse(raw));
-     * ```
-     */
-    parse(handler: unknown) {
-      return set("parse", handler);
     },
     /**
      * Attach the head/SEO handler.
@@ -208,4 +194,47 @@ export function route<P extends string>(pattern: P): RouteBuilder<RouteState<P>>
  */
 export function defineRoutes<T extends RouteMap>(routes: T): T {
   return routes;
+}
+
+/**
+ * Build a pure, app-free URL builder from a route map. `toUrl(name, params)` resolves
+ * a route's path by pattern substitution using the SAME `buildUrl` as the runtime
+ * `RouterApi.toUrl`, so the helper and the API can never diverge. It needs no running
+ * app, router instance, base URL, or i18n — just the route map the consumer already
+ * holds at module scope. So components, layouts, and hydrated islands import it
+ * directly: no `app.router` reference, no manual "bind", no module global, no
+ * "not bound" guard, and no createApp ↔ routes cycle.
+ *
+ * @param routes - The route map (typically the value returned by {@link defineRoutes}).
+ * @returns A {@link Urls} builder whose `toUrl` accepts only this map's route names.
+ * @example
+ * ```ts
+ * const url = createUrls(routes);
+ * url.toUrl("article", { lang: "en", slug: "hello" }); // "/en/hello/"
+ * ```
+ */
+export function createUrls<T extends RouteMap>(routes: T): Urls<T> {
+  return {
+    /**
+     * Build a route's URL path from its name and params.
+     *
+     * @param name - Route name key from the map.
+     * @param params - Path params to substitute into the pattern. Defaults to `{}`.
+     * @returns The resolved relative URL path.
+     * @throws {Error} If `name` is not present in the route map.
+     * @example
+     * ```ts
+     * url.toUrl("home", { lang: "en" }); // "/en/"
+     * ```
+     */
+    toUrl(name, params = {}) {
+      const definition = routes[name];
+      if (!definition) {
+        throw new Error(
+          `[web] router: unknown route name "${String(name)}".\n  Check the name matches a key in the route map passed to createUrls.`
+        );
+      }
+      return buildUrl(definition.pattern, params);
+    }
+  };
 }

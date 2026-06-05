@@ -26,15 +26,16 @@ const i18nConfig = {
 function buildApp(headConfig: Record<string, unknown> = {}) {
   const coreConfig = createCoreConfig("web", { config: {}, plugins: [], pluginConfigs: {} });
   const { createApp } = coreConfig.createCore(coreConfig, { plugins: [] });
-  return createApp({
+  const app = createApp({
     plugins: [sitePlugin, i18nPlugin, routerPlugin, headPlugin],
     pluginConfigs: {
       site: siteConfig,
       i18n: i18nConfig,
-      router: { routes: defineRoutes({ article: route("/{lang:?}/{slug}/") }) },
       head: headConfig
     }
   });
+  app.router.set(defineRoutes({ article: route("/{lang:?}/{slug}/") }));
+  return app;
 }
 
 describe("head integration", () => {
@@ -42,8 +43,8 @@ describe("head integration", () => {
     expect(() => buildApp()).not.toThrow();
   });
 
-  it("throws fail-fast [head] config: ... on an invalid titleTemplate", () => {
-    expect(() => buildApp({ titleTemplate: "no token" })).toThrow(/\[head\] config:/);
+  it("throws fail-fast [web] head: ... on an invalid titleTemplate", () => {
+    expect(() => buildApp({ titleTemplate: "no token" })).toThrow(/\[web\] head:/);
   });
 
   it("app.head.render(route, data) produces composed <head> inner HTML", () => {

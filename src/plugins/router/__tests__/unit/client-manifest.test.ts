@@ -25,8 +25,12 @@ function load(): { n: number } {
 /** Build an api over a compiled table from the given declaration-ordered routes. */
 function makeApi(routes: CompileInput["routes"]) {
   const table = compileRoutes(makeInput(routes));
-  const state: RouterState = { table, mode: "hybrid" };
-  return { api: createApi({ state }), table };
+  const state: RouterState = { table };
+  // `global`/`require` are only used by `set()`/`mode()`, which these tests never call.
+  return {
+    api: createApi({ state, global: { mode: "hybrid" }, require: (() => undefined) as never }),
+    table
+  };
 }
 
 describe("clientManifest()", () => {
