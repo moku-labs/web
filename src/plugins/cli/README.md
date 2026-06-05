@@ -1,52 +1,44 @@
 # cli
 
-> Complex plugin — the node-only developer CLI for `@moku-labs/web`. Exposes exactly four
-> methods — `app.cli.build / serve / preview / deploy` — each rendering through a boxed
-> **Panel** UI (a `MOKU WEB` header → live build phases → BUILD summary block → bordered
-> server-ready panel → reload lines → y/N deploy confirm). There is **no argv parser, no
-> `run()` dispatcher, and no framework bin**: the consumer drives the plugin from one thin
-> per-command script.
+> **Node-only** — the developer CLI for `@moku-labs/web`: `build` · `serve` · `preview` · `deploy`, each rendered through a boxed **Panel** UI with live build/deploy progress.
 
-`cli` is **API-driven**: nothing happens at framework start. It `depends` on the node-only
-`build` and `deploy` plugins, which makes `cli` node-only too — it is exported from the node
-`src/index.ts` barrel for Layer-3 composition and is **not** in the isomorphic default plugin
-set nor in `src/browser.ts`. Live build/deploy progress rides on **hooks** over the
-`build`/`deploy` plugins' events, so the renderer updates as a build runs without any polling.
+`cli` mounts exactly four methods at `app.cli` (`build`/`serve`/`preview`/`deploy`). Each one renders a `MOKU WEB` Panel header, then does its work — running the SSG build, serving `dist/` in-process with live reload, previewing the built output with Cloudflare-Pages clean URLs, or scaffolding + deploying. There is **no argv parser, no `run()` dispatcher, and no framework bin**: the consumer drives the plugin from one thin per-command script (`scripts/{build,serve,preview,deploy}.ts`), each naming its command by *being* it.
 
-There is no `onStart`/`onStop` — `cli` owns no long-lived resource at plugin scope. The dev
-server, the static preview server, and the file watcher are created **inside** `serve()` /
-`preview()` (only when a long-running command is invoked) and are torn down on SIGINT/SIGTERM
-within that call, so app `stop()` has nothing to clean up. `onInit` performs synchronous
-config validation only.
+It `depends` on the node-only `build` and `deploy` plugins (which makes `cli` node-only too) and PULLs their APIs at call time via `ctx.require(buildPlugin)` / `ctx.require(deployPlugin)`. Live progress rides on **hooks** over those plugins' events, so the renderer updates as a build runs without polling. `cli` owns no long-lived resource at plugin scope, so it has **no `onStart`/`onStop`** — `onInit` does synchronous config validation only. The dev server, preview server, and file watcher are created *inside* `serve()`/`preview()` and torn down on SIGINT/SIGTERM within that same call, so app `stop()` has nothing to clean up.
 
-`index.ts` is a wiring harness only. All logic lives in sibling modules: `api.ts` (the four
-methods + `validateConfig` + the `CliPluginContext` type), `render/ansi.ts` (TTY/`NO_COLOR`
-color + box helpers), `render/panel.ts` (the Panel renderer), `network.ts` (LAN IPv4
-derivation), `preview.ts` (the **pure**, server-agnostic clean-URL resolver + the preview
-server), `serve.ts` (the dev loop: build → static server + live-reload SSE → watch → debounced
-rebuild), and `state.ts` (the injectable seams).
+## Example
+```ts
+// app.ts — compose the CLI (node-only target)
+import { buildPlugin, cliPlugin, createApp, deployPlugin } from "@moku-labs/web";
 
-## Command ↔ legacy-script map
+export const app = createApp({
+  plugins: [buildPlugin, deployPlugin, cliPlugin],
+  pluginConfigs: { cli: { outDir: "dist", port: 4173, watchDirs: ["content", "src"] } }
+});
+await app.start();
 
-| API              | Replaces           | Behavior                                                                 |
-| ---------------- | ------------------ | ------------------------------------------------------------------------ |
-| `cli.build()`    | `scripts/build.ts` | `app.build.run()` → assert `dist/404.html` → Panel BUILD block           |
-| `cli.serve()`    | `scripts/dev.ts`   | build once → in-process static server (live-reload SSE) + watch → rebuild |
-| `cli.preview()`  | `scripts/serve.ts` | static server for `dist/`, CF-Pages clean URLs, no reload injection       |
-| `cli.deploy()`   | `scripts/deploy.ts`| TTY-only confirm → `app.deploy.init()` → `app.deploy.run()` (CI auto-proceeds) |
+// scripts/build.ts            scripts/serve.ts      scripts/preview.ts     scripts/deploy.ts
+import { app } from "../app";  // …same import…    // …same import…       // …same import…
+await app.cli.build();         await app.cli.serve();  await app.cli.preview();  await app.cli.deploy();
+```
+
+```jsonc
+// package.json — one thin script per command (no flags parsed)
+"scripts": {
+  "build": "bun scripts/build.ts",
+  "dev": "bun scripts/serve.ts",
+  "preview": "bun scripts/preview.ts",
+  "deploy": "bun scripts/deploy.ts"
+}
+```
 
 ## API
 
-The API surface (`Api`) is mounted at `ctx.cli` (and as `app.cli`) — exactly four methods.
+The `Api` surface is mounted at `app.cli` — exactly four methods.
 
 ### `build(options?): Promise<BuildSummary>`
 
-Renders the `build` Panel header, runs the SSG build via `app.build.run()` (its
-`build:phase` / `build:complete` events render live through the cli hooks), then asserts that
-`<outDir>/<notFoundFile>` exists — Cloudflare Pages flips a project to SPA mode without a
-top-level `404.html`. Returns `{ outDir, pageCount, durationMs }` (the awaited build result).
-Throws `ERR_CLI_NOT_FOUND` when the not-found page is missing; pass `{ assertNotFound: false }`
-to skip that check.
+Renders the `build` Panel header, runs the SSG build via `ctx.require(buildPlugin).run()` (its `build:phase` / `build:complete` events render live through the cli hooks), then asserts that `<outDir>/<notFoundFile>` exists — Cloudflare Pages flips a project to SPA mode without a top-level `404.html`. Returns `{ outDir, pageCount, durationMs }` (the awaited build result). Throws `ERR_CLI_NOT_FOUND` when the not-found page is missing; pass `{ assertNotFound: false }` to skip the check.
 
 ```ts
 const summary = await app.cli.build();
@@ -55,11 +47,7 @@ console.log(`${summary.pageCount} pages in ${summary.durationMs}ms`);
 
 ### `serve(options?): Promise<void>`
 
-The dev loop. Builds once, serves `dist/` in-process via `Bun.serve`, injects a tiny
-live-reload SSE client into HTML responses (when `liveReload`), watches `watchDirs`
-recursively, and on a change runs a **debounced** rebuild (`debounceMs`) before rendering the
-reload line and pushing a browser reload over SSE. Resolves when SIGINT/SIGTERM tears the
-server + watchers down. `options.port` overrides `config.port`.
+The dev loop. Builds once, serves `dist/` in-process via the `Bun.serve` seam, injects a tiny live-reload SSE client into HTML responses (when `liveReload`), watches `watchDirs` recursively, and on a change runs a **debounced** rebuild (`debounceMs`) before rendering the reload line and pushing a browser reload over SSE. Resolves when SIGINT/SIGTERM tears the server + watchers down. `options.port` overrides `config.port`; `options.open` is reserved (not yet implemented).
 
 ```ts
 await app.cli.serve({ port: 3000 });
@@ -67,11 +55,7 @@ await app.cli.serve({ port: 3000 });
 
 ### `preview(options?): Promise<void>`
 
-A static preview of the built `dist/` with Cloudflare-Pages clean-URL resolution — a trailing
-slash maps to `index.html`, an extensionless path to `<path>/index.html`, and a miss climbs to
-the nearest `404.html` (served with status 404). **No** reload injection, mirroring production.
-Resolves on SIGINT/SIGTERM. The clean-URL resolver (`resolveCleanUrl`) is a pure,
-server-agnostic function, unit-tested without a socket.
+A static preview of the built `dist/` with Cloudflare-Pages clean-URL resolution — a trailing slash maps to `index.html`, an extensionless path to `<path>/index.html`, and a miss climbs toward the root for the nearest `404.html` (served with status `404`). **No** reload injection, mirroring production. Resolves on SIGINT/SIGTERM. `options.port` overrides `config.port`.
 
 ```ts
 await app.cli.preview();
@@ -79,93 +63,84 @@ await app.cli.preview();
 
 ### `deploy(options?): Promise<DeployOutcome>`
 
-Scaffolds via `app.deploy.init({ ci: true })`, then deploys. The y/N confirm is a **local
-safety net only** — it is shown **just** on an interactive TTY (`process.stdout.isTTY` with
-`CI` unset). Any non-interactive run — CI, or a piped/non-TTY shell — **skips the prompt and
-deploys**, so the consumer scripts never hang a pipeline. `options.yes` forces the skip
-anywhere. The outcome is `{ deployed: true, url, deploymentId, branch, durationMs }` (the
-awaited deploy result), or `{ deployed: false, reason: "declined" }` only when a TTY user
-answers no. `options.branch` is forwarded to `app.deploy.run`.
+Scaffolds via `ctx.require(deployPlugin).init({ ci: true })`, then deploys via `.run()`. The y/N confirm is a **local safety net only** — shown **just** on an interactive TTY (`process.stdout.isTTY === true` with `CI` unset). Any non-interactive run (CI, or a piped/non-TTY shell) **skips the prompt and deploys**, so the consumer scripts never hang a pipeline. `options.yes` forces the skip anywhere. The outcome is `{ deployed: true, url, deploymentId, branch, durationMs }` (the awaited deploy result), or `{ deployed: false, reason: "declined" }` only when a TTY user answers no. `options.branch` is forwarded to `deploy.run`.
 
 ```ts
-// Interactive (prompts only on a TTY):
-const outcome = await app.cli.deploy();
-
-// CI / non-TTY: deploys automatically (no prompt). `yes` forces it on a TTY too:
-await app.cli.deploy({ branch: "preview/landing", yes: true });
+const outcome = await app.cli.deploy();                          // prompts only on a TTY
+await app.cli.deploy({ branch: "preview/landing", yes: true });  // forces the deploy anywhere
 ```
 
-## The consumer "CLI" (thin per-command scripts)
+### Command map
 
-The framework ships **only the plugin**. The consumer keeps one thin script per command — each
-names its command by *being* it, with no flags parsed:
-
-```ts
-// scripts/build.ts                 // scripts/serve.ts  (dev: build + watch + reload)
-import { app } from "../src/app";   import { app } from "../src/app";
-await app.cli.build();              await app.cli.serve();
-
-// scripts/preview.ts               // scripts/deploy.ts
-import { app } from "../src/app";   import { app } from "../src/app";
-await app.cli.preview();            await app.cli.deploy();
-```
-
-```jsonc
-// package.json
-"scripts": {
-  "build":   "bun scripts/build.ts",
-  "dev":     "bun scripts/serve.ts",
-  "preview": "bun scripts/preview.ts",
-  "deploy":  "bun scripts/deploy.ts"
-}
-```
-
-These scripts live in the consumer app, not in the framework. The plugin itself is composed in
-the app's `createApp` call:
-
-```ts
-import { buildPlugin, cliPlugin, createApp, deployPlugin } from "@moku-labs/web";
-
-const app = createApp({
-  plugins: [/* …content/build/deploy/data… */ buildPlugin, deployPlugin, cliPlugin],
-  pluginConfigs: {
-    cli: { outDir: "dist", port: 4173, watchDirs: ["content", "src"] }
-  }
-});
-await app.start();
-```
+| Method | Replaces | Behavior |
+|---|---|---|
+| `cli.build()` | `scripts/build.ts` | `build.run()` → assert `dist/404.html` → Panel BUILD block |
+| `cli.serve()` | `scripts/dev.ts` | build once → in-process static server (live-reload SSE) + watch → debounced rebuild |
+| `cli.preview()` | `scripts/serve.ts` | static server for `dist/`, CF-Pages clean URLs, no reload injection |
+| `cli.deploy()` | `scripts/deploy.ts` | TTY-only confirm → `deploy.init({ ci: true })` → `deploy.run()` (CI auto-proceeds) |
 
 ## Configuration
 
-| Field          | Type       | Default               | Description                                                                                   |
-| -------------- | ---------- | --------------------- | --------------------------------------------------------------------------------------------- |
-| `outDir`       | `string`   | `"dist"`              | Build output directory; served by `preview`, asserted by `build`, rebuilt by `serve`.         |
-| `port`         | `number`   | `4173`                | Default port for `serve()`/`preview()` (overridable per-call via `options.port`).             |
-| `watchDirs`    | `string[]` | `["content", "src"]`  | Directories `serve()` watches for changes (recursive).                                        |
-| `debounceMs`   | `number`   | `150`                 | Debounce window (ms) coalescing FS-event bursts into one rebuild.                             |
-| `notFoundFile` | `string`   | `"404.html"`          | Filename `build()` asserts exists at `outDir` root (CF Pages flips to SPA mode without it).   |
-| `liveReload`   | `boolean`  | `true`                | Inject the live-reload SSE client into HTML during `serve()` (never during `preview()`).      |
+`pluginConfigs.cli` — all fields optional; each falls back to the default below.
 
-`onInit` validates the resolved config (synchronous fail-fast) and throws `ERR_CLI_CONFIG`
-when `port` is not an integer in 1–65535, `outDir`/`notFoundFile` are not non-empty strings,
-`watchDirs` is not a non-empty array of non-empty strings, or `debounceMs` is negative.
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `outDir` | `string` | `"dist"` | Build output dir; served by `preview`, asserted by `build`, rebuilt by `serve`. |
+| `port` | `number` | `4173` | Default port for `serve()`/`preview()` (overridable per-call via `options.port`). |
+| `watchDirs` | `string[]` | `["content", "src"]` | Directories `serve()` watches recursively for changes. |
+| `debounceMs` | `number` | `150` | Debounce window (ms) coalescing FS-event bursts into one rebuild. |
+| `notFoundFile` | `string` | `"404.html"` | Filename `build()` asserts at `outDir` root (CF Pages flips to SPA mode without it). |
+| `liveReload` | `boolean` | `true` | Inject the live-reload SSE client into HTML during `serve()` (never during `preview()`). |
+
+`onInit` validates the resolved config (synchronous fail-fast) and throws `ERR_CLI_CONFIG` when `port` is not an integer in 1–65535, `outDir`/`notFoundFile` are not non-empty strings, `watchDirs` is not a non-empty array of non-empty strings, or `debounceMs` is negative.
+
+## Dependencies
+
+`depends: [buildPlugin, deployPlugin]` — both node-only, which is why `cli` is node-only and lives only in the node `src/index.ts` barrel (exported as `cliPlugin` + the `Cli` type namespace), **not** in `src/browser.ts` or the isomorphic default set.
+
+| Plugin | Pulled via | Used by | For |
+|---|---|---|---|
+| [`build`](../build/README.md) | `ctx.require(buildPlugin)` | `build`, `serve` | `.run()` — the SSG build + rebuilds |
+| [`deploy`](../deploy/README.md) | `ctx.require(deployPlugin)` | `deploy` | `.init({ ci: true })` then `.run({ branch? })` |
 
 ## Events
 
-**None.** `cli` declares no per-plugin events. It is a pure consumer/renderer of other plugins'
-events: it **listens** to `build:phase` and `build:complete` (from `build`) and
-`deploy:complete` (from `deploy`) via hooks, and emits nothing.
+`cli` declares **no events of its own** (`emit` is typed against an empty map for context compatibility). It is a pure consumer/renderer: it **listens** to dependency events via `hooks` and renders each one.
 
-## Rendering
+| Event | Source | Handler |
+|---|---|---|
+| `build:phase` | `build` | `state.render.phase` — live per-phase row |
+| `build:complete` | `build` | `state.render.built` — BUILD summary block |
+| `deploy:complete` | `deploy` | `state.render.deployed` — deploy result panel |
 
-The Panel renderer is TTY/`NO_COLOR`-aware (modeled on the legacy `scripts/_log.ts`): it draws
-Unicode box borders + ANSI color only when `process.stdout.isTTY` is true and `NO_COLOR` is
-unset, and falls back to plain ASCII lines otherwise (CI logs, pipes). Every line of output
-flows through the renderer, which is an injectable state seam — tests supply a line-capturing
-fake so render output can be asserted without parsing ANSI.
+> [!NOTE]
+> Hooks are fire-and-forget (spec/07 §3) — `emit()` does not await them, so the handlers are render-only. Each command's **return value** comes from the awaited `build.run()` / `deploy.run()` result, never from a hook.
 
-## Notes
+## Design notes
 
-The fire-and-forget invariant (spec/07 §3) means `emit()` does not await hooks, so the cli's
-hook handlers are render-only. Each command's **return value** therefore comes from the awaited
-`app.build.run()` / `app.deploy.run()` result, never from a hook.
+- **Panel renderer.** Every line of output flows through `CliRenderer` (`state.render`), an injectable seam. `createPanelRenderer` is TTY/`NO_COLOR`-aware: it draws Unicode box borders + ANSI color only when `process.stdout.isTTY` is true and `NO_COLOR` is unset, and falls back to plain ASCII lines otherwise (CI logs, pipes). Tests inject a line-capturing sink (`{ write, color: false }`) so render output is asserted without parsing ANSI.
+- **No real I/O in tests.** All runtime effects live behind injectable `state` seams (mirroring deploy's injectable `spawn`): `render`, `confirm` (stdin y/N), `clock` (`Date.now`), `watch` (recursive `node:fs.watch`), `serveStatic` (`Bun.serve`), `fileResponse` (`Bun.file`), and `networkUrl` (`node:os` LAN IPv4). Every command runs under unit tests without sockets, FS watch, or a TTY.
+- **Lazy Bun resolution.** `serveStatic`/`fileResponse` resolve the `Bun` global *at call time*, so a non-Bun runtime fails with a coded error rather than a raw `TypeError`, and the dependency is only required when a long-running command actually starts a server.
+- **CI-safe deploy.** The confirm prompt is gated on `isTTY && CI === undefined`; non-interactive runs always proceed, so `DeployOutcome.deployed: false` happens *only* on an interactive "no" (`reason: "declined"`).
+- **Pure clean-URL resolver.** `resolveCleanUrl(rootDir, pathname, isFile?)` is server-agnostic — it touches the filesystem only through an injected `FileProbe` and is unit-tested without a socket. `safePath` strips leading `../` so a request can never escape the served root.
+- **No-drop rebuilds.** The dev-loop `Rebuilder` coalesces a burst into one build, never overlaps runs, and a change arriving mid-build sets a `dirty` flag that triggers exactly one coalesced re-run when the current build settles.
+
+## Files
+
+| File | Responsibility |
+|---|---|
+| `index.ts` | Wiring harness only — `createPlugin("cli", …)`: `depends`, `createState`, `onInit` validation, the three render hooks, and `api`. |
+| `api.ts` | The four methods (`createApi`) + `validateConfig` + the `CliPluginContext`/`CliRequire`/`CliEvents` types. |
+| `types.ts` | `Config`, `State`, `CliRenderer`, the option/outcome shapes, and the public `Api` (re-exported via `export type * from "./types"`). |
+| `defaults.ts` | `defaultConfig` — the resolved default `Config`. |
+| `errors.ts` | `cliError` + `ERROR_PREFIX` (`[web] cli`) — coded errors carrying a stable `code`. |
+| `state.ts` | `createState` — wires the production injectable seams (renderer, confirm, clock, watch, Bun server/file, networkUrl). |
+| `serve.ts` | The dev loop: `runDevServer`, `createRebuilder`, `createReloadHub`, `createDevHandler`, `injectReloadClient`, `installSignalTeardown`. |
+| `preview.ts` | The static preview server: `runPreviewServer`, the pure `resolveCleanUrl`, `safePath`, `statIsFile`, `createPreviewHandler`. |
+| `network.ts` | LAN IPv4 derivation for the server-ready panel: `networkUrl`, `lanAddress`. |
+| `render/panel.ts` | `createPanelRenderer` — the boxed Panel `CliRenderer`. |
+| `render/ansi.ts` | TTY/`NO_COLOR` color + box-drawing helpers: `supportsColor`, `makePalette`, `box`, `boxGlyphs`, `visibleWidth`. |
+
+---
+
+<sub>Part of <strong><a href="../../../README.md">@moku-labs/web</a></strong> — built on <a href="https://github.com/moku-labs/core">@moku-labs/core</a>.</sub>
