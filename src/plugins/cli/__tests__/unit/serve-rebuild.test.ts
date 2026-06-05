@@ -46,6 +46,46 @@ describe("cli/createRebuilder (debounced rebuild)", () => {
     expect(reloads[0]).toEqual({ file: "c.md", pageCount: 4, durationMs: 7 });
   });
 
+  it("coalesces a change arriving mid-rebuild into exactly one extra rerun", async () => {
+    const summary: BuildSummary = { outDir: "dist", pageCount: 1, durationMs: 1 };
+    // A slow first build so a change can land while the rebuild is in flight; later
+    // builds resolve immediately.
+    let resolveFirst: (() => void) | undefined;
+    let calls = 0;
+    const runBuild = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) {
+        await new Promise<void>(resolve => {
+          resolveFirst = resolve;
+        });
+      }
+      return summary;
+    });
+    const reloads: ReloadInfo[] = [];
+    const rebuilder = createRebuilder({
+      debounceMs: 10,
+      runBuild,
+      onReloaded: info => reloads.push(info),
+      onError: () => undefined
+    });
+
+    // First change fires a rebuild that is now in flight (not yet resolved).
+    rebuilder.schedule("a.md");
+    await vi.advanceTimersByTimeAsync(10);
+    expect(runBuild).toHaveBeenCalledTimes(1);
+
+    // A change arrives mid-rebuild → debounced timer fires while building → marked dirty.
+    rebuilder.schedule("b.md");
+    await vi.advanceTimersByTimeAsync(10);
+    expect(runBuild).toHaveBeenCalledTimes(1);
+
+    // Settle the first build → exactly one coalesced rerun for the latest file.
+    resolveFirst?.();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(runBuild).toHaveBeenCalledTimes(2);
+    expect(reloads.map(info => info.file)).toEqual(["a.md", "b.md"]);
+  });
+
   it("routes a rebuild failure to onError (loop keeps running)", async () => {
     const runBuild = vi.fn(async () => {
       throw new Error("boom");

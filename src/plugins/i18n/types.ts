@@ -3,7 +3,7 @@
  */
 
 /**
- * i18n plugin configuration. Mirrors the legacy `I18nConfig` shape.
+ * i18n plugin configuration.
  *
  * `locales` and `defaultLocale` are required and validated in `onInit`. The
  * optional maps default to empty objects so every lookup method is total —

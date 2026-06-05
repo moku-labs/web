@@ -102,9 +102,9 @@ queryable matcher whose table is filled at init or by `set`).
 ## Files
 
 - `index.ts` — wiring + `onInit` that compiles `config.routes` via `registerRoutes`.
-- `builders/route-builder.ts` — `route()` fluent builder + `defineRoutes()` identity.
-- `builders/compile.ts` — `validateRoutes`, `patternToUrlPattern`, `buildUrl`, `buildFilePath`, `countDynamicSegments`, `compileRoutes`, `buildRouterTable`.
+- `builders/route-builder.ts` — `route()` fluent builder + `defineRoutes()` identity + `createUrls()` pure URL builder.
+- `builders/compile.ts` — `validateRoutes`, `patternToUrlPattern`, `buildUrl`, `buildFilePath`, `compileRoutes`.
 - `builders/match.ts` — `createMatchFunction`, `extractParams`, `matchRoute`.
 - `api.ts` — `set` (compile the table) / `match` / `toUrl` / `entries` / `manifest` / `clientManifest` / `mode` closures.
 - `state.ts` — the `{ table: null }` holder filled in `onInit`.
-- `types.ts` — `ExtractRouteParams`, `RouteBuilder`, `RouteDefinition`, `RouteMap`, `TypedRoute`, `CompiledRoute`, `MatcherTable`, `RouterConfig`, `RouterState`, `RouterApi`.
+- `types.ts` — `ExtractRouteParams`, `RouteBuilder`, `RouteDefinition`, `RouteMap`, `TypedRoute`, `Urls<T>`, `CompiledRoute`, `MatcherTable`, `RouterConfig`, `RouterState`, `RouterApi`.

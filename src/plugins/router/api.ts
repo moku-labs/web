@@ -180,7 +180,7 @@ export function createApi(ctx: RouterRegisterContext): RouterApi {
       const entry = readTable(state).byName.get(routeName);
       if (!entry) {
         throw new Error(
-          `${ERROR_PREFIX}: unknown route name "${routeName}".\n  Check the name matches a key in the route map passed to app.router.set(routes).`
+          `${ERROR_PREFIX}: unknown route name "${routeName}".\n  Check the name matches a key in the route map registered via pluginConfigs.router.routes or app.router.set(routes).`
         );
       }
       return entry.toUrl(params);

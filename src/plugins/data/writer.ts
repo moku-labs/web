@@ -15,34 +15,17 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import pLimit from "p-limit";
 import type { DataPluginContext } from "./api";
-import { dataSuffix } from "./convention";
+import { relativeDataFile } from "./convention";
 import type { DataEntry, DataWriteSummary } from "./types";
 
-/** Default build output root, matching `build`'s `defaultBuildConfig.outDir`. */
+/** Default build output root, matching build's default `outDir` ("./dist", build/api.ts). */
 const DEFAULT_OUT_DIR = "./dist";
-/** Concurrency bound for per-page writes (matches the OG-image phase's pool). */
+/** Concurrency bound for per-page JSON writes. */
 const WRITE_CONCURRENCY = 8;
 
 /**
- * Resolve the `outDir`-relative file for a page path using the shared convention,
- * trimming a trailing slash from the config dir so the join stays clean.
- *
- * @param outputDir - The configured data output subdir (e.g. `"_data"`).
- * @param pagePath - The page URL path (e.g. `/en/hello/`).
- * @returns The `outDir`-relative file path (e.g. `_data/en/hello/index.json`).
- * @example
- * ```ts
- * relativeFile("_data", "/en/hello/"); // "_data/en/hello/index.json"
- * ```
- */
-function relativeFile(outputDir: string, pagePath: string): string {
-  const dir = outputDir.endsWith("/") ? outputDir.slice(0, -1) : outputDir;
-  return `${dir}/${dataSuffix(pagePath)}`;
-}
-
-/**
- * Persist one entry's data as JSON under `<outDir>/<relativeFile>` and return the
- * written `{ relative, bytes }`.
+ * Persist one entry's data as JSON under `<outDir>/<relativeDataFile>` and return
+ * the written `{ relative, bytes }`.
  *
  * @param entry - The page entry to persist.
  * @param outDir - The build output root.
@@ -58,7 +41,7 @@ async function writeEntry(
   outDir: string,
   outputDir: string
 ): Promise<{ relative: string; bytes: number }> {
-  const relative = relativeFile(outputDir, entry.path);
+  const relative = relativeDataFile(outputDir, entry.path);
   const filePath = path.join(outDir, relative);
   await mkdir(path.dirname(filePath), { recursive: true });
   const body = JSON.stringify(entry.data);

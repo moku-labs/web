@@ -74,20 +74,23 @@ pipeline. The additive `extraRemarkPlugins` / `extraRehypePlugins` keys avoid th
 defaults are never in config, so they cannot be replaced; consumer extras are
 **concatenated** after the defaults at processor-build time.
 
-### Lazy processor singleton on `ctx.state`
+### Lazy processor singleton (in the provider)
 
-The Shiki/unified processor is a **lazy singleton stored on `ctx.state.processor`** —
-never a module-level cache. It is built on the first `loadAll()` / `renderMarkdown()`
-via `ensureProcessor(state, config)`, then reused for every article in that app. Because
-state is per-app, two apps in one process never share a processor (no cross-app Shiki
-leak). `createState`/`onInit` do no async work, keeping `createApp` synchronous.
+The Shiki/unified processor is a **lazy singleton stored on the provider's private
+`ContentProviderState.processor`** — never on the plugin shell's `ctx.state`, never a
+module-level cache. It is built on the first `loadAll()` / `renderMarkdown()` via
+`ensureProcessor(state, options)` inside the `fileSystemContent` provider, then reused
+for every article. Because the processor lives in the provider closure, two apps in one
+process never share one (no cross-app Shiki leak). `createState`/`onInit` do no async
+work, keeping `createApp` synchronous.
 
 ### Locale fallback & draft filtering
 
 `load(slug, locale)` prefers the native `content/<slug>/<locale>.md`
 (`isFallback: false`); when absent it falls back to the default-locale file
-(`isFallback: true`, requested locale retained on `locale`/`url`). `loadAll()` excludes
-articles whose status is `draft` only when `ctx.global.mode === "production"`.
+(`isFallback: true`, requested locale retained on `locale`/`url`). `loadAll()` and
+`load()` exclude articles whose status is `draft` only when `!global.isDevelopment`
+(i.e. in non-development mode).
 
 ## Structure
 

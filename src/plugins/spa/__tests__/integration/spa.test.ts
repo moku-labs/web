@@ -150,7 +150,7 @@ describe("spa integration", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("client DATA path: composing dataPlugin fetches the page data, validates via parse, and renders", async () => {
+  it("client DATA path: composing dataPlugin fetches the page data and renders it directly", async () => {
     const { createApp } = makeCore();
     const routes = defineRoutes({
       home: route("/")

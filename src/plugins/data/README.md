@@ -29,7 +29,7 @@ products, metrics, …) integrates by declaring a route with its own `load`/`ren
 | Method | Side | Signature | Purpose |
 |--------|------|-----------|---------|
 | `write` | Node | `(entries: readonly DataEntry[], options?: { outDir? }) => Promise<DataWriteSummary>` | Persist one JSON file per page (keyed by `fileFor`). Called by `build` after it expands routes. Lazily loads its `node:fs` writer. |
-| `at` | browser | `(path: string) => Promise<unknown \| null>` | Fetch (+cache) the persisted data for a page path. `null` on fetch/parse failure (spa falls back). |
+| `at` | browser | `(path: string) => Promise<unknown \| null>` | Fetch (+cache) the persisted data for a page path; used directly as `ctx.data`. `null` on fetch or JSON parse failure (spa falls back). |
 | `urlFor` | pure | `(path: string) => string` | `/en/hello/` → `/_data/en/hello/index.json` (browser fetch URL). |
 | `fileFor` | pure | `(path: string) => string` | `/en/hello/` → `_data/en/hello/index.json` (outDir-relative file). |
 

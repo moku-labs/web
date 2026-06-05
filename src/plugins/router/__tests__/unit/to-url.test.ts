@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
-import {
-  buildFilePath,
-  buildUrl,
-  compileRoutes,
-  countDynamicSegments
-} from "../../builders/compile";
+import { buildFilePath, buildUrl, compileRoutes } from "../../builders/compile";
 import { route } from "../../builders/route-builder";
+import { dynamicSegmentCount } from "../../iso-match";
 import type { CompileInput } from "../../types";
 
 /** Standard compile input used across the to-url scenarios. */
@@ -21,17 +17,23 @@ function makeInput(routes: CompileInput["routes"]): CompileInput {
 
 describe("buildUrl()", () => {
   it("substitutes a required {param}", () => {
-    expect(buildUrl("/{slug}/", { slug: "hello" }, "https://blog.dev")).toBe("/hello/");
+    expect(buildUrl("/{slug}/", { slug: "hello" })).toBe("/hello/");
   });
 
   it("substitutes an optional {param:?}", () => {
-    expect(buildUrl("/{lang:?}/{slug}/", { lang: "uk", slug: "x" }, "https://blog.dev")).toBe(
-      "/uk/x/"
-    );
+    expect(buildUrl("/{lang:?}/{slug}/", { lang: "uk", slug: "x" })).toBe("/uk/x/");
+  });
+
+  it("skips an absent optional segment instead of leaving a double slash", () => {
+    expect(buildUrl("/{lang:?}/{slug}/", { slug: "hello" })).toBe("/hello/");
+  });
+
+  it("keeps the optional segment when its param is present", () => {
+    expect(buildUrl("/{lang:?}/{slug}/", { lang: "en", slug: "hello" })).toBe("/en/hello/");
   });
 
   it("leaves a static pattern untouched", () => {
-    expect(buildUrl("/about/", {}, "https://blog.dev")).toBe("/about/");
+    expect(buildUrl("/about/", {})).toBe("/about/");
   });
 });
 
@@ -45,17 +47,17 @@ describe("buildFilePath()", () => {
   });
 });
 
-describe("countDynamicSegments()", () => {
+describe("dynamicSegmentCount()", () => {
   it("ignores the optional lang segment", () => {
-    expect(countDynamicSegments("/{lang:?}/{slug}/")).toBe(1);
+    expect(dynamicSegmentCount("/{lang:?}/{slug}/")).toBe(1);
   });
 
   it("counts required brace params", () => {
-    expect(countDynamicSegments("/{a}/{b}/")).toBe(2);
+    expect(dynamicSegmentCount("/{a}/{b}/")).toBe(2);
   });
 
   it("static pattern is zero", () => {
-    expect(countDynamicSegments("/about/")).toBe(0);
+    expect(dynamicSegmentCount("/about/")).toBe(0);
   });
 });
 

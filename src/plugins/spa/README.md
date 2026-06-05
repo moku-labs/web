@@ -25,7 +25,7 @@ a client bundle regardless of bundler or tree-shaking — a stronger, more relia
 importing `@moku-labs/web` and relying on `sideEffects: false` tree-shaking (which is fragile,
 since building entries together can merge node code into a shared chunk). A CI gate
 (`bun run check:bundle`) asserts the built browser bundle has zero static node/native imports and
-stays under a gzip size budget (the browser bundle is ~35 kB gzip). `./browser` also **pre-wires
+stays under a gzip size budget (the browser bundle is ~41 kB gzip (under the 45 kB gz budget)). `./browser` also **pre-wires
 `browserEnv()` as the default env provider**, so env works with zero consumer config (resolving
 from `import.meta.env` and `globalThis.__ENV__`) — you do not need to pass
 `pluginConfigs.env.providers`. A browser app is just your own `createApp(...).start()` over the
@@ -64,10 +64,11 @@ through one strategy:
 
 1. **Client DATA path** — *only* when `router.mode() !== "ssg"` and the optional
    [`data`](../data/README.md) plugin is composed. `spa` runs `router.match(path)` →
-   `data.at(path)` (fetch the page's PERSISTED data as `unknown`) → the route's own
-   `parse(raw)` (validate → `D`) → `render(ctx)` (the SAME component the build used for
-   SSG) → Preact-render into the swap region, then re-mounts islands. `route.load` does
-   NOT run on the client. The Preact `render` layer is lazy-loaded (`./render`) in its own
+   `data.at(path)` (fetch the page's PERSISTED data as `unknown`, used DIRECTLY as
+   `ctx.data` — there is NO validation step) → `render(ctx)` (the SAME component the
+   build used for SSG) → Preact-render into the swap region, then re-mounts islands.
+   `route.load` does NOT run on the client. A fetch miss / non-JSON / throw falls back
+   to HTML-over-fetch. The Preact `render` layer is lazy-loaded (`./render`) in its own
    chunk, so an app without `data` ships zero render layer.
 2. **HTML-over-fetch** (the default + fallback) — fetch the page, swap `swapSelector`,
    head-sync from the fetched `<head>`. Any DATA-path miss/throw falls back here.

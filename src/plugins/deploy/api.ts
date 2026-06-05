@@ -159,7 +159,7 @@ export function createApi(ctx: DeployPluginContext): Api {
     /**
      * Deploy the built outDir to Cloudflare Pages via the wrangler subprocess.
      *
-     * @param options - Optional branch override and build toggle.
+     * @param options - Optional branch override.
      * @returns The deploy result (url, deploymentId, branch, durationMs).
      * @throws {Error} With a `code` from the deploy error taxonomy on any failure.
      * @example

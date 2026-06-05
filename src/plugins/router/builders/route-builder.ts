@@ -33,7 +33,7 @@ interface MutableRoute {
  * @example
  * ```ts
  * route("/{lang:?}/{slug}/")
- *   .load(({ slug }) => loadArticle(slug))
+ *   .load((ctx) => loadArticle(ctx.params.slug))
  *   .render((ctx) => <Article a={ctx.data} />)
  *   .head((ctx) => ({ title: ctx.data.title }));
  * ```
@@ -69,7 +69,7 @@ export function route<P extends string>(pattern: P): RouteBuilder<RouteState<P>>
      * @returns The same builder, with the data generic widened.
      * @example
      * ```ts
-     * route("/{slug}/").load(({ slug }) => ({ slug }));
+     * route("/{slug}/").load((ctx) => ({ slug: ctx.params.slug }));
      * ```
      */
     load(loader: unknown) {
@@ -230,9 +230,11 @@ export function createUrls<T extends RouteMap>(routes: T): Urls<T> {
     toUrl(name, params = {}) {
       const definition = routes[name];
       if (!definition) {
-        throw new Error(`[web] router: unknown route name "${String(name)}".`);
+        throw new Error(
+          `[web] router: unknown route name "${String(name)}".\n  Check the name matches a key in the route map passed to createUrls.`
+        );
       }
-      return buildUrl(definition.pattern, params, "");
+      return buildUrl(definition.pattern, params);
     }
   };
 }

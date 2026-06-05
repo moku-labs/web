@@ -9,8 +9,8 @@
  *  - **Node (build):** `write(entries)` persists one JSON file per page, keyed by
  *    the page's URL via {@link DataProvider.fileFor}. `build` supplies the entries
  *    (it already expanded the routes), so there is no duplicate expansion here.
- *  - **Browser (runtime):** `at(path)` fetches + caches that file as `unknown`; the
- *    route's `parse` validates it into the route's data type before `render`.
+ *  - **Browser (runtime):** `at(path)` fetches + caches that file as `unknown`, which
+ *    the route uses directly as `ctx.data` in `render`.
  *
  * The Node-only file-writing code (`node:fs`) is isolated behind a lazy `import()`
  * inside `write()`, so composing `data` in a browser app keeps the bundle free of
@@ -33,8 +33,8 @@ export type DataConfig = {
   outputDir: string;
   /**
    * READ side (browser): site-root-relative URL the client fetches the per-page
-   * JSON from. A different domain from {@link DataConfig.outputDir} (a filesystem
-   * path); keep consistent (`"/" + trim(outputDir) + "/"`). Default `"/_data/"`.
+   * JSON from. The URL-space mirror of {@link DataConfig.outputDir} (a filesystem
+   * path); keep them consistent (`"/" + trim(outputDir) + "/"`). Default `"/_data/"`.
    */
   baseUrl: string;
 };
@@ -81,14 +81,14 @@ export interface DataState {
  * await app.data.write([{ path: "/en/hello/", data: article }]);
  *
  * // Browser (inside spa nav): fetch the page's data, used directly as ctx.data:
- * const raw = await app.data.at("/en/hello/"); // unknown | null
+ * const raw = await app.data.at("/en/hello/"); // unknown | null (null on failure)
  * ```
  */
 export type DataProvider = {
   /**
    * READ (browser) — fetch (and cache) the persisted data for a page path from
-   * `config.baseUrl`. Returns the raw parsed JSON as `unknown` (used directly as
-   * the route's `ctx.data`), or `null` if the fetch/parse fails.
+   * `config.baseUrl`. Returns the raw parsed JSON as `unknown`, used directly as
+   * the route's `ctx.data`; returns `null` if the fetch or JSON parse fails.
    *
    * @param path - The page URL path (e.g. `/en/hello/`).
    * @returns The page's raw data, or `null` on failure.

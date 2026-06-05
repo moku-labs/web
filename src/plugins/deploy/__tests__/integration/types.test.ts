@@ -41,9 +41,7 @@ describe("deploy type-level surface", () => {
     }>();
 
     // run accepts the documented options (type-position only — never invoked).
-    expectTypeOf(app.deploy.run)
-      .parameter(0)
-      .toEqualTypeOf<{ branch?: string; build?: boolean } | undefined>();
+    expectTypeOf(app.deploy.run).parameter(0).toEqualTypeOf<{ branch?: string } | undefined>();
 
     // ...and rejects an unknown option key (excess-property check). Purely
     // type-level — `_reject` is a typed function reference that is never called.

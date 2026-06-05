@@ -8,7 +8,7 @@ import { createEnvState } from "./state";
 import type { EnvConfig } from "./types";
 import { validateSchema } from "./validate";
 
-/** Plugin config defaults (R6 typed const). `providers: []` — framework sets `[dotenv(), processEnv()]` via the 4-level cascade. */
+/** Plugin config defaults (R6 typed const). `providers: []` — the consumer supplies them per target (`[dotenv(), processEnv()]` on Node; the `/browser` entry pre-wires `browserEnv()`). */
 const defaultEnvConfig: EnvConfig = { schema: {}, providers: [], publicPrefix: "PUBLIC_" };
 
 /**

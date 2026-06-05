@@ -52,8 +52,8 @@ describe("head api", () => {
       expect(() => validateHeadConfig({ titleTemplate: "%s — Site" })).not.toThrow();
     });
 
-    it("throws [head] config: ... when titleTemplate lacks %s", () => {
-      expect(() => validateHeadConfig({ titleTemplate: "Site" })).toThrow(/\[head\] config:/);
+    it("throws [web] head: ... when titleTemplate lacks %s", () => {
+      expect(() => validateHeadConfig({ titleTemplate: "Site" })).toThrow(/\[web\] head:/);
     });
 
     it("accepts the two valid twitterCard literals", () => {
@@ -61,9 +61,9 @@ describe("head api", () => {
       expect(() => validateHeadConfig({ twitterCard: "summary_large_image" })).not.toThrow();
     });
 
-    it("throws [head] config: ... for an invalid twitterCard", () => {
+    it("throws [web] head: ... for an invalid twitterCard", () => {
       // @ts-expect-error — exercising the runtime guard with an invalid literal
-      expect(() => validateHeadConfig({ twitterCard: "huge" })).toThrow(/\[head\] config:/);
+      expect(() => validateHeadConfig({ twitterCard: "huge" })).toThrow(/\[web\] head:/);
     });
 
     it("accepts an empty config", () => {
@@ -96,7 +96,7 @@ describe("head api", () => {
     });
 
     it("throws on invalid config (delegates to validation)", () => {
-      expect(() => normalizeHeadConfig({ titleTemplate: "no token" })).toThrow(/\[head\] config:/);
+      expect(() => normalizeHeadConfig({ titleTemplate: "no token" })).toThrow(/\[web\] head:/);
     });
   });
 

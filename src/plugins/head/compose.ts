@@ -83,7 +83,8 @@ function applyTemplate(title: string, template: string | undefined): string {
  * @example resolveImage("/og.png", site) // "https://blog.dev/og.png"
  */
 function resolveImage(image: string, site: SiteSlice): string {
-  return image.startsWith("http") ? image : site.canonical(image);
+  const isAbsolute = /^https?:\/\//.test(image) || image.startsWith("//");
+  return isAbsolute ? image : site.canonical(image);
 }
 
 /**

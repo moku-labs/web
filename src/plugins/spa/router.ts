@@ -9,8 +9,9 @@ export type RouterTeardown = () => void;
 /**
  * A navigation strategy: perform a navigation to `pathname`, resolving once the
  * swap (or fallback) is dispatched. The kernel injects a DATA-aware navigate
- * (match → route.load → route.render) that falls back to the default
- * HTML-over-fetch ({@link performNavigation}); without injection the default is used.
+ * (match → data.at(path) → route.render — no `load` on the client) that falls
+ * back to the default HTML-over-fetch ({@link performNavigation}); without
+ * injection the default is used.
  */
 export type NavigateFunction = (pathname: string) => Promise<void>;
 

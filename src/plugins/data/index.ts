@@ -5,7 +5,7 @@
  * Owns ONE contract — `page path → persisted JSON file` — and nothing about what
  * the data is: `write(entries)` persists per-page JSON on Node (build supplies the
  * entries it already expanded); `at(path)` fetches + caches it in the browser as
- * `unknown`, which the route's `parse` validates before `render`. NOT a framework
+ * `unknown`, which the route uses directly as `ctx.data` in `render`. NOT a framework
  * default — the consumer composes it where needed (Node build AND/OR browser app).
  *
  * **No hard `depends`** — fully browser-composable; the `node:fs` writer is behind

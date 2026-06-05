@@ -30,3 +30,22 @@ export function dataSuffix(path: string): string {
   while (trimmed.endsWith("/")) trimmed = trimmed.slice(0, -1);
   return trimmed.length > 0 ? `${trimmed}/index.json` : "index.json";
 }
+
+/**
+ * Compute the `outputDir`-relative data file for a page path, joining the trimmed
+ * output dir with {@link dataSuffix}. Shared by the Node writer and the pure
+ * `fileFor` accessor so the written file and the reported path can never drift.
+ *
+ * @param outputDir - The configured data output subdir (e.g. `"_data"` or `"_data/"`).
+ * @param path - The page URL path (e.g. `/en/hello/`).
+ * @returns The `outputDir`-relative file path (e.g. `_data/en/hello/index.json`).
+ * @example
+ * ```ts
+ * relativeDataFile("_data", "/en/hello/"); // "_data/en/hello/index.json"
+ * relativeDataFile("_data/", "/");         // "_data/index.json"
+ * ```
+ */
+export function relativeDataFile(outputDir: string, path: string): string {
+  const dir = outputDir.endsWith("/") ? outputDir.slice(0, -1) : outputDir;
+  return `${dir}/${dataSuffix(path)}`;
+}

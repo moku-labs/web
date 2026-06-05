@@ -33,7 +33,7 @@ export type SitemapResult = {
  * @returns The relative URLs produced by this route.
  * @example
  * ```ts
- * await expandUrls(def, entry, ["en"]);
+ * await expandUrls(def, entry, ["en"], ctx);
  * ```
  */
 async function expandUrls(

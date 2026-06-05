@@ -10,8 +10,9 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { h, type VNode } from "preact";
 import type { Article } from "../../content/types";
+import { i18nPlugin } from "../../i18n";
 import { sitePlugin } from "../../site";
-import type { OgFont, OgImageConfig, OgPngRenderer, PhaseContext, RichOgInput } from "../types";
+import type { OgFont, OgImageConfig, PhaseContext, RichOgInput } from "../types";
 import { readCachedContent } from "./content";
 
 /** Default OG image dimensions when `size` is omitted. */
@@ -38,6 +39,18 @@ export type OgImagesResult = {
   /** Peak observed concurrent renders (never exceeds {@link OG_CONCURRENCY}). */
   peakConcurrency: number;
 };
+
+/**
+ * Injectable PNG renderer for the og-images phase. Defaults to the real
+ * Satori → resvg pipeline; unit tests inject a fake to assert hash-cache skip
+ * and the `p-limit` bound without rasterizing real images.
+ *
+ * @example
+ * ```ts
+ * const render: OgPngRenderer = async () => new Uint8Array();
+ * ```
+ */
+export type OgPngRenderer = (input: RichOgInput) => Promise<Uint8Array>;
 
 /** The optional dependency-injection seam for {@link generateOgImages}. */
 export type OgImagesOptions = {
@@ -225,18 +238,21 @@ function makeDefaultRenderer(ctx: {
 }
 
 /**
- * Select the published articles to render OG images for (default-locale set).
+ * Select the published articles to render OG images for — the default-locale set
+ * (mirrors `feeds.ts`: OG cards are single-locale by convention, keyed to the
+ * default locale rather than whatever locale happens to be cached first).
  *
  * @param byLocale - The cached locale-keyed article map.
- * @returns The published articles across the first cached locale.
+ * @param defaultLocale - The default locale code from i18n.
+ * @returns The published default-locale articles.
  * @example
  * ```ts
- * selectArticles(byLocale);
+ * selectArticles(byLocale, "en");
  * ```
  */
-function selectArticles(byLocale: Map<string, Article[]>): Article[] {
-  const first = [...byLocale.values()][0] ?? [];
-  return first.filter(article => article.computed.status === "published");
+function selectArticles(byLocale: Map<string, Article[]>, defaultLocale: string): Article[] {
+  const articles = byLocale.get(defaultLocale) ?? [];
+  return articles.filter(article => article.computed.status === "published");
 }
 
 /**
@@ -245,6 +261,8 @@ function selectArticles(byLocale: Map<string, Article[]>): Article[] {
  *
  * @param article - The published article to render a card for.
  * @param size - The resolved OG output dimensions.
+ * @param size.width - The OG image width in pixels.
+ * @param size.height - The OG image height in pixels.
  * @param siteName - The site name (from the site plugin, or `""` when unavailable).
  * @returns The fully-populated rich OG input.
  * @example
@@ -325,7 +343,8 @@ export async function generateOgImages(
   const renderHook = config.render ? { render: config.render } : {};
   const renderPng = options.renderPng ?? makeDefaultRenderer({ fonts, ...renderHook });
   const siteName = resolveSiteName(ctx);
-  const articles = selectArticles(readCachedContent(ctx));
+  const defaultLocale = ctx.require(i18nPlugin).defaultLocale();
+  const articles = selectArticles(readCachedContent(ctx), defaultLocale);
   const cache = ctx.state.ogImageHashCache;
   await loadDiskCache(ctx.config.outDir, cache);
 

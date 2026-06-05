@@ -90,7 +90,7 @@ const core = createCore(coreConfig, {
  *
  * @param options - Optional configuration:
  *  - `pluginConfigs` — per-plugin overrides, keyed by plugin name.
- *  - `config` — global framework config (e.g. `{ mode: "development" }`).
+ *  - `config` — global framework config (e.g. `{ mode: "spa" }`).
  *  - `plugins` — extra plugins (e.g. `dataPlugin` or your own) merged into the app and its type.
  *  - `onReady` / `onError` / `onStart` / `onStop` — lifecycle callbacks.
  * @returns The initialized app: `start()`, `stop()`, every plugin's API, and `log`.

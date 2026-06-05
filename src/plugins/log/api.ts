@@ -6,11 +6,19 @@
  * the live `expect()` chain, `addSink`, and `reset`.
  */
 import { createExpectChain } from "./expect";
-import type { ExpectChain, LogApi, LogEntry, LogLevel, LogSink, LogState } from "./types";
+import type {
+  ExpectChain,
+  LogApi,
+  LogConfig,
+  LogEntry,
+  LogLevel,
+  LogSink,
+  LogState
+} from "./types";
 
 /** Core-plugin context surface available to the log API factory. */
 type LogContext = {
-  readonly config: Readonly<{ mode: "test" | "dev" | "production" | "silent" }>;
+  readonly config: Readonly<LogConfig>;
   readonly state: LogState;
 };
 
@@ -35,13 +43,14 @@ function append(state: LogState, level: LogLevel, event: string, data?: unknown)
 }
 
 /**
- * Merge an `Error`'s `message`/`stack` into `data` under an `error` key,
- * preserving existing keys. Non-object `data` is coerced to `{}` first so a
- * thrown error is never silently dropped.
+ * Merge an `Error`'s `message`/`stack` into `data` under an `error` key. The
+ * `error` field is always preserved; only a plain object `data` contributes its
+ * keys. Non-plain-object `data` (arrays and primitives) is replaced by `{}` —
+ * its original value is not retained — so the merge target is always a record.
  *
  * @param data - Original payload (any shape).
  * @param error - The originating error to merge.
- * @returns A new object carrying the original keys plus the `error` field.
+ * @returns A new object carrying any plain-object keys plus the `error` field.
  * @example
  * ```ts
  * mergeError({ target: "cf" }, new Error("boom"));

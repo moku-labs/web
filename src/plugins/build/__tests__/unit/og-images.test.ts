@@ -31,7 +31,8 @@ function inputFor(title: string): RichOgInput {
 /** Build a ctx with N cached published articles + an enabled (fontless) ogImage config. */
 function ogCtx(tmp: string, articles: Article[]) {
   const ctx = makeCtx({
-    config: { outDir: tmp, ogImage: { fontDir: "./fonts" } }
+    config: { outDir: tmp, ogImage: { fontDir: "./fonts" } },
+    requireMap: { i18n: { defaultLocale: () => "en", locales: () => ["en"] } }
   });
   ctx.state.buildCache.set(CONTENT_CACHE_KEY, new Map([["en", articles]]));
   return ctx;
@@ -72,6 +73,35 @@ describe("build/phases/og-images", () => {
     expect(ctx.state.ogImageHashCache.get("fresh")).toBe(
       ogHash(inputFor("Hello World"), "default", fontsKey())
     );
+  });
+
+  it("selects the default-locale article set, not the first cached locale", async () => {
+    // selectArticles must pick the i18n DEFAULT locale's articles, not whatever locale is
+    // first in the (insertion-ordered) cache. Seed "uk" first, "en" (the default) second.
+    const enArticle = makeArticle({
+      computed: { ...makeArticle().computed, slug: "en-post", contentId: "en:0:en-post" }
+    });
+    const ukArticle = makeArticle({
+      computed: { ...makeArticle().computed, slug: "uk-post", contentId: "uk:0:uk-post" }
+    });
+    const ctx = makeCtx({
+      config: { outDir: tmp, ogImage: { fontDir: "./fonts" } },
+      requireMap: { i18n: { defaultLocale: () => "en", locales: () => ["uk", "en"] } }
+    });
+    ctx.state.buildCache.set(
+      CONTENT_CACHE_KEY,
+      new Map([
+        ["uk", [ukArticle]],
+        ["en", [enArticle]]
+      ])
+    );
+    const renderPng = vi.fn(async () => new Uint8Array([1]));
+
+    const result = await generateOgImages(ctx, { renderPng });
+
+    expect(result?.rendered).toBe(1);
+    expect(existsSync(path.join(tmp, "og", "en-post.png"))).toBe(true);
+    expect(existsSync(path.join(tmp, "og", "uk-post.png"))).toBe(false);
   });
 
   it("names the PNG by the URL-clean slug, not the loadAll contentId", async () => {
@@ -152,7 +182,10 @@ describe("build/phases/og-images", () => {
 
   it("reaches the configured ogImage.render hook (RichOgInput passed)", async () => {
     const article = makeArticle({ computed: { ...makeArticle().computed, contentId: "rich" } });
-    const ctx = makeCtx({ config: { outDir: tmp, ogImage: { fontDir: "./fonts" } } });
+    const ctx = makeCtx({
+      config: { outDir: tmp, ogImage: { fontDir: "./fonts" } },
+      requireMap: { i18n: { defaultLocale: () => "en", locales: () => ["en"] } }
+    });
     ctx.state.buildCache.set(CONTENT_CACHE_KEY, new Map([["en", [article]]]));
     let seen: RichOgInput | undefined;
     const og = ctx.config.ogImage;

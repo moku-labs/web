@@ -102,9 +102,10 @@ export default [
     }
   },
 
-  // 6. Source files: strict JSDoc requirements
+  // 6. Source files: strict JSDoc requirements (.ts AND .tsx — phase renderers
+  //    like build/phases/*.tsx must meet the same JSDoc/type-import bar).
   {
-    files: ["src/**/*.ts"],
+    files: ["src/**/*.{ts,tsx}"],
     rules: {
       "jsdoc/require-jsdoc": [
         "error",
@@ -132,7 +133,7 @@ export default [
 
   // 7. Test files: relaxed rules
   {
-    files: ["tests/**/*.ts", "src/plugins/**/__tests__/**/*.ts"],
+    files: ["tests/**/*.{ts,tsx}", "src/plugins/**/__tests__/**/*.{ts,tsx}"],
     rules: {
       "jsdoc/require-jsdoc": "off",
       "jsdoc/require-description": "off",

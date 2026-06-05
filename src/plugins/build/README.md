@@ -60,7 +60,8 @@ cross-plugin data is a synchronous PULL via `ctx.require`, never an event.
 - **Phase 2 — content + images** (parallel). `content` delegates to
   `content.loadAll()`; `images` copies static image directories (gated by `config.images`).
 - **Phase 3 — pages.** Pull `router.manifest()`; for each route expand instances via
-  `route.generate?.(locale)`, load data via `route.load?.(params, locale)`, pull
+  `route.generate?.(genCtx)` (where `genCtx = { locale, require, has }`), load data via
+  `route.load?.(loadCtx)` (where `loadCtx = { params, locale, require, has }`), pull
   `head.render(route, data)`, render the body with `preact-render-to-string`, inject
   the build-id meta tag, and write `outDir/<path>/index.html`. Renders concurrently
   via `Promise.all`. Captures the default (`/`) page for the root index. **When

@@ -141,11 +141,6 @@ export type DeployRunOptions = {
    * /^[a-zA-Z0-9/_.-]+$/ — otherwise rejected with ERR_DEPLOY_INVALID_BRANCH.
    */
   branch?: string;
-  /**
-   * Whether to run the build before deploying. When false, deploys the existing outDir.
-   * Defaults to `true`.
-   */
-  build?: boolean;
 };
 
 /**
@@ -180,14 +175,14 @@ export type Api = {
    * the branch argument, spawns wrangler (no shell), scrubs all subprocess output
    * before logging, records lastDeployment, and emits deploy:complete.
    *
-   * @param options - Optional branch override and build toggle.
+   * @param options - Optional branch override.
    * @returns The deploy result (url, deploymentId, branch, durationMs).
    * @throws {Error} With a `code` from the deploy error taxonomy on any failure.
    * @example
    * const result = await app.deploy.run();
    * console.log(result.url); // https://my-site.pages.dev
    * @example
-   * await app.deploy.run({ branch: "preview/landing", build: false });
+   * await app.deploy.run({ branch: "preview/landing" });
    */
   run(options?: DeployRunOptions): Promise<DeployResult>;
   /**

@@ -114,6 +114,8 @@ export function feedLink(title: string, url: string, type = "application/rss+xml
  * modified times, author, section, tags, plus a JSON-LD `Article` block and canonical.
  *
  * @param articleMeta - Article metadata (title, description, author, dates, tags, image…).
+ *   `image`, when present, is pushed to `og:image` verbatim and must therefore be
+ *   an absolute URL (this helper does not resolve relative paths against the site).
  * @param canonicalUrl - The article's canonical absolute URL.
  * @returns An ordered array of serializable head elements.
  * @example buildArticleHead({ title: "Hi", author: "A", published: "2026-01-01" }, "https://x/p")

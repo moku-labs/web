@@ -43,8 +43,8 @@ describe("head integration", () => {
     expect(() => buildApp()).not.toThrow();
   });
 
-  it("throws fail-fast [head] config: ... on an invalid titleTemplate", () => {
-    expect(() => buildApp({ titleTemplate: "no token" })).toThrow(/\[head\] config:/);
+  it("throws fail-fast [web] head: ... on an invalid titleTemplate", () => {
+    expect(() => buildApp({ titleTemplate: "no token" })).toThrow(/\[web\] head:/);
   });
 
   it("app.head.render(route, data) produces composed <head> inner HTML", () => {

@@ -26,7 +26,7 @@ const ERROR_PREFIX = "[web] router";
  * starting with `/`, unbalanced `{…}` braces, or more than one `{lang:?}` segment.
  *
  * @param routes - The route map registered via `app.router.set(routes)`.
- * @throws {Error} If routes are empty, a pattern is malformed, or names collide.
+ * @throws {Error} If routes are empty or a pattern is malformed.
  * @example
  * ```ts
  * validateRoutes({ home: route("/") });
@@ -125,26 +125,30 @@ export function patternToUrlPattern(
 
 /**
  * Build a URL from a pattern and params (substitutes `{param}` / `{param:?}`).
- * Walks segment-by-segment (no backtracking regex).
+ * Walks segment-by-segment (no backtracking regex). An optional placeholder whose
+ * param is absent has its segment skipped entirely (no empty segment), so a missing
+ * `{lang:?}` collapses cleanly instead of leaving a double slash.
  *
  * @param pattern - The route pattern.
  * @param params - Param values to substitute.
- * @param _baseUrl - Site base URL (reserved for absolute-link construction).
  * @returns The resolved relative URL string.
  * @example
  * ```ts
- * buildUrl("/{slug}/", { slug: "hello" }, "https://blog.dev");
+ * buildUrl("/{slug}/", { slug: "hello" }); // "/hello/"
  * ```
  */
-export function buildUrl(
-  pattern: string,
-  params: Record<string, string>,
-  _baseUrl: string
-): string {
+export function buildUrl(pattern: string, params: Record<string, string>): string {
   const out: string[] = [];
   for (const segment of pattern.split("/")) {
     const placeholder = parsePlaceholder(segment);
-    out.push(placeholder ? (params[placeholder.name] ?? "") : segment);
+    if (!placeholder) {
+      out.push(segment);
+      continue;
+    }
+    const value = params[placeholder.name] ?? "";
+    // Skip an absent optional segment so it collapses (no double slash).
+    if (placeholder.optional && value === "") continue;
+    out.push(value);
   }
   return out.join("/");
 }
@@ -161,26 +165,9 @@ export function buildUrl(
  * ```
  */
 export function buildFilePath(pattern: string, params: Record<string, string>): string {
-  const url = buildUrl(pattern, params, "");
+  const url = buildUrl(pattern, params);
   const cleanPath = url.replace(/^\//, "").replace(/\/$/, "");
   return cleanPath === "" ? "index.html" : `${cleanPath}/index.html`;
-}
-
-/**
- * Count dynamic segments in a pattern (lower = more specific). Thin alias over the
- * isomorphic {@link dynamicSegmentCount} — the single source of the specificity
- * logic shared by the server table and the client matcher — kept for the build-time
- * import surface.
- *
- * @param pattern - The route pattern.
- * @returns The number of dynamic (non-lang) segments.
- * @example
- * ```ts
- * countDynamicSegments("/{lang:?}/{slug}/"); // 1
- * ```
- */
-export function countDynamicSegments(pattern: string): number {
-  return dynamicSegmentCount(pattern);
 }
 
 /**
@@ -223,7 +210,7 @@ function compileRoute(
      * ```
      */
     toUrl(params: Record<string, string>): string {
-      return buildUrl(pattern, params, input.baseUrl);
+      return buildUrl(pattern, params);
     },
     /**
      * Build the output file path for this route from params. Honors a custom

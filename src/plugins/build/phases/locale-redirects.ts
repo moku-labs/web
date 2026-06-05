@@ -80,7 +80,7 @@ function pairRoutes(router: RouterSlice): Array<[RouteDefinition, TypedRoute]> {
  * @returns Redirect jobs of `{ file, target }` for this route.
  * @example
  * ```ts
- * await expandRedirects(def, entry, "en");
+ * await expandRedirects(def, entry, "en", ctx);
  * ```
  */
 async function expandRedirects(

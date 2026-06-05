@@ -103,18 +103,6 @@ export type PhaseContext = {
 };
 
 /**
- * Injectable PNG renderer for the og-images phase. Defaults to the real
- * Satori → resvg pipeline; unit tests inject a fake to assert hash-cache skip
- * and the `p-limit` bound without rasterizing real images.
- *
- * @example
- * ```ts
- * const render: OgPngRenderer = async () => new Uint8Array();
- * ```
- */
-export type OgPngRenderer = (input: RichOgInput) => Promise<Uint8Array>;
-
-/**
  * Rich input handed to a custom OG `render` hook for a single article card. Carries
  * the full article + site metadata so a consumer can compose any layout. Returned by
  * the framework, not authored by consumers directly.

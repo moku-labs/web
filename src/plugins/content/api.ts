@@ -63,6 +63,9 @@ export type ContentPluginContext = {
 function mergeProviders(providers: readonly ContentProvider[]): ContentProvider {
   const [first] = providers;
   if (providers.length === 1 && first !== undefined) return first;
+  // Below runs only for length >= 2 (validate.ts rejects 0; the fast path above
+  // handles 1). The `|| "content:empty"`, `?? ""`, and NO_PROVIDER throw are thus
+  // unreachable defensive guards, kept so the facade is total over its types.
   return {
     name: providers.map(provider => provider.name).join("+") || "content:empty",
     contentDir: first?.contentDir ?? "",

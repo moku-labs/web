@@ -102,7 +102,7 @@ node-only modules. This is stronger and more reliable than importing `@moku-labs
 relying on `"sideEffects": false` tree-shaking, which is fragile (building entries together
 can merge node code into a shared chunk). A CI gate (`bun run check:bundle`) asserts the
 built browser bundle has zero static node/native imports and stays under a gzip size budget
-(the browser bundle is currently ~35 kB gzip).
+(the browser bundle is currently ~41 kB gzip, comfortably under the 45 kB gz budget).
 
 `data` is a special case — an **optional, domain-agnostic data provider**: composed on
 Node, `build` calls `data.write(...)` to persist each page's real `load()` output as JSON
