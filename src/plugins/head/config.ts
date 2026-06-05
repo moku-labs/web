@@ -38,11 +38,14 @@ export const defaultConfig: Config = { twitterCard: "summary_large_image" };
  * ```
  */
 export function validateHeadConfig(config: Config): void {
+  // A provided titleTemplate must carry the `%s` slot the route title is spliced into.
   if (config.titleTemplate !== undefined && !config.titleTemplate.includes("%s")) {
     throw new Error(
       `${ERROR_PREFIX}: titleTemplate must contain the "%s" token (replaced by the route title), received ${JSON.stringify(config.titleTemplate)}.`
     );
   }
+
+  // A provided twitterCard must be one of the two supported card literals.
   if (config.twitterCard !== undefined && !VALID_TWITTER_CARDS.includes(config.twitterCard)) {
     throw new Error(
       `${ERROR_PREFIX}: twitterCard must be one of [${VALID_TWITTER_CARDS.join(", ")}], received ${JSON.stringify(config.twitterCard)}.`
@@ -65,11 +68,16 @@ export function validateHeadConfig(config: Config): void {
  */
 export function normalizeHeadConfig(config: Config): HeadDefaults {
   validateHeadConfig(config);
+
+  // Seed the snapshot with the one always-present field (twitterCard has a default).
   const defaults: { -readonly [K in keyof HeadDefaults]: HeadDefaults[K] } = {
     twitterCard: config.twitterCard ?? "summary_large_image"
   };
+
+  // Copy optional fields through only when present (preserves exactOptionalPropertyTypes).
   if (config.titleTemplate !== undefined) defaults.titleTemplate = config.titleTemplate;
   if (config.defaultOgImage !== undefined) defaults.defaultOgImage = config.defaultOgImage;
   if (config.twitterHandle !== undefined) defaults.twitterHandle = config.twitterHandle;
+
   return Object.freeze(defaults);
 }

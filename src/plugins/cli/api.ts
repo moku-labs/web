@@ -95,24 +95,31 @@ export type CliPluginContext = {
  * validateConfig({ outDir: "dist", port: 4173, watchDirs: ["content"], debounceMs: 150, notFoundFile: "404.html", liveReload: true });
  */
 export function validateConfig(config: Config): void {
+  // Port must be a TCP port number — an integer within the valid range.
   if (!Number.isInteger(config.port) || config.port < MIN_PORT || config.port > MAX_PORT) {
     throw cliError(
       "ERR_CLI_CONFIG",
       `${ERROR_PREFIX}: port must be an integer in ${MIN_PORT}–${MAX_PORT}.\n  Set pluginConfigs.cli.port to a valid TCP port (e.g. 4173).`
     );
   }
+
+  // Output directory must name a real build directory (non-empty string).
   if (typeof config.outDir !== "string" || config.outDir.length === 0) {
     throw cliError(
       "ERR_CLI_CONFIG",
       `${ERROR_PREFIX}: outDir must be a non-empty string.\n  Set pluginConfigs.cli.outDir to your build output directory (e.g. "dist").`
     );
   }
+
+  // Not-found page filename must be a non-empty string.
   if (typeof config.notFoundFile !== "string" || config.notFoundFile.length === 0) {
     throw cliError(
       "ERR_CLI_CONFIG",
       `${ERROR_PREFIX}: notFoundFile must be a non-empty string.\n  Set pluginConfigs.cli.notFoundFile to the not-found page filename (e.g. "404.html").`
     );
   }
+
+  // Watch list must be a non-empty array of non-empty directory names.
   if (
     !Array.isArray(config.watchDirs) ||
     config.watchDirs.length === 0 ||
@@ -123,6 +130,8 @@ export function validateConfig(config: Config): void {
       `${ERROR_PREFIX}: watchDirs must be a non-empty array of non-empty strings.\n  Set pluginConfigs.cli.watchDirs to the directories serve() should watch (e.g. ["content", "src"]).`
     );
   }
+
+  // Debounce window must be a non-negative millisecond count.
   if (typeof config.debounceMs !== "number" || config.debounceMs < 0) {
     throw cliError(
       "ERR_CLI_CONFIG",

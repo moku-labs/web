@@ -115,6 +115,29 @@ async function expandRedirects(
 }
 
 /**
+ * Write a single bare-path redirect page into `outDir`, creating its parent
+ * directory tree as needed (the bare path may be nested, e.g. `about/index.html`).
+ *
+ * @param job - The redirect job (`file` relative path + `target` URL).
+ * @param job.file - The redirect page's output path, relative to `outDir`.
+ * @param job.target - The absolute default-locale URL the page redirects to.
+ * @param outDir - The build output directory the file is resolved against.
+ * @returns Resolves once the redirect HTML page is written.
+ * @example
+ * ```ts
+ * await writeRedirectFile({ file: "about/index.html", target: "/en/about/" }, "dist");
+ * ```
+ */
+async function writeRedirectFile(
+  job: { file: string; target: string },
+  outDir: string
+): Promise<void> {
+  const filePath = path.join(outDir, job.file);
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, redirectHtml(job.target), "utf8");
+}
+
+/**
  * Emits one bare-path redirect HTML page per locale-prefixed route path, each a
  * `0;url` refresh + canonical link to the default-locale URL. Never writes a
  * Cloudflare `_redirects` file. No-op (returns `null`) when `localeRedirects` is
@@ -130,26 +153,28 @@ async function expandRedirects(
 export async function generateLocaleRedirects(
   ctx: Pick<PhaseContext, "require" | "config" | "log" | "has">
 ): Promise<LocaleRedirectsResult | null> {
+  // Locale redirects are opt-in — a disabled build skips the phase entirely.
   if (!ctx.config.localeRedirects) {
     ctx.log.debug("build:locale-redirects", { skipped: true });
     // eslint-disable-next-line unicorn/no-null -- `null` signals a disabled phase
     return null;
   }
+
+  // Gather the inputs: the router (manifest + entries) and the default locale.
   const router = ctx.require(routerPlugin);
   const defaultLocale = ctx.require(i18nPlugin).defaultLocale();
+
+  // Expand every correlated route into its bare→default redirect jobs.
   const jobLists = await Promise.all(
     pairRoutes(router).map(([definition, entry]) =>
       expandRedirects(definition, entry, defaultLocale, ctx)
     )
   );
   const jobs = jobLists.flat();
-  await Promise.all(
-    jobs.map(async ({ file, target }) => {
-      const filePath = path.join(ctx.config.outDir, file);
-      await mkdir(path.dirname(filePath), { recursive: true });
-      await writeFile(filePath, redirectHtml(target), "utf8");
-    })
-  );
+
+  // Persist one redirect HTML page per job into outDir.
+  await Promise.all(jobs.map(job => writeRedirectFile(job, ctx.config.outDir)));
+
   ctx.log.debug("build:locale-redirects", { written: jobs.length });
   return { written: jobs.length };
 }

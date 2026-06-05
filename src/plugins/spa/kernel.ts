@@ -187,17 +187,18 @@ export function createSpaKernel(
    * const resolved = await resolveDataRender("/en/world/");
    */
   const resolveDataRender = async (pathname: string): Promise<ResolvedDataRender | false> => {
+    // Bail unless the DATA path can run: data reader composed, route matched with a render.
     if (!deps.dataAt) return false;
     const matchPath = pathname.split("?")[0] ?? pathname;
     const hit = deps.router.match(matchPath);
     if (!hit?.route._handlers.render) return false;
-    const raw = await deps.dataAt(pathname); // persisted JSON (unknown) — null on miss
-    if (raw === null) return false;
-    // The persisted JSON IS this page's payload (the build wrote it from `load()`),
-    // used directly as `ctx.data` — there is no validation step. A malformed/missing
-    // file already degrades to the HTML-over-fetch fallback (dataAt → null, or the
-    // surrounding try/catch in tryDataRender).
-    const data = raw;
+
+    // Read the page's persisted payload — a miss degrades to the HTML-over-fetch fallback.
+    const data = await deps.dataAt(pathname); // persisted JSON (unknown) — null on miss
+    if (data === null) return false;
+
+    // Build the render context directly from the persisted payload (no validation step):
+    // the build wrote this JSON from `load()`, so it IS this page's `ctx.data`.
     const locale = hit.params.lang ?? document.documentElement.lang ?? "";
     const routeContext: RouteContext<RouteState> = {
       params: hit.params,
@@ -206,6 +207,8 @@ export function createSpaKernel(
       // eslint-disable-next-line jsdoc/require-jsdoc -- inline link builder; delegates to router.toUrl
       url: (routeName, routeParams = {}) => deps.router.toUrl(routeName, routeParams)
     };
+
+    // Render the route's OWN component (the same one SSG used) and locate its swap region.
     // NB: the route's `.layout()` is intentionally NOT applied here. The layout
     // chrome (TopBar/TabNav/Footer) is persistent — rendered once by SSG and left
     // in place across navigations. Client nav replaces ONLY the inner swap region
@@ -214,6 +217,7 @@ export function createSpaKernel(
     const vnode = hit.route._handlers.render(routeContext);
     const region = document.querySelector(resolved.swapSelector);
     if (!region) return false;
+
     return { route: hit.route, vnode, routeContext, region };
   };
 
@@ -232,19 +236,35 @@ export function createSpaKernel(
     pathname: string,
     resolvedRender: ResolvedDataRender
   ): Promise<void> => {
+    // Begin the navigation, then lazy-load the Preact render layer on demand.
     const { route, vnode, routeContext, region } = resolvedRender;
     handleStart(pathname);
     const { renderVNode } = await import("./render");
+
+    // Sync the document head and tear down the outgoing page-specific islands.
     syncDataHead(route, routeContext);
     unmountPageSpecific(state, emit);
-    runSwap(() => {
+
+    /**
+     * Render the VNode into the region and re-mount its islands in one paint — the
+     * swap body handed to `runSwap` (optionally wrapped in a View Transition).
+     *
+     * @example
+     * ```ts
+     * runSwap(renderAndMount, resolved.viewTransitions);
+     * ```
+     */
+    const renderAndMount = (): void => {
       // `renderVNode` clears the static SSR children on first render into this region,
       // then lets Preact own + diff it on subsequent navs (clearing again would desync
       // Preact's retained vdom from the live DOM → a blank region on the next nav).
       renderVNode(vnode, region);
       scanAndMount(state, emit, resolved.swapSelector);
       notifyNavEnd(state);
-    }, resolved.viewTransitions);
+    };
+    runSwap(renderAndMount, resolved.viewTransitions);
+
+    // Record the new URL and announce the completed navigation.
     state.currentUrl = pathname;
     progress?.done();
     emit("spa:navigated", { url: pathname });
@@ -312,14 +332,19 @@ export function createSpaKernel(
      * kernel.boot();
      */
     boot(): void {
+      // Boot is a client-only, single-shot operation — no-op headless, throw on re-boot.
       if (typeof document === "undefined") return;
       if (state.started) {
         throw new Error(
           `${ERROR_PREFIX} spa kernel already started.\n  Call app.stop() before booting again (single boot per app).`
         );
       }
+
+      // Stand up the progress bar and seed the current URL from the live document.
       progress = createProgressBar(resolved.progressBar);
       state.currentUrl = currentLocationUrl();
+
+      // Intercept navigation, mount the initial islands, and mark the kernel started.
       state.destroyRouter = attachRouter(handlers, navigate);
       scanAndMount(state, emit, resolved.swapSelector);
       state.started = true;

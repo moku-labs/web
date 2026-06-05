@@ -9,6 +9,19 @@ const MAX_SLUG_LENGTH = 58;
 const FALLBACK_SLUG = "site";
 
 /**
+ * Whether `char` is an ASCII lowercase letter or digit — the only characters kept
+ * verbatim in a Cloudflare project-name slug (everything else is a separator).
+ *
+ * @param char - A single character (already NFKD-normalized and lowercased).
+ * @returns `true` for `a–z` or `0–9`, else `false`.
+ * @example
+ * isAsciiLetterOrDigit("a"); // true
+ */
+function isAsciiLetterOrDigit(char: string): boolean {
+  return (char >= "a" && char <= "z") || (char >= "0" && char <= "9");
+}
+
+/**
  * Convert a site display name into a Cloudflare Pages project-name slug.
  * Normalizes via NFKD and strips diacritics, lowercases, collapses every run of
  * non-alphanumerics into a single hyphen, drops leading/trailing hyphens so the
@@ -37,15 +50,15 @@ export function toSlug(name: string): string {
   let slug = "";
   let pendingHyphen = false;
   for (const char of normalized) {
-    const isLower = char >= "a" && char <= "z";
-    const isDigit = char >= "0" && char <= "9";
-    if (isLower || isDigit) {
-      if (pendingHyphen && slug.length > 0) slug += "-";
-      pendingHyphen = false;
-      slug += char;
-    } else {
+    if (!isAsciiLetterOrDigit(char)) {
       pendingHyphen = true;
+      continue;
     }
+
+    // Emit one hyphen for the run of separators we just skipped (never leading).
+    if (pendingHyphen && slug.length > 0) slug += "-";
+    pendingHyphen = false;
+    slug += char;
   }
 
   // Cap length, then trim any trailing hyphen the cap may have exposed (linear

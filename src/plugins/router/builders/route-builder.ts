@@ -22,46 +22,31 @@ interface MutableRoute {
 }
 
 /**
- * Create a fluent route builder from a URL pattern string. Captures the pattern
- * as a literal type for compile-time param inference; `.load()` is the only method
- * that widens the data generic, so `ctx.data` in `.render()`/`.head()` is typed by
- * `.load()`'s return at the CALL SITE. The returned object is itself the route
- * definition (`pattern` / `_meta` / `_handlers`), so it slots straight into a route map.
+ * Records a handler under a slot and returns the owning builder for chaining — the
+ * single primitive every handler-slot setter delegates to.
+ */
+type SetHandler<P extends string> = (
+  key: keyof RouteHandlers,
+  fn: unknown
+) => RouteBuilder<RouteState<P>>;
+
+/**
+ * Build the handler-slot setter methods for one builder instance. Each method
+ * records its handler under the matching slot and returns the builder, so the chain
+ * stays fluent; they differ only in slot name and documented intent. `meta` is NOT
+ * here — it merges into `_meta` rather than a handler slot — so the carrier is not
+ * needed, keeping this helper a pure factory over the shared `set` primitive.
  *
- * @param pattern - URL pattern with `{param}` / `{param:?}` placeholders.
- * @returns A `RouteBuilder<RouteState<P>>` carrying the typed fluent chain.
+ * @param set - The record-then-return-builder primitive shared by every method.
+ * @returns The handler-slot setters (`load`/`layout`/`render`/`head`/`generate`/`toJson`/`toFile`).
  * @example
  * ```ts
- * route("/{lang:?}/{slug}/")
- *   .load((ctx) => loadArticle(ctx.params.slug))
- *   .render((ctx) => <Article a={ctx.data} />)
- *   .head((ctx) => ({ title: ctx.data.title }));
+ * const methods = createBuilderMethods(set);
+ * methods.render(handler); // records the render handler, returns the builder
  * ```
  */
-export function route<P extends string>(pattern: P): RouteBuilder<RouteState<P>> {
-  const carrier: MutableRoute = { pattern, _meta: {}, _handlers: {} };
-  const handlers = carrier._handlers;
-
-  /**
-   * Record a handler under `key` and return the same builder for chaining.
-   *
-   * @param key - The handler slot name.
-   * @param fn - The handler function to store.
-   * @returns The same builder instance, for fluent chaining.
-   * @example
-   * ```ts
-   * set("render", handler);
-   * ```
-   */
-  function set(key: keyof RouteHandlers, fn: unknown): RouteBuilder<RouteState<P>> {
-    handlers[key] = fn;
-    return builder;
-  }
-
-  const builder = {
-    pattern: carrier.pattern,
-    _meta: carrier._meta,
-    _handlers: carrier._handlers as RouteHandlers,
+function createBuilderMethods<P extends string>(set: SetHandler<P>) {
+  return {
     /**
      * Attach a data loader; widens the data generic for downstream handlers.
      *
@@ -135,22 +120,6 @@ export function route<P extends string>(pattern: P): RouteBuilder<RouteState<P>>
       return set("generate", handler);
     },
     /**
-     * Merge an arbitrary metadata bag into the route's `_meta`. The bag MUST be
-     * JSON-serializable — it is projected verbatim into `clientManifest()` and
-     * shipped to the browser, so functions/symbols/class instances are unsupported.
-     *
-     * @param meta - JSON-serializable metadata to merge.
-     * @returns The same builder for chaining.
-     * @example
-     * ```ts
-     * route("/").meta({ activeTab: "home" });
-     * ```
-     */
-    meta(meta: Record<string, unknown>) {
-      Object.assign(carrier._meta, meta);
-      return builder;
-    },
-    /**
      * Attach a JSON serializer for the route's data.
      *
      * @param handler - The JSON serializer.
@@ -175,6 +144,69 @@ export function route<P extends string>(pattern: P): RouteBuilder<RouteState<P>>
      */
     toFile(handler: unknown) {
       return set("toFile", handler);
+    }
+  };
+}
+
+/**
+ * Create a fluent route builder from a URL pattern string. Captures the pattern
+ * as a literal type for compile-time param inference; `.load()` is the only method
+ * that widens the data generic, so `ctx.data` in `.render()`/`.head()` is typed by
+ * `.load()`'s return at the CALL SITE. The returned object is itself the route
+ * definition (`pattern` / `_meta` / `_handlers`), so it slots straight into a route map.
+ *
+ * @param pattern - URL pattern with `{param}` / `{param:?}` placeholders.
+ * @returns A `RouteBuilder<RouteState<P>>` carrying the typed fluent chain.
+ * @example
+ * ```ts
+ * route("/{lang:?}/{slug}/")
+ *   .load((ctx) => loadArticle(ctx.params.slug))
+ *   .render((ctx) => <Article a={ctx.data} />)
+ *   .head((ctx) => ({ title: ctx.data.title }));
+ * ```
+ */
+export function route<P extends string>(pattern: P): RouteBuilder<RouteState<P>> {
+  // The carrier doubles as the live route definition every method mutates in place.
+  const carrier: MutableRoute = { pattern, _meta: {}, _handlers: {} };
+
+  /**
+   * Record a handler under `key` and return the builder for chaining — the one
+   * primitive every typed handler setter (`load`, `render`, …) delegates to.
+   *
+   * @param key - The handler slot name.
+   * @param fn - The handler function to store.
+   * @returns The same builder instance, for fluent chaining.
+   * @example
+   * ```ts
+   * set("render", handler);
+   * ```
+   */
+  const set: SetHandler<P> = (key, fn) => {
+    carrier._handlers[key] = fn;
+    return builder;
+  };
+
+  // Compose the chainable surface: carrier fields, handler setters, and the meta merger.
+  const builder = {
+    pattern: carrier.pattern,
+    _meta: carrier._meta,
+    _handlers: carrier._handlers as RouteHandlers,
+    ...createBuilderMethods(set),
+    /**
+     * Merge an arbitrary metadata bag into the route's `_meta`. The bag MUST be
+     * JSON-serializable — it is projected verbatim into `clientManifest()` and
+     * shipped to the browser, so functions/symbols/class instances are unsupported.
+     *
+     * @param meta - JSON-serializable metadata to merge.
+     * @returns The same builder for chaining.
+     * @example
+     * ```ts
+     * route("/").meta({ activeTab: "home" });
+     * ```
+     */
+    meta(meta: Record<string, unknown>) {
+      Object.assign(carrier._meta, meta);
+      return builder;
     }
   } as unknown as RouteBuilder<RouteState<P>>;
 

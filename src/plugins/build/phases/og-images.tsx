@@ -308,6 +308,85 @@ function resolveSiteName(ctx: Pick<PhaseContext, "require">): string {
 }
 
 /**
+ * The mutable accumulator threaded through every per-article render task: the
+ * render/skip counts returned by the phase plus the live concurrency tracker
+ * ({@link RenderTally.active} rises/falls around each render so {@link
+ * RenderTally.peakConcurrency} captures the high-water mark across the pool).
+ *
+ * @example
+ * ```ts
+ * const tally: RenderTally = { rendered: 0, skipped: 0, active: 0, peakConcurrency: 0 };
+ * ```
+ */
+type RenderTally = {
+  /** Number of articles rasterized so far. */
+  rendered: number;
+  /** Number of articles skipped via the content-hash cache. */
+  skipped: number;
+  /** Renders currently in flight (rises/falls around each rasterization). */
+  active: number;
+  /** Peak observed value of {@link RenderTally.active}. */
+  peakConcurrency: number;
+};
+
+/**
+ * Render (or cache-skip) one article's OG image, mutating {@link RenderTally} in
+ * place. A matching cached hash bumps `skipped` and returns early; otherwise the
+ * PNG is rasterized to `<outDir>/og/<slug>.png`, the cache entry is updated, and
+ * `rendered` is bumped — with `active`/`peakConcurrency` bracketing the render so
+ * the pool's high-water mark is observed even if rasterization throws.
+ *
+ * @param article - The published article to render a card for.
+ * @param deps - The shared per-pass render wiring.
+ * @param deps.renderPng - The bound PNG rasterizer (DI seam or default pipeline).
+ * @param deps.input - The article's {@link RichOgInput} card payload.
+ * @param deps.hash - The article's content-hash cache value ({@link ogHash}).
+ * @param deps.cache - The in-memory hash cache (read for skip, written on render).
+ * @param deps.outDir - The `og` output directory the PNG is written into.
+ * @param tally - The mutable counts + concurrency tracker, updated in place.
+ * @returns Resolves once the article is rendered or skipped.
+ * @example
+ * ```ts
+ * await renderArticleOg(article, { renderPng, input, hash, cache, outDir }, tally);
+ * ```
+ */
+async function renderArticleOg(
+  article: Article,
+  deps: {
+    renderPng: OgPngRenderer;
+    input: RichOgInput;
+    hash: string;
+    cache: Map<string, string>;
+    outDir: string;
+  },
+  tally: RenderTally
+): Promise<void> {
+  // Cache hit — an unchanged article is counted as skipped and never rasterized.
+  const key = article.computed.contentId;
+  if (deps.cache.get(key) === deps.hash) {
+    tally.skipped += 1;
+    return;
+  }
+
+  // Bracket the rasterization so the pool's peak concurrency is observed even on throw.
+  tally.active += 1;
+  tally.peakConcurrency = Math.max(tally.peakConcurrency, tally.active);
+  try {
+    const png = await deps.renderPng(deps.input);
+    await mkdir(deps.outDir, { recursive: true });
+    // Name the PNG by the URL-clean `slug`, NOT `loadAll`'s reassigned `${locale}:${index}:${slug}`
+    // contentId. Route loaders see `load()`'s contentId === slug (and `computed.slug`), so the file
+    // must be `/og/{slug}.png` for a consumer's `og:image` to resolve. The hash CACHE key stays
+    // `contentId` (stable + unique across locales).
+    await writeFile(path.join(deps.outDir, `${article.computed.slug}.png`), png);
+    deps.cache.set(key, deps.hash);
+    tally.rendered += 1;
+  } finally {
+    tally.active -= 1;
+  }
+}
+
+/**
  * Renders OG images for published articles with a `p-limit(4)` concurrency pool.
  * Computes {@link ogHash} (full {@link RichOgInput} + template + fonts) per article
  * and skips regeneration when the hash matches `state.ogImageHashCache`; writes the
@@ -327,66 +406,53 @@ export async function generateOgImages(
   ctx: Pick<PhaseContext, "require" | "state" | "config" | "log">,
   options: OgImagesOptions = {}
 ): Promise<OgImagesResult | null> {
+  // OG images are opt-in — a disabled build skips the phase entirely.
   const og = ctx.config.ogImage;
   if (!og) {
     ctx.log.debug("build:og-images", { skipped: true });
     // eslint-disable-next-line unicorn/no-null -- `null` signals a disabled phase (asserted via toBeNull)
     return null;
   }
-  const { default: pLimit } = await import("p-limit");
+
+  // Resolve the render settings + load fonts ONCE for the whole pass (outside the per-image loop).
   const config: OgImageConfig = og;
   const size = config.size ?? DEFAULT_SIZE;
   const template = config.template ?? "default";
   const fontsHash = fontsKey(config.fonts);
-  // Fonts loaded ONCE for the whole pass (outside the per-image loop).
   const fonts = options.renderPng ? [] : await loadFonts(config);
   const renderHook = config.render ? { render: config.render } : {};
   const renderPng = options.renderPng ?? makeDefaultRenderer({ fonts, ...renderHook });
+
+  // Gather the inputs: site name, published default-locale articles, and the warmed hash cache.
   const siteName = resolveSiteName(ctx);
   const defaultLocale = ctx.require(i18nPlugin).defaultLocale();
   const articles = selectArticles(readCachedContent(ctx), defaultLocale);
   const cache = ctx.state.ogImageHashCache;
   await loadDiskCache(ctx.config.outDir, cache);
 
+  // Render every article through the bounded pool, accumulating counts + peak concurrency.
+  const { default: pLimit } = await import("p-limit");
   const limit = pLimit(OG_CONCURRENCY);
-  let active = 0;
-  let peakConcurrency = 0;
-  let rendered = 0;
-  let skipped = 0;
   const outDir = path.join(ctx.config.outDir, "og");
-
+  const tally: RenderTally = { rendered: 0, skipped: 0, active: 0, peakConcurrency: 0 };
   await Promise.all(
     articles.map(article =>
-      limit(async () => {
-        const key = article.computed.contentId;
+      limit(() => {
         const input = buildInput(article, size, siteName);
         const hash = ogHash(input, template, fontsHash);
-        if (cache.get(key) === hash) {
-          skipped += 1;
-          return;
-        }
-        active += 1;
-        peakConcurrency = Math.max(peakConcurrency, active);
-        try {
-          const png = await renderPng(input);
-          await mkdir(outDir, { recursive: true });
-          // Name the PNG by the URL-clean `slug`, NOT `loadAll`'s reassigned `${locale}:${index}:${slug}`
-          // contentId. Route loaders see `load()`'s contentId === slug (and `computed.slug`), so the file
-          // must be `/og/{slug}.png` for a consumer's `og:image` to resolve. The hash CACHE key stays
-          // `contentId` (stable + unique across locales).
-          await writeFile(path.join(outDir, `${article.computed.slug}.png`), png);
-          cache.set(key, hash);
-          rendered += 1;
-        } finally {
-          active -= 1;
-        }
+        return renderArticleOg(article, { renderPng, input, hash, cache, outDir }, tally);
       })
     )
   );
 
+  // Persist the updated hash cache so the next build can skip unchanged articles.
   await persistDiskCache(ctx.config.outDir, cache);
-  ctx.log.debug("build:og-images", { rendered, skipped });
-  return { rendered, skipped, peakConcurrency };
+  ctx.log.debug("build:og-images", { rendered: tally.rendered, skipped: tally.skipped });
+  return {
+    rendered: tally.rendered,
+    skipped: tally.skipped,
+    peakConcurrency: tally.peakConcurrency
+  };
 }
 
 /**
