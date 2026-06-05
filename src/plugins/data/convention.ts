@@ -26,7 +26,11 @@
 export function dataSuffix(path: string): string {
   const queryless = path.split("?")[0] ?? path;
   let trimmed = queryless;
+
+  // Drop any leading slashes so the suffix is outputDir-relative.
   while (trimmed.startsWith("/")) trimmed = trimmed.slice(1);
+
+  // Drop any trailing slashes so a single one can be reattached uniformly.
   while (trimmed.endsWith("/")) trimmed = trimmed.slice(0, -1);
   return trimmed.length > 0 ? `${trimmed}/index.json` : "index.json";
 }

@@ -24,12 +24,12 @@ const NO_SEPARATOR = -1;
  * ```
  */
 function stripQuotes(value: string): string {
-  if (value.length >= 2) {
-    const first = value[0];
-    const last = value.at(-1);
-    if ((first === '"' || first === "'") && first === last) {
-      return value.slice(1, -1);
-    }
+  if (value.length < 2) return value;
+
+  const first = value[0];
+  const last = value.at(-1);
+  if ((first === '"' || first === "'") && first === last) {
+    return value.slice(1, -1);
   }
   return value;
 }

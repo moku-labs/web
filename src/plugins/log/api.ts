@@ -43,6 +43,21 @@ function append(state: LogState, level: LogLevel, event: string, data?: unknown)
 }
 
 /**
+ * Tests whether a value is a non-null, non-array plain object.
+ *
+ * @param value - The value to test.
+ * @returns `true` when `value` is a non-null object that is not an array.
+ * @example
+ * ```ts
+ * isPlainObject({ a: 1 }); // true
+ * isPlainObject([1]); // false
+ * ```
+ */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
  * Merge an `Error`'s `message`/`stack` into `data` under an `error` key. The
  * `error` field is always preserved; only a plain object `data` contributes its
  * keys. Non-plain-object `data` (arrays and primitives) is replaced by `{}` —
@@ -58,10 +73,7 @@ function append(state: LogState, level: LogLevel, event: string, data?: unknown)
  * ```
  */
 function mergeError(data: unknown, error: Error): Record<string, unknown> {
-  const base =
-    typeof data === "object" && data !== null && !Array.isArray(data)
-      ? (data as Record<string, unknown>)
-      : {};
+  const base = isPlainObject(data) ? data : {};
   return { ...base, error: { message: error.message, stack: error.stack } };
 }
 

@@ -186,7 +186,9 @@ export function runSwap(doSwap: () => void, viewTransitions: boolean): void {
   const docWithVt = document as Document & {
     startViewTransition?: (cb: () => void) => unknown;
   };
-  if (viewTransitions && !reduced && typeof docWithVt.startViewTransition === "function") {
+  const canUseViewTransitions =
+    viewTransitions && !reduced && typeof docWithVt.startViewTransition === "function";
+  if (canUseViewTransitions) {
     docWithVt.startViewTransition(doSwap);
   } else {
     doSwap();
@@ -231,7 +233,8 @@ export function swapRegion(
  * const url = resolveClickTarget(event);
  */
 export function resolveClickTarget(event: MouseEvent): URL | undefined {
-  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return undefined;
+  const hasModifierKey = event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
+  if (hasModifierKey) return undefined;
   if (event.defaultPrevented) return undefined;
   const anchor = (event.target as Element | null)?.closest("a");
   if (!anchor || anchor.target === "_blank") return undefined;
@@ -322,7 +325,9 @@ export function attachNavigationApi(
    */
   const onNavigate = (navEvent: NavigateEvent): void => {
     const url = new URL(navEvent.destination.url);
-    if (!navEvent.canIntercept || navEvent.hashChange || navEvent.downloadRequest) return;
+    const shouldSkipIntercept =
+      !navEvent.canIntercept || navEvent.hashChange || navEvent.downloadRequest;
+    if (shouldSkipIntercept) return;
     if (!isInternalLink(url)) return;
     if (url.pathname === location.pathname) {
       navEvent.intercept({

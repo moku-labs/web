@@ -96,14 +96,20 @@ function toUrlPatternSource(pattern: string): string {
   const out: string[] = [];
   for (const segment of pattern.split("/")) {
     const placeholder = parsePlaceholder(segment);
+
+    // Static segment — copy it through verbatim.
     if (!placeholder) {
       out.push(segment);
       continue;
     }
+
+    // Optional {lang:?} — emit URLPattern's optional group.
     if (placeholder.name === "lang" && placeholder.optional) {
       out.push(":lang?");
       continue;
     }
+
+    // Regular dynamic param — emit as a named group.
     out.push(`:${placeholder.name}`);
   }
   return out.join("/");
