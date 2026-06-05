@@ -15,6 +15,9 @@ import type {
 /** Error prefix for spa config-validation failures (spec/11 Part-3). */
 const ERROR_PREFIX = "[web]";
 
+/** Last-resort `swapSelector` when neither config nor defaults supply one. */
+const FALLBACK_SWAP_SELECTOR = "main > section";
+
 /** Default SPA config (declared as a value — no inline assertion). */
 export const defaultSpaConfig: SpaConfig = {
   swapSelector: "main > section",
@@ -54,17 +57,27 @@ function isValidSelector(selector: string): boolean {
  * const resolved = resolveSpaConfig({ swapSelector: "main > section" });
  */
 export function resolveSpaConfig(config: SpaConfig): ResolvedSpaConfig {
-  const swapSelector = config.swapSelector ?? defaultSpaConfig.swapSelector ?? "main > section";
-  if (swapSelector.trim() === "") {
+  // Resolve the swap target: caller wins, then plugin default, then a hard fallback.
+  const swapSelector =
+    config.swapSelector ?? defaultSpaConfig.swapSelector ?? FALLBACK_SWAP_SELECTOR;
+
+  // Reject an absent/blank selector — there is no region to swap.
+  const isBlankSelector = swapSelector.trim() === "";
+  if (isBlankSelector) {
     throw new Error(
       `${ERROR_PREFIX} spa.swapSelector must be a non-empty string.\n  Set a CSS selector for the page region to swap (e.g. "main > section").`
     );
   }
-  if (!isValidSelector(swapSelector)) {
+
+  // Reject a selector the DOM cannot parse (skipped in headless contexts).
+  const isParseableSelector = isValidSelector(swapSelector);
+  if (!isParseableSelector) {
     throw new Error(
       `${ERROR_PREFIX} spa.swapSelector is not a valid CSS selector: "${swapSelector}".\n  Provide a syntactically valid selector.`
     );
   }
+
+  // Fill the remaining optional fields from their per-key defaults.
   return {
     swapSelector,
     viewTransitions: config.viewTransitions ?? false,

@@ -99,6 +99,26 @@ export async function writeScaffolding(input: {
 }
 
 /**
+ * Create the parent directory then write the scaffold file to disk.
+ *
+ * @param cwd - Project root the file is written into.
+ * @param relativePath - Path (relative to cwd) of the scaffold file.
+ * @param contents - The content to write.
+ * @returns Resolves once the file (and any missing parents) exist on disk.
+ * @example
+ * await writeScaffoldFile(process.cwd(), "wrangler.jsonc", contents);
+ */
+async function writeScaffoldFile(
+  cwd: string,
+  relativePath: string,
+  contents: string
+): Promise<void> {
+  const absolutePath = path.join(cwd, relativePath);
+  await mkdir(path.dirname(absolutePath), { recursive: true });
+  await writeFile(absolutePath, contents, "utf8");
+}
+
+/**
  * Reconcile one scaffold file against disk: in check mode record drift, otherwise
  * skip an existing file or write a new one. Mutates the shared {@link InitResult}.
  *
@@ -122,15 +142,24 @@ async function reconcile(input: {
   result: InitResult;
 }): Promise<void> {
   const { relativePath, expected, existing, cwd, check, result } = input;
+
+  // Classify the on-disk state so each branch reads as a named decision.
+  const fileExists = existing !== null;
+  const fileDrifted = fileExists && existing !== expected;
+
+  // Drift-only mode: record divergence and write nothing.
   if (check) {
-    if (existing !== null && existing !== expected) result.drifted.push(relativePath);
+    if (fileDrifted) result.drifted.push(relativePath);
     return;
   }
-  if (existing !== null) {
+
+  // Idempotent skip: an existing file is never overwritten.
+  if (fileExists) {
     result.skipped.push(relativePath);
     return;
   }
-  await mkdir(path.dirname(path.join(cwd, relativePath)), { recursive: true });
-  await writeFile(path.join(cwd, relativePath), expected, "utf8");
+
+  // Fresh write: materialize the generated scaffold and tally it.
+  await writeScaffoldFile(cwd, relativePath, expected);
   result.written.push(relativePath);
 }

@@ -71,6 +71,43 @@ function hasValidLangCount(pattern: string): boolean {
 }
 
 /**
+ * Assert a single route's pattern is well-formed, throwing the `[web]`-prefixed
+ * error for the first failure: not rooted at `/`, unbalanced `{…}` braces, or
+ * more than one `{lang:?}` segment. Extracted from {@link validateRoutes} so the
+ * loop body stays flat.
+ *
+ * @param name - The route name key, surfaced in any error message.
+ * @param pattern - The route's user pattern to validate.
+ * @throws {Error} When the pattern is malformed.
+ * @example
+ * ```ts
+ * assertRouteValid("home", "/{slug}/");
+ * ```
+ */
+function assertRouteValid(name: string, pattern: string): void {
+  // Patterns must be absolute so they compose with locale prefix + base URL.
+  if (!isPatternRooted(pattern)) {
+    throw new Error(
+      `${ERROR_PREFIX}: route "${name}" pattern must start with "/" (got "${pattern}").`
+    );
+  }
+
+  // Every placeholder must be closed so segment parsing cannot drift.
+  if (!hasBalancedBraces(pattern)) {
+    throw new Error(
+      `${ERROR_PREFIX}: route "${name}" pattern has unbalanced braces ("${pattern}").`
+    );
+  }
+
+  // The locale prefix is single-slot — a second `{lang:?}` is ambiguous.
+  if (!hasValidLangCount(pattern)) {
+    throw new Error(
+      `${ERROR_PREFIX}: route "${name}" pattern has more than one {lang:?} segment ("${pattern}").`
+    );
+  }
+}
+
+/**
  * Validate the route map (fail-fast in `onInit`). Throws with the `[web]` prefix
  * naming the offending route/pattern on any failure: empty map, a pattern not
  * starting with `/`, unbalanced `{…}` braces, or more than one `{lang:?}` segment.
@@ -94,21 +131,7 @@ export function validateRoutes(routes: RouteMap): void {
   // Reject the first malformed pattern, naming the offending route.
   for (const name of names) {
     const pattern = routes[name]?.pattern ?? "";
-    if (!isPatternRooted(pattern)) {
-      throw new Error(
-        `${ERROR_PREFIX}: route "${name}" pattern must start with "/" (got "${pattern}").`
-      );
-    }
-    if (!hasBalancedBraces(pattern)) {
-      throw new Error(
-        `${ERROR_PREFIX}: route "${name}" pattern has unbalanced braces ("${pattern}").`
-      );
-    }
-    if (!hasValidLangCount(pattern)) {
-      throw new Error(
-        `${ERROR_PREFIX}: route "${name}" pattern has more than one {lang:?} segment ("${pattern}").`
-      );
-    }
+    assertRouteValid(name, pattern);
   }
 }
 

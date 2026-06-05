@@ -141,6 +141,72 @@ export function validateConfig(config: Config): void {
 }
 
 /**
+ * Assert the SSG emitted the not-found page, rendering a hint and throwing
+ * `ERR_CLI_NOT_FOUND` when it is missing (CF Pages flips to SPA mode without a
+ * top-level 404). A no-op when the page exists.
+ *
+ * @param ctx - Plugin context (provides `state.render` for the failure hint).
+ * @param page - The absolute path the not-found page is expected at.
+ * @throws {Error} `ERR_CLI_NOT_FOUND` when the not-found page is missing.
+ * @example
+ * assertNotFoundPage(ctx, path.join(ctx.config.outDir, ctx.config.notFoundFile));
+ */
+function assertNotFoundPage(ctx: CliPluginContext, page: string): void {
+  if (existsSync(page)) {
+    return;
+  }
+  ctx.state.render.error(`${page} missing — set build.notFound (CF Pages would flip to SPA mode)`);
+  throw cliError(
+    "ERR_CLI_NOT_FOUND",
+    `${ERROR_PREFIX}: ${page} missing after build.\n  Set build.notFound so the SSG emits it (CF Pages flips to SPA mode without a top-level 404), or pass { assertNotFound: false } to skip this check.`
+  );
+}
+
+/**
+ * Whether the deploy confirmation prompt should be shown to a human. True only on
+ * an interactive TTY with `CI` unset and when the caller has not passed `yes`; CI
+ * and non-TTY runs are not prompted so consumer scripts never block a pipeline.
+ *
+ * @param yes - The caller's `yes` flag (forces the prompt to be skipped anywhere).
+ * @returns `true` when a confirmation prompt should be shown, otherwise `false`.
+ * @example
+ * if (shouldPromptDeploy(false)) { ... }
+ */
+function shouldPromptDeploy(yes: boolean): boolean {
+  const isInteractiveTty = process.stdout.isTTY === true && process.env.CI === undefined;
+  return isInteractiveTty && !yes;
+}
+
+/**
+ * Resolve whether a deploy may proceed, handling the human/non-interactive split:
+ * prompts an interactive TTY user (rendering the "skipped" warning on a "no"),
+ * renders the non-interactive notice when no prompt and no `yes`, and otherwise
+ * proceeds silently. Returns whether the caller should run the deploy.
+ *
+ * @param ctx - Plugin context (provides `state.confirm` and `state.render`).
+ * @param yes - The caller's `yes` flag (forces the skip anywhere).
+ * @returns `true` when the deploy should run, `false` when an interactive user declined.
+ * @example
+ * if (!(await confirmDeploy(ctx, false))) return { deployed: false, reason: "declined" };
+ */
+async function confirmDeploy(ctx: CliPluginContext, yes: boolean): Promise<boolean> {
+  // Non-interactive (or `yes`): never prompt; note the skip when not forced by `yes`.
+  if (!shouldPromptDeploy(yes)) {
+    if (!yes) {
+      ctx.state.render.info("non-interactive — skipping deploy confirmation");
+    }
+    return true;
+  }
+
+  // Interactive human: ask, and surface the skip when they decline.
+  const confirmed = await ctx.state.confirm(`Deploy ${ctx.config.outDir}/ to cloudflare-pages?`);
+  if (!confirmed) {
+    ctx.state.render.warn("deploy skipped");
+  }
+  return confirmed;
+}
+
+/**
  * Create the cli plugin API surface — exactly `build`, `serve`, `preview`, `deploy`.
  * Each method renders `state.render.header(<command>)` first, then does its work;
  * live progress is rendered by the hooks wired in `index.ts`, so each method's
@@ -165,18 +231,16 @@ export function createApi(ctx: CliPluginContext): Api {
      */
     async build(options = {}) {
       const { assertNotFound = true } = options;
+
+      // Render the command header, then run the SSG build (progress arrives via hooks).
       ctx.state.render.header("build");
       const result = await ctx.require(buildPlugin).run();
-      const page = path.join(ctx.config.outDir, ctx.config.notFoundFile);
-      if (assertNotFound && !existsSync(page)) {
-        ctx.state.render.error(
-          `${page} missing — set build.notFound (CF Pages would flip to SPA mode)`
-        );
-        throw cliError(
-          "ERR_CLI_NOT_FOUND",
-          `${ERROR_PREFIX}: ${page} missing after build.\n  Set build.notFound so the SSG emits it (CF Pages flips to SPA mode without a top-level 404), or pass { assertNotFound: false } to skip this check.`
-        );
+
+      // Unless opted out, fail loudly when the SSG skipped the top-level not-found page.
+      if (assertNotFound) {
+        assertNotFoundPage(ctx, path.join(ctx.config.outDir, ctx.config.notFoundFile));
       }
+
       return result;
     },
 
@@ -223,21 +287,17 @@ export function createApi(ctx: CliPluginContext): Api {
      */
     async deploy(options = {}) {
       const { branch, yes = false } = options;
+
+      // Render the command header, then scaffold the deploy (CI mode).
       ctx.state.render.header("deploy");
       await ctx.require(deployPlugin).init({ ci: true });
 
-      // Confirm only when a human can answer. CI / non-TTY runs deploy without
-      // prompting so the scripts never block; `yes` forces the skip anywhere.
-      const interactive = process.stdout.isTTY === true && process.env.CI === undefined;
-      if (interactive && !yes) {
-        const ok = await ctx.state.confirm(`Deploy ${ctx.config.outDir}/ to cloudflare-pages?`);
-        if (!ok) {
-          ctx.state.render.warn("deploy skipped");
-          return { deployed: false, reason: "declined" };
-        }
-      } else if (!yes) {
-        ctx.state.render.info("non-interactive — skipping deploy confirmation");
+      // Gate on confirmation; an interactive "no" returns without deploying.
+      if (!(await confirmDeploy(ctx, yes))) {
+        return { deployed: false, reason: "declined" };
       }
+
+      // Proceed: deploy (progress arrives via hooks) and report the outcome.
       const result = await ctx.require(deployPlugin).run(branch === undefined ? {} : { branch });
       return { deployed: true, ...result };
     }

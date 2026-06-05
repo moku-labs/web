@@ -26,13 +26,19 @@ type I18nContext = {
  */
 export function validateI18nConfig(ctx: I18nContext): void {
   const { locales, defaultLocale } = ctx.config;
-  if (locales.length === 0) {
+
+  // Guard: at least one supported locale must be declared.
+  const hasNoLocales = locales.length === 0;
+  if (hasNoLocales) {
     throw new Error(
       `${ERROR_PREFIX} i18n.locales must contain at least one locale.\n` +
         '  Set pluginConfigs.i18n.locales to a non-empty array, e.g. ["en"].'
     );
   }
-  if (!locales.includes(defaultLocale)) {
+
+  // Guard: the fallback locale must itself be one of the supported locales.
+  const defaultLocaleMissing = !locales.includes(defaultLocale);
+  if (defaultLocaleMissing) {
     throw new Error(
       `${ERROR_PREFIX} i18n.defaultLocale "${defaultLocale}" is not in i18n.locales [${locales.join(", ")}].\n` +
         `  Set pluginConfigs.i18n.defaultLocale to one of the configured locales, or add "${defaultLocale}" to i18n.locales.`

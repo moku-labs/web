@@ -68,6 +68,47 @@ function pairRoutes(router: RouterSlice): Array<[RouteDefinition, TypedRoute]> {
 }
 
 /**
+ * Compute the single bare→default redirect job for one generated parameter set, or
+ * `null` when no redirect is needed. The BARE (locale-less) path is derived by
+ * stripping `lang`. `generate()` supplies `lang` (pages need it), so using `params`
+ * as-is makes the "bare" URL already carry the locale → target === bareUrl → NO
+ * redirect is ever emitted. Removing `lang` yields the real lang-less file/URL
+ * (`/`, `/about/`, `/{slug}/`) that must redirect to the default-locale URL.
+ *
+ * @param entry - The compiled `TypedRoute` (owns `toFile`/`toUrl`).
+ * @param raw - One raw parameter set from `generate()` (may be `null`/`undefined`).
+ * @param defaultLocale - The default locale to redirect bare paths to.
+ * @returns The `{ file, target }` redirect job, or `null` when no redirect is needed.
+ * @example
+ * ```ts
+ * redirectJobFor(entry, { lang: "en", slug: "hello" }, "en");
+ * ```
+ */
+function redirectJobFor(
+  entry: TypedRoute,
+  raw: unknown,
+  defaultLocale: string
+): { file: string; target: string } | null {
+  // Strip `lang` to recover the locale-less bare path/URL this redirect lives at.
+  const params = (raw ?? {}) as Record<string, string>;
+  const bareParams = { ...params };
+  delete bareParams.lang;
+
+  // Resolve the bare output file, the default-locale target, and the bare URL.
+  const file = entry.toFile(bareParams);
+  const target = entry.toUrl({ ...bareParams, lang: defaultLocale });
+  const bareUrl = entry.toUrl(bareParams);
+
+  // A redirect is only needed when the route is locale-prefixed (bare URL differs).
+  const isLocalePrefixed = target !== bareUrl;
+  if (!isLocalePrefixed) {
+    // eslint-disable-next-line unicorn/no-null -- `null` signals "no redirect needed"
+    return null;
+  }
+  return { file, target };
+}
+
+/**
  * Expand one route into bare→default redirect jobs for the default locale. Uses
  * `generate?.(defaultLocale)` (or a single empty-params instance) and emits a job
  * only when the bare file path differs from the default-locale URL (i.e. the route
@@ -89,27 +130,23 @@ async function expandRedirects(
   defaultLocale: string,
   ctx: Pick<PhaseContext, "require" | "has">
 ): Promise<Array<{ file: string; target: string }>> {
+  // Build the ctx forwarded into `generate()` for the default-locale pass.
   const generateContext: GenerateContext = {
     locale: defaultLocale,
     require: ctx.require,
     has: ctx.has
   };
+
+  // Fetch the parameter sets to expand (or a single empty-params instance).
   const parameterSets = definition._handlers.generate
     ? await definition._handlers.generate(generateContext)
     : [{}];
+
+  // Compute one redirect job per parameter set, dropping the no-redirect cases.
   const jobs: Array<{ file: string; target: string }> = [];
   for (const raw of parameterSets) {
-    const params = (raw ?? {}) as Record<string, string>;
-    // Compute the BARE (locale-less) path by stripping `lang`. `generate()` supplies `lang` (pages
-    // need it), so using `params` as-is makes the "bare" URL already carry the locale →
-    // target === bareUrl → NO redirect is ever emitted. Removing `lang` yields the real lang-less
-    // file/URL (`/`, `/about/`, `/{slug}/`) that must redirect to the default-locale URL.
-    const bareParams = { ...params };
-    delete bareParams.lang;
-    const file = entry.toFile(bareParams);
-    const target = entry.toUrl({ ...bareParams, lang: defaultLocale });
-    const bareUrl = entry.toUrl(bareParams);
-    if (target !== bareUrl) jobs.push({ file, target });
+    const job = redirectJobFor(entry, raw, defaultLocale);
+    if (job) jobs.push(job);
   }
   return jobs;
 }

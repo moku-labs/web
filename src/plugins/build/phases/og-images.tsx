@@ -129,6 +129,63 @@ export function ogHash(input: RichOgInput, template: string, fontsHash: string):
   return createHash("sha256").update(payload).digest("hex");
 }
 
+/** Weight applied to fonts with no explicit `weight`. */
+const DEFAULT_FONT_WEIGHT = 400;
+/** Style applied to fonts with no explicit `style`. */
+const DEFAULT_FONT_STYLE = "normal";
+/** Family name given to the single fallback font scanned from `fontDir`. */
+const FALLBACK_FONT_NAME = "OG";
+
+/**
+ * Load each explicitly-configured OG font, reading its `path` to a Buffer once and
+ * filling in the default weight/style when omitted.
+ *
+ * @param fonts - The explicit named fonts to load.
+ * @returns The loaded Satori font entries, in configuration order.
+ * @example
+ * ```ts
+ * await loadExplicitFonts([{ name: "Inter", path: "./Inter.ttf" }]);
+ * ```
+ */
+async function loadExplicitFonts(fonts: readonly OgFont[]): Promise<LoadedFont[]> {
+  return Promise.all(
+    fonts.map(async font => ({
+      name: font.name,
+      data: await readFile(font.path),
+      weight: font.weight ?? DEFAULT_FONT_WEIGHT,
+      style: font.style ?? DEFAULT_FONT_STYLE
+    }))
+  );
+}
+
+/**
+ * Scan `fontDir` for the first recognized font file and load it as a single
+ * 400/normal fallback; yields an empty list when the directory or a usable file
+ * is missing.
+ *
+ * @param fontDir - Directory scanned for a fallback font file.
+ * @returns The single fallback font, or an empty list when none is available.
+ * @example
+ * ```ts
+ * await scanFallbackFont("./fonts");
+ * ```
+ */
+async function scanFallbackFont(fontDir: string): Promise<LoadedFont[]> {
+  // No directory means no fallback font.
+  if (!existsSync(fontDir)) return [];
+
+  // Pick the first file with a recognized font extension.
+  const entries = await readdir(fontDir);
+  const file = entries.find(name => FONT_EXTENSIONS.some(extension => name.endsWith(extension)));
+  if (!file) return [];
+
+  // Load it as the single 400/normal fallback family.
+  const data = await readFile(path.join(fontDir, file));
+  return [
+    { name: FALLBACK_FONT_NAME, data, weight: DEFAULT_FONT_WEIGHT, style: DEFAULT_FONT_STYLE }
+  ];
+}
+
 /**
  * Load the configured OG fonts ONCE per build. When `ogImage.fonts` is set, each
  * `path` is read to a Buffer (outside any per-image loop) and mapped to a Satori
@@ -148,23 +205,12 @@ export async function loadFonts(og: {
   fontDir: string;
   fonts?: readonly OgFont[];
 }): Promise<LoadedFont[]> {
-  if (og.fonts && og.fonts.length > 0) {
-    return Promise.all(
-      og.fonts.map(async font => ({
-        name: font.name,
-        data: await readFile(font.path),
-        weight: font.weight ?? 400,
-        style: font.style ?? "normal"
-      }))
-    );
-  }
-  if (!existsSync(og.fontDir)) return [];
-  const entries = await readdir(og.fontDir);
-  const file = entries.find(name => FONT_EXTENSIONS.some(extension => name.endsWith(extension)));
-  if (!file) return [];
-  return [
-    { name: "OG", data: await readFile(path.join(og.fontDir, file)), weight: 400, style: "normal" }
-  ];
+  // Explicit fonts win: load each configured entry directly.
+  const hasExplicitFonts = og.fonts !== undefined && og.fonts.length > 0;
+  if (hasExplicitFonts) return loadExplicitFonts(og.fonts ?? []);
+
+  // Otherwise fall back to the first font file scanned from `fontDir`.
+  return scanFallbackFont(og.fontDir);
 }
 
 /**

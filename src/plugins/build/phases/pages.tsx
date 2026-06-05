@@ -177,6 +177,56 @@ function fillTemplate(template: string, parts: DocumentParts): string {
 }
 
 /**
+ * Resolve the compiled entry for a manifest definition, asserting the router
+ * invariant that `manifest()` and `entries()` stay in sync (see {@link makeEntryMap}).
+ *
+ * @param byPattern - The pattern→compiled-`TypedRoute` index.
+ * @param definition - The route definition from the manifest.
+ * @returns The compiled `TypedRoute` for the definition's pattern.
+ * @throws {Error} When no compiled entry exists for the definition's pattern.
+ * @example
+ * ```ts
+ * const entry = resolveEntry(byPattern, definition);
+ * ```
+ */
+function resolveEntry(byPattern: Map<string, TypedRoute>, definition: RouteDefinition): TypedRoute {
+  const entry = byPattern.get(definition.pattern);
+  if (!entry) {
+    throw new Error(
+      `[web] build.pages: no router entry for pattern "${definition.pattern}" — ` +
+        "router.manifest() and router.entries() are out of sync."
+    );
+  }
+  return entry;
+}
+
+/**
+ * Produce the param sets one route generates for a single locale: the route's
+ * `.generate(ctx)` result when present, else a single empty-params instance. The
+ * generate context is the spec `{ locale, require, has }`, so a `.generate()` handler
+ * pulls sibling APIs the spec way.
+ *
+ * @param definition - The route definition from the manifest.
+ * @param locale - The active locale to generate param sets for.
+ * @param ctx - Plugin context (provides `require`/`has` for the generate context).
+ * @returns The param sets for this route+locale (`[{}]` when there is no `.generate()`).
+ * @example
+ * ```ts
+ * const paramSets = await generateParamSets(def, "en", ctx);
+ * ```
+ */
+async function generateParameterSets(
+  definition: RouteDefinition,
+  locale: string,
+  ctx: Pick<PhaseContext, "require" | "has">
+): Promise<unknown[]> {
+  const generateContext: GenerateContext = { locale, require: ctx.require, has: ctx.has };
+  return definition._handlers.generate
+    ? await definition._handlers.generate(generateContext)
+    : [{}];
+}
+
+/**
  * Expand one route definition into its concrete page instances across all locales,
  * using `generate?.(ctx)` when present (else a single empty-params instance per
  * locale). The generate context is the spec `{ locale, require, has }`, so a
@@ -198,21 +248,17 @@ async function expandRoute(
   byPattern: Map<string, TypedRoute>,
   ctx: Pick<PhaseContext, "require" | "has">
 ): Promise<PageInstance[]> {
-  const entry = byPattern.get(definition.pattern);
-  if (!entry) {
-    throw new Error(
-      `[web] build.pages: no router entry for pattern "${definition.pattern}" — ` +
-        "router.manifest() and router.entries() are out of sync."
-    );
-  }
+  // Correlate the definition to its compiled entry (the URL/file-path source of truth).
+  const entry = resolveEntry(byPattern, definition);
   const { name } = entry;
+
+  // Fan out across locales, expanding each route+locale into its generated param sets.
   const instances: PageInstance[] = [];
   for (const locale of locales) {
-    const generateContext: GenerateContext = { locale, require: ctx.require, has: ctx.has };
-    const generated = definition._handlers.generate
-      ? await definition._handlers.generate(generateContext)
-      : [{}];
-    for (const raw of generated) {
+    const parameterSets = await generateParameterSets(definition, locale, ctx);
+
+    // Materialize one page instance per generated param set.
+    for (const raw of parameterSets) {
       instances.push({
         definition,
         entry,

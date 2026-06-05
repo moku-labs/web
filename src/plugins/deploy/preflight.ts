@@ -2,6 +2,7 @@
  * @file deploy plugin — preflight validators (cheap → expensive), run in order
  * and short-circuiting on the first failure.
  */
+import type { Dirent } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import type { Config } from "./types";
@@ -42,6 +43,40 @@ export function resolveFileLimit(env: NodeJS.ProcessEnv = process.env): number {
 type OutdirStats = { fileCount: number; oversizePath: string | null };
 
 /**
+ * Fold one directory entry into the running walk: queue subdirectories, and for
+ * files bump the count and flag the path when it breaches the per-file size cap.
+ *
+ * @param entry - The directory entry being visited.
+ * @param entryPath - The absolute path of `entry`.
+ * @param result - The running walk aggregate, mutated in place.
+ * @param stack - The pending-directory stack, pushed to for subdirectories.
+ * @returns Resolves once the entry has been folded into `result`/`stack`.
+ * @example
+ * await inspectEntry(entry, "/project/dist/app.js", result, stack);
+ */
+async function inspectEntry(
+  entry: Dirent,
+  entryPath: string,
+  result: OutdirStats,
+  stack: string[]
+): Promise<void> {
+  // Subdirectories are deferred onto the walk stack for a later iteration.
+  if (entry.isDirectory()) {
+    stack.push(entryPath);
+    return;
+  }
+
+  // Non-file entries (symlinks, sockets, …) are neither counted nor sized.
+  if (!entry.isFile()) return;
+
+  // Count the file, then flag it if it breaches the per-file size cap.
+  result.fileCount += 1;
+  const info = await stat(entryPath);
+  const isOversize = info.size > MAX_FILE_SIZE_BYTES;
+  if (isOversize) result.oversizePath = entryPath;
+}
+
+/**
  * Recursively walk `dir`, counting files and flagging the first file over the
  * per-file size cap. Short-circuits once an oversize file is found.
  *
@@ -51,27 +86,26 @@ type OutdirStats = { fileCount: number; oversizePath: string | null };
  * await inspectOutdir("/project/dist");
  */
 export async function inspectOutdir(dir: string): Promise<OutdirStats> {
+  // Seed the aggregate ("no oversize file" is modeled as null) and the walk stack.
   // eslint-disable-next-line unicorn/no-null -- "no oversize file" is modeled as null.
   const result: OutdirStats = { fileCount: 0, oversizePath: null };
   const stack: string[] = [dir];
-  while (stack.length > 0) {
+
+  // Drain the stack one directory at a time, stopping early once an oversize file appears.
+  while (stack.length > 0 && result.oversizePath === null) {
     const current = stack.pop();
     if (current === undefined) break;
+
+    // Fold each child entry into the aggregate (files counted/sized, dirs queued).
     const entries = await readdir(current, { withFileTypes: true });
     for (const entry of entries) {
-      const entryPath = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        stack.push(entryPath);
-      } else if (entry.isFile()) {
-        result.fileCount += 1;
-        const info = await stat(entryPath);
-        if (info.size > MAX_FILE_SIZE_BYTES) {
-          result.oversizePath = entryPath;
-          return result;
-        }
-      }
+      await inspectEntry(entry, path.join(current, entry.name), result, stack);
+
+      // Short-circuit the walk on the first oversize file found.
+      if (result.oversizePath !== null) break;
     }
   }
+
   return result;
 }
 
