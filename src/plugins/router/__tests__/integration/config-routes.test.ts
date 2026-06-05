@@ -20,7 +20,7 @@ const I18N = { locales: ["en"], defaultLocale: "en" };
 /** Build a site+i18n+router app that registers `routes` via `pluginConfigs.router.routes`. */
 function makeApp(routes: RouteMap, mode: "ssg" | "spa" | "hybrid" = "hybrid") {
   const coreConfig = createCoreConfig("web", {
-    config: { isDevelopment: false, mode },
+    config: { stage: "production", mode },
     plugins: [],
     pluginConfigs: {}
   });
@@ -34,7 +34,7 @@ function makeApp(routes: RouteMap, mode: "ssg" | "spa" | "hybrid" = "hybrid") {
 /** Build the same app with NO router config routes (table stays empty until `set()`). */
 function makeAppNoRoutes() {
   const coreConfig = createCoreConfig("web", {
-    config: { isDevelopment: false, mode: "hybrid" },
+    config: { stage: "production", mode: "hybrid" },
     plugins: [],
     pluginConfigs: {}
   });

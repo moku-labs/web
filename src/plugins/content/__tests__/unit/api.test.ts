@@ -21,7 +21,7 @@ function makeCtx(
   const emit = vi.fn() as EmitSpy;
   const ctx: ContentApiContext = {
     state,
-    global: { isDevelopment: (overrides.mode ?? "development") === "development" },
+    global: { stage: overrides.mode ?? "development" },
     emit,
     locales: () => overrides.locales ?? ["en", "uk"],
     defaultLocale: () => overrides.defaultLocale ?? "en",

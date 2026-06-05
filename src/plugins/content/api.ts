@@ -7,6 +7,7 @@
  * resolved from `config.providers`. This module imports ZERO node code — so
  * `contentPlugin` is browser-safe and is exported from `@moku-labs/web/browser`.
  */
+import type { Stage } from "../../config";
 import { i18nPlugin } from "../i18n";
 import type { Api as I18nApi } from "../i18n/types";
 import type {
@@ -40,8 +41,8 @@ export type ContentPluginContext = {
   state: State;
   /** Resolved plugin configuration (the content providers). */
   config: Config;
-  /** Global framework configuration (development flag). */
-  global: { isDevelopment: boolean };
+  /** Global framework configuration (deployment stage). */
+  global: { stage: Stage };
   /** Emit a registered content event. */
   emit: <K extends keyof ContentEvents>(event: K, payload: ContentEvents[K]) => void;
   /** Resolve a depended-upon plugin's API (here the i18n plugin). */
@@ -309,7 +310,7 @@ export function createContentApi(ctx: ContentApiContext): Api {
      */
     async loadAll(): Promise<Map<string, Article[]>> {
       const slugs = await ctx.provider.slugs();
-      const isProduction = !ctx.global.isDevelopment;
+      const isProduction = ctx.global.stage === "production";
 
       const result = new Map<string, Article[]>();
       let total = 0;
@@ -340,13 +341,13 @@ export function createContentApi(ctx: ContentApiContext): Api {
      * Resolve and render a single article for one locale with locale fallback. Throws a
      * `[web] content` not-found error when no file matches; in production a `draft` is
      * suppressed and throws the SAME not-found error (drafts indistinguishable from
-     * missing); in development drafts load normally.
+     * missing); in development and test drafts load normally.
      *
      * @param slug - Article directory name.
      * @param locale - Requested locale code.
      * @returns The resolved Article.
      * @throws {Error} `[web] content` not-found when no file matches, or when the
-     *   resolved article is a draft and `!global.isDevelopment` (production).
+     *   resolved article is a draft and `global.stage === "production"`.
      * @example
      * ```ts
      * const article = await api.load("intro", "uk");
@@ -357,7 +358,7 @@ export function createContentApi(ctx: ContentApiContext): Api {
       if (article === null) {
         throw articleNotFound(slug, locale);
       }
-      const isProduction = !ctx.global.isDevelopment;
+      const isProduction = ctx.global.stage === "production";
       if (isProduction && article.computed.status === "draft") {
         throw articleNotFound(slug, locale);
       }

@@ -7,12 +7,18 @@ import { envPlugin } from "./plugins/env";
 import { logPlugin } from "./plugins/log";
 
 /**
+ * Deployment stage. Drives content draft visibility — drafts are suppressed
+ * only in `"production"`; `"development"` and `"test"` both surface them.
+ */
+export type Stage = "production" | "development" | "test";
+
+/**
  * Global framework configuration. Minimal by design — per-plugin config is
  * resolved via `pluginConfigs`, not merged here.
  */
 export type Config = {
-  /** Development mode. Drives log sink defaults and content draft visibility. */
-  isDevelopment: boolean;
+  /** Deployment stage. Drives content draft visibility (drafts hidden only in `"production"`). */
+  stage: Stage;
   /**
    * Render mode — the single SSG/DATA/SPA switch, read by the router (`ctx.global`)
    * and consumed by `build`/`spa` via `router.mode()`.
@@ -44,7 +50,7 @@ export type Events = {};
 export const coreConfig = createCoreConfig<Config, Events, [typeof logPlugin, typeof envPlugin]>(
   "web",
   {
-    config: { isDevelopment: false, mode: "hybrid" },
+    config: { stage: "production", mode: "hybrid" },
     plugins: [logPlugin, envPlugin],
     pluginConfigs: {
       // Core-plugin defaults (levels 1–2 of the 4-level core cascade, spec/03 §5).
