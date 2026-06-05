@@ -7,7 +7,7 @@
  * only (`CompileInput`) — never the plugin ctx.
  */
 
-import { bySpecificity, dynamicSegmentCount } from "../iso-match";
+import { bySpecificity, dynamicSegmentCount, parsePlaceholder } from "../iso-match";
 import type {
   CompiledRoute,
   CompileInput,
@@ -60,32 +60,6 @@ export function validateRoutes(routes: RouteMap): void {
       );
     }
   }
-}
-
-/** A parsed `{name}` / `{name:?}` placeholder within one path segment. */
-interface ParsedPlaceholder {
-  /** The placeholder param name (e.g. `slug`). */
-  readonly name: string;
-  /** Whether the placeholder is optional (`{name:?}`). */
-  readonly optional: boolean;
-}
-
-/**
- * Parse a single path segment into its placeholder, or `false` for a static
- * segment. Uses a plain loop over the brace delimiters (no backtracking regex).
- *
- * @param segment - One `/`-delimited segment, e.g. `{slug}` or `about`.
- * @returns The parsed placeholder, or `false` when the segment is static.
- * @example
- * ```ts
- * parsePlaceholder("{slug:?}"); // { name: "slug", optional: true }
- * ```
- */
-function parsePlaceholder(segment: string): ParsedPlaceholder | false {
-  if (!segment.startsWith("{") || !segment.endsWith("}")) return false;
-  const inner = segment.slice(1, -1);
-  if (inner.endsWith(":?")) return { name: inner.slice(0, -2), optional: true };
-  return { name: inner, optional: false };
 }
 
 /**
