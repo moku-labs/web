@@ -32,7 +32,7 @@ import { validateDataConfig } from "./validate";
  * const app = createApp({
  *   plugins: [dataPlugin, contentPlugin, buildPlugin],
  *   config: { mode: "hybrid" },
- *   pluginConfigs: { content: { contentDir: "./content" }, router: { routes } }
+ *   pluginConfigs: { content: { providers: [fileSystemContent({ contentDir: "./content" })] }, router: { routes } }
  * });
  * await app.build.run();   // writes HTML + per-page data sidecars (routes compiled at init)
  *

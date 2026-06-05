@@ -7,6 +7,7 @@ import { h } from "preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildPlugin } from "../../../build";
 import { contentPlugin } from "../../../content";
+import { fileSystemContent } from "../../../content/providers";
 import type { Article, ArticleCard } from "../../../content/types";
 import { headPlugin } from "../../../head";
 import { i18nPlugin } from "../../../i18n";
@@ -41,7 +42,7 @@ async function loadArticles(): Promise<{ bySlug: Map<string, Article>; cards: Ar
     plugins: [i18nPlugin, contentPlugin],
     pluginConfigs: {
       i18n: { locales: ["en"], defaultLocale: "en" },
-      content: { contentDir: FIXTURE_DIR }
+      content: { providers: [fileSystemContent({ contentDir: FIXTURE_DIR })] }
     }
   });
   const bySlug = new Map<string, Article>();
@@ -101,7 +102,7 @@ function makeApp(outDir: string, bySlug: Map<string, Article>, cards: ArticleCar
     pluginConfigs: {
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
-      content: { contentDir: FIXTURE_DIR },
+      content: { providers: [fileSystemContent({ contentDir: FIXTURE_DIR })] },
       build: { outDir, feeds: false, sitemap: false, images: false, ogImage: false, minify: false }
     }
   });

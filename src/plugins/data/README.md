@@ -40,7 +40,7 @@ import * as routes from "./routes";
 const app = createApp({
   plugins: [dataPlugin, contentPlugin, buildPlugin],
   config: { mode: "hybrid" },          // global render mode
-  pluginConfigs: { content: { contentDir: "./content" }, router: { routes } }
+  pluginConfigs: { content: { providers: [fileSystemContent({ contentDir: "./content" })] }, router: { routes } }
 });
 await app.build.run();                 // writes HTML + per-page data sidecars (routes compiled at init)
 

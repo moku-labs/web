@@ -20,21 +20,33 @@
 ## Configuration
 
 ```ts
+import { contentPlugin, fileSystemContent } from "@moku-labs/web";
+
 createApp({
+  plugins: [contentPlugin],
   pluginConfigs: {
     content: {
-      contentDir: "./src/content",   // article root: content/<slug>/<locale>.md
-      trustedContent: false,          // SECURITY GATE — see below
-      shikiTheme: "github-dark",
-      defaultAuthor: "Alex",          // optional; applied when frontmatter omits author
-      extraRemarkPlugins: [],         // additive — concatenated AFTER framework defaults
-      extraRehypePlugins: []          // additive — concatenated AFTER custom transforms
+      // The content plugin SHELL is browser-safe (orchestration only). Source I/O +
+      // the Markdown pipeline live in a provider you compose — mirrors `env` providers.
+      providers: [
+        fileSystemContent({
+          contentDir: "./src/content",  // article root: content/<slug>/<locale>.md
+          trustedContent: false,         // SECURITY GATE — see below
+          shikiTheme: "github-dark",
+          defaultAuthor: "Alex",         // optional; applied when frontmatter omits author
+          extraRemarkPlugins: [],        // additive — concatenated AFTER framework defaults
+          extraRehypePlugins: []         // additive — concatenated AFTER custom transforms
+        })
+      ]
     }
   }
 });
 ```
 
-`pluginConfigs.content` is optional — every field has a default (except `defaultAuthor`, which resolves to `undefined`).
+Compose at least one provider (validated at `onInit`); every `fileSystemContent` option has a
+default except `contentDir` (required) and `defaultAuthor` (resolves to `undefined`). On the browser,
+`contentPlugin` (the shell) is importable from `@moku-labs/web/browser` for `ctx.require(contentPlugin)`
+in build-only loaders, while `fileSystemContent` (node) is exported only from the package root.
 
 ## Key invariants
 

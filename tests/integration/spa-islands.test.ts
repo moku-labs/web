@@ -8,7 +8,7 @@
  * and re-mounts islands, and that `stop()` tears the runtime down.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { contentPlugin, createApp, defineRoutes, route } from "../../src";
+import { contentPlugin, createApp, defineRoutes, fileSystemContent, route } from "../../src";
 import { createComponent } from "../../src/plugins/spa";
 import { FIXTURE_CONTENT_DIR, SITE } from "./helpers/harness";
 
@@ -43,7 +43,7 @@ function makeSpaApp() {
     pluginConfigs: {
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
-      content: { contentDir: FIXTURE_CONTENT_DIR },
+      content: { providers: [fileSystemContent({ contentDir: FIXTURE_CONTENT_DIR })] },
       head: {},
       spa: { progressBar: false, components: [counter] }
     }

@@ -18,6 +18,7 @@ import {
   createApp,
   defineRoutes,
   deployPlugin,
+  fileSystemContent,
   route
 } from "../../../src";
 import type { Article } from "../../../src/plugins/content/types";
@@ -94,7 +95,7 @@ export async function loadFixtureArticles(
     pluginConfigs: {
       site: SITE,
       i18n: { locales: [...locales], defaultLocale: locales[0] ?? "en" },
-      content: { contentDir: FIXTURE_CONTENT_DIR }
+      content: { providers: [fileSystemContent({ contentDir: FIXTURE_CONTENT_DIR })] }
     }
   });
   const byLocale = await app.content.loadAll();
@@ -189,7 +190,7 @@ export function buildBlogApp(options: {
     pluginConfigs: {
       site: SITE,
       i18n: { ...I18N, locales: [...locales], defaultLocale: locales[0] ?? "en" },
-      content: { contentDir: FIXTURE_CONTENT_DIR },
+      content: { providers: [fileSystemContent({ contentDir: FIXTURE_CONTENT_DIR })] },
       head: { titleTemplate: "%s — Moku Blog", twitterHandle: "@moku_labs" },
       build: {
         outDir: options.outDir,

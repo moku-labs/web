@@ -30,6 +30,7 @@ import {
   defineRoutes,
   route,
   contentPlugin,
+  fileSystemContent,
   buildPlugin,
   deployPlugin,
   dotenv,
@@ -56,7 +57,7 @@ const app = createApp({
     env: { providers: [dotenv(), processEnv()] },
     site: { name: "My Blog", url: "https://blog.dev", author: "Me", description: "A personal blog." },
     i18n: { locales: ["en", "uk"], defaultLocale: "en" },
-    content: { contentDir: "./content" },
+    content: { providers: [fileSystemContent({ contentDir: "./content" })] },
     router: { routes },                                // declarative route map (an `import * as` namespace works)
     head: { titleTemplate: "%s — My Blog" },
     build: { outDir: "dist", feeds: true, sitemap: true }

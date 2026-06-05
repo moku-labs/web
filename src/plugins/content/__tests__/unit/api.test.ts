@@ -1,42 +1,31 @@
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { createContentApi } from "../../api";
-import { createContentState } from "../../state";
-import type { Article, Config, ContentApiContext, ContentEvents } from "../../types";
+import { fileSystemContent } from "../../providers";
+import type { Article, ContentApiContext, ContentEvents, State } from "../../types";
 
 const FIXTURE_DIR = fileURLToPath(new URL("../fixtures/content", import.meta.url));
-
-const baseConfig: Config = {
-  contentDir: FIXTURE_DIR,
-  trustedContent: false,
-  extraRemarkPlugins: [],
-  extraRehypePlugins: [],
-  shikiTheme: "github-dark"
-};
 
 type EmitSpy = ReturnType<typeof vi.fn> &
   (<K extends keyof ContentEvents>(event: K, payload: ContentEvents[K]) => void);
 
-/** Build a kernel-free api context over the fixture content dir. */
+/** Build a kernel-free api context over the fixture content dir (via the node provider). */
 function makeCtx(
   overrides: Partial<{
-    config: Config;
     mode: "production" | "development";
     locales: readonly string[];
     defaultLocale: string;
   }> = {}
 ) {
-  const config = overrides.config ?? baseConfig;
-  const state = createContentState({ global: {}, config });
+  const state: State = { articles: new Map() };
   const emit = vi.fn() as EmitSpy;
   const ctx: ContentApiContext = {
     state,
-    config,
     global: { isDevelopment: (overrides.mode ?? "development") === "development" },
     emit,
     locales: () => overrides.locales ?? ["en", "uk"],
     defaultLocale: () => overrides.defaultLocale ?? "en",
-    articleToUrl: (locale, slug) => `/${locale}/${slug}/`
+    provider: fileSystemContent({ contentDir: FIXTURE_DIR, shikiTheme: "github-dark" })
   };
   return { ctx, state, emit };
 }
@@ -104,40 +93,31 @@ describe("content/api", () => {
     for (const a of en) expect(a.computed.contentId).toBeTruthy();
   });
 
-  it("invalidate adds paths to dirtyPaths and removes slug cache entry", async () => {
+  it("invalidate drops the slug cache entry and emits content:invalidated", async () => {
     const { ctx, state } = makeCtx({ locales: ["en"], defaultLocale: "en" });
     const api = createContentApi(ctx);
     await api.loadAll();
     expect(state.articles.get("en")?.has("hello-world")).toBe(true);
     api.invalidate([`${FIXTURE_DIR}/hello-world/en.md`]);
-    expect(state.dirtyPaths.has(`${FIXTURE_DIR}/hello-world/en.md`)).toBe(true);
+    // The shell drops the derived slug cache entry (provider re-reads on next scan).
     expect(state.articles.get("en")?.has("hello-world")).toBe(false);
   });
 
-  it("invalidate ignores empty/whitespace paths and emits content:invalidated", () => {
-    const { ctx, state, emit } = makeCtx();
+  it("invalidate ignores empty/whitespace paths and emits only the accepted ones", () => {
+    const { ctx, emit } = makeCtx();
     createContentApi(ctx).invalidate(["", "   ", "src/content/x/en.md"]);
-    expect(state.dirtyPaths.has("")).toBe(false);
-    expect(state.dirtyPaths.has("   ")).toBe(false);
-    expect(state.dirtyPaths.has("src/content/x/en.md")).toBe(true);
     expect(emit).toHaveBeenCalledWith("content:invalidated", {
       paths: ["src/content/x/en.md"]
     });
   });
 
-  it("processor is a singleton per app (reused across renders; new app gets its own)", async () => {
-    const { ctx, state } = makeCtx();
+  it("renderMarkdown renders through the provider pipeline (reused across calls)", async () => {
+    const { ctx } = makeCtx();
     const api = createContentApi(ctx);
-    await api.renderMarkdown("# one");
-    const first = state.processor;
-    expect(first).not.toBeNull();
-    await api.renderMarkdown("# two");
-    expect(state.processor).toBe(first);
-
-    // A second app/context gets its OWN processor (no module-level sharing).
-    const { ctx: ctx2, state: state2 } = makeCtx();
-    await createContentApi(ctx2).renderMarkdown("# three");
-    expect(state2.processor).not.toBe(first);
+    const first = await api.renderMarkdown("# one");
+    const second = await api.renderMarkdown("# two");
+    expect(first).toContain("one");
+    expect(second).toContain("two");
   });
 
   it("load uses default-locale file with isFallback=true when locale missing", async () => {

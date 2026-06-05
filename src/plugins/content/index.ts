@@ -15,20 +15,20 @@ import { createContentState } from "./state";
 import { validateContentConfig } from "./validate";
 
 /**
- * Content plugin — Markdown pipeline: discovers files, parses frontmatter, renders
- * to sanitized HTML (rehype-sanitize unless `trustedContent`), and exposes a
- * locale-keyed Article model. Depends on i18n; emits `content:ready` and
- * `content:invalidated`.
+ * Content plugin (shell) — provider-driven locale-keyed Article model. Orchestration
+ * (locale fallback, draft filtering, sort, caching, events) lives here; source I/O +
+ * the Markdown pipeline live in a {@link ContentProvider} you compose (like `env`
+ * providers). The shell imports zero node code, so `contentPlugin` is browser-safe.
+ * Depends on i18n; emits `content:ready` and `content:invalidated`.
  *
- * @example Point at a content directory and pick a Shiki theme
+ * @example Compose the node filesystem provider with a content dir + Shiki theme
  * ```ts
+ * import { contentPlugin, fileSystemContent } from "@moku-labs/web";
  * const app = createApp({
+ *   plugins: [contentPlugin],
  *   pluginConfigs: {
  *     content: {
- *       contentDir: "./content",
- *       shikiTheme: "github-dark",
- *       defaultAuthor: "Ada Lovelace"
- *       // trustedContent: true // ONLY for fully author-controlled Markdown — disables sanitize
+ *       providers: [fileSystemContent({ contentDir: "./content", shikiTheme: "github-dark", defaultAuthor: "Ada" })]
  *     }
  *   }
  * });

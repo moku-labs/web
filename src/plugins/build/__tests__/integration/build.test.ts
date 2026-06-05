@@ -6,6 +6,7 @@ import { createCoreConfig } from "@moku-labs/core";
 import { h } from "preact";
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it } from "vitest";
 import { contentPlugin } from "../../../content";
+import { fileSystemContent } from "../../../content/providers";
 import type { Article } from "../../../content/types";
 import { headPlugin } from "../../../head";
 import { i18nPlugin } from "../../../i18n";
@@ -35,7 +36,7 @@ async function loadFixtureArticles(): Promise<Map<string, Article>> {
     plugins: [i18nPlugin, contentPlugin],
     pluginConfigs: {
       i18n: { locales: ["en"], defaultLocale: "en" },
-      content: { contentDir: FIXTURE_DIR }
+      content: { providers: [fileSystemContent({ contentDir: FIXTURE_DIR })] }
     }
   });
   const byLocale = await app.content.loadAll();
@@ -82,7 +83,7 @@ function buildApp(outDir: string, bySlug: Map<string, Article>, extraPlugins: un
     pluginConfigs: {
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
-      content: { contentDir: FIXTURE_DIR },
+      content: { providers: [fileSystemContent({ contentDir: FIXTURE_DIR })] },
       build: { outDir, feeds: true, sitemap: true, images: false, ogImage: false, minify: false }
     }
   });
@@ -236,7 +237,7 @@ describe("build integration", () => {
       pluginConfigs: {
         site: SITE,
         i18n: { locales: ["en", "uk"], defaultLocale: "en" },
-        content: { contentDir: FIXTURE_DIR },
+        content: { providers: [fileSystemContent({ contentDir: FIXTURE_DIR })] },
         build: {
           outDir: out,
           feeds: false,

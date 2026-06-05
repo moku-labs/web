@@ -16,7 +16,7 @@ Requires Node 24+ (the router uses the global `URLPattern`). Package manager: `b
 ## Quickstart
 
 ```ts
-import { createApp, route, contentPlugin, buildPlugin, dataPlugin, processEnv } from "@moku-labs/web";
+import { createApp, route, contentPlugin, fileSystemContent, buildPlugin, dataPlugin, processEnv } from "@moku-labs/web";
 
 // routes.ts — loaders pull sibling APIs via ctx.require(pluginInstance); links via ctx.url
 export const home = route("/{lang:?}/").load(c => listCards(c.require(contentPlugin), c.locale)).render(c => <Home cards={c.data} url={c.url} />);
@@ -30,7 +30,7 @@ const app = createApp({
   pluginConfigs: {
     site: { name: "Blog", url: "https://blog.dev", author: "A", description: "…" },
     i18n: { locales: ["en"], defaultLocale: "en" },
-    content: { contentDir: "./content" },
+    content: { providers: [fileSystemContent({ contentDir: "./content" })] },
     router: { routes },                                        // declarative route map (a namespace works)
     env: { providers: [processEnv()] }
   }
@@ -46,7 +46,7 @@ await app.build.run();   // writes dist/<path>/index.html + (mode!==ssg) dist/_d
 - [router](src/plugins/router/README.md): typed route DSL (`route`/`defineRoutes`) — optional `.load` (takes one `ctx`), `.render`/`.head`/`.generate`; pure `createUrls(routes)` link builder; routes registered via `pluginConfigs.router.routes` (or `app.router.set`); `match`/`toUrl`/`entries`/`manifest`/`mode`. Default.
 - [head](src/plugins/head/README.md): SEO `<head>` composition (title template, canonical, OG/Twitter, JSON-LD, hreflang). Default.
 - [spa](src/plugins/spa/README.md): client runtime — island hydration + intercepted navigation (HTML-over-fetch, or DATA nav when `data` is composed). Inert on Node. Default.
-- [content](src/plugins/content/README.md): markdown → sanitized HTML, frontmatter, reading time, locale model. Node-only.
+- [content](src/plugins/content/README.md): provider-driven Markdown model (markdown → sanitized HTML, frontmatter, reading time, locale fallback). The plugin SHELL is browser-safe (isomorphic, like `env`); compose the node `fileSystemContent` provider for a build. `ctx.require(contentPlugin)` in loaders.
 - [build](src/plugins/build/README.md): SSG orchestrator — pages, feeds, sitemap, OG images; persists per-page data when `mode!=="ssg"`. Node-only.
 - [deploy](src/plugins/deploy/README.md): Cloudflare Pages scaffolding + deploy. Node-only.
 - [cli](src/plugins/cli/README.md): developer CLI — `build`/`serve`/`preview`/`deploy` with a boxed Panel renderer + live build progress (via hooks on `build:phase`/`build:complete`/`deploy:complete`); driven from thin per-command scripts. Deploy confirm is TTY-only (CI auto-proceeds). Node-only. `depends: [build, deploy]`.
@@ -55,7 +55,7 @@ await app.build.run();   // writes dist/<path>/index.html + (mode!==ssg) dist/_d
 
 ## Consumer helpers
 
-- `createApp`, `createPlugin`, `defineRoutes`, `route`, `createUrls` (pure name→URL builder), `createComponent` (spa islands).
+- `createApp`, `createPlugin`, `defineRoutes`, `route`, `createUrls` (pure name→URL builder), `createComponent` (spa islands), `fileSystemContent` (node content provider).
 - env providers: `dotenv`, `processEnv`, `cloudflareBindings` (Node), `browserEnv` (browser — pre-wired as the default when importing `@moku-labs/web/browser`).
 - SEO primitives for `.head()`: `meta`, `og`, `twitter`, `jsonLd`, `canonical`, `hreflang`, `feedLink`, `buildArticleHead`.
 - Type namespaces: `Site`, `I18n`, `Router`, `Head`, `Spa`, `Content`, `Build`, `Deploy`, `Data`, `Log`, `Env`.

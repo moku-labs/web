@@ -28,6 +28,9 @@ export * from "./plugins";
 export { cloudflareBindings, dotenv, processEnv } from "./plugins/env/providers";
 export { browserEnv } from "./plugins/env/providers.browser";
 
+// ─── content providers (compose per source; fileSystemContent is the Node markdown source) ──
+export { fileSystemContent } from "./plugins/content/providers";
+
 // ─── Consumer helpers: route DSL, SPA islands, SEO <head> primitives ──────────
 export { createUrls, defineRoutes, route } from "./plugins/router";
 export { createComponent } from "./plugins/spa";

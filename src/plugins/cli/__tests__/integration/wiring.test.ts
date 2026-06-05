@@ -6,6 +6,7 @@ import { h } from "preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildPlugin } from "../../../build";
 import { contentPlugin } from "../../../content";
+import { fileSystemContent } from "../../../content/providers";
 import { deployPlugin } from "../../../deploy";
 import { headPlugin } from "../../../head";
 import { i18nPlugin } from "../../../i18n";
@@ -52,7 +53,7 @@ function buildApp(root: string, overrides: { notFound?: boolean; cliPort?: numbe
     pluginConfigs: {
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
-      content: { contentDir },
+      content: { providers: [fileSystemContent({ contentDir })] },
       build: {
         outDir,
         feeds: false,

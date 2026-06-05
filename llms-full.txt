@@ -154,7 +154,7 @@ SEO primitives for `.head()` handlers (all exported):
 - `load(slug, locale) => Promise<Article>` — single article (NOT draft-filtered; use loadAll for safe sets).
 - `renderMarkdown(md) => Promise<string>`, `invalidate(paths)`, `articleToCard(article) => ArticleCard`.
 - `Article = { frontmatter, computed: { slug, readingTime, contentId, status, wordCount }, html, locale, isFallback, url }`. `ArticleCard` is the slim list projection (title/date/description/tags/readingTime/url — no body).
-- Config: `content: { contentDir, defaultAuthor?, trustedContent?, shikiTheme? }`. Articles live in `contentDir/<slug>/<locale>.md` with YAML frontmatter (`title`, `date`, `description`, `tags`, `language`, optional `author`, `draft`).
+- Config: `content: { providers: [fileSystemContent({ contentDir, defaultAuthor?, trustedContent?, shikiTheme? })] }` — the plugin SHELL is browser-safe (orchestration: locale fallback, drafts, sort, cache, events); source I/O + the Markdown pipeline live in the composed provider (mirrors `env` providers). `contentPlugin` is exported from `/browser` (for `ctx.require(contentPlugin)` in build-only loaders); `fileSystemContent` (node) from the package root only. Articles live in `contentDir/<slug>/<locale>.md` with YAML frontmatter (`title`, `date`, `description`, `tags`, `language`, optional `author`, `draft`).
 
 ## 7. build — SSG orchestrator (node-only)
 

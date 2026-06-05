@@ -17,6 +17,7 @@ import {
   createPlugin,
   defineRoutes,
   feedLink,
+  fileSystemContent,
   hreflang,
   jsonLd,
   meta,
@@ -37,7 +38,7 @@ function bootApp(routes: ReturnType<typeof defineRoutes>, mode: "ssg" | "spa" | 
     pluginConfigs: {
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
-      content: { contentDir: FIXTURE_CONTENT_DIR }
+      content: { providers: [fileSystemContent({ contentDir: FIXTURE_CONTENT_DIR })] }
     }
   });
   app.router.set(routes);
@@ -72,7 +73,7 @@ describe("integration: framework boots (whole app)", () => {
       config: { mode: "ssg" },
       pluginConfigs: {
         site: SITE,
-        content: { contentDir: FIXTURE_CONTENT_DIR }
+        content: { providers: [fileSystemContent({ contentDir: FIXTURE_CONTENT_DIR })] }
       }
     });
     expect(() => app.router.set(defineRoutes({}))).toThrow(/\[web\]/);

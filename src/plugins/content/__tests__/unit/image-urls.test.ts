@@ -3,26 +3,18 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createContentApi } from "../../api";
-import { createContentState } from "../../state";
-import type { Config, ContentApiContext } from "../../types";
+import { fileSystemContent } from "../../providers";
+import type { ContentApiContext } from "../../types";
 
-/** Build a content API over `contentDir`. */
+/** Build a content API over `contentDir` (via the node filesystem provider). */
 function makeApi(contentDir: string) {
-  const config: Config = {
-    contentDir,
-    trustedContent: true,
-    extraRemarkPlugins: [],
-    extraRehypePlugins: [],
-    shikiTheme: "github-dark"
-  };
   const ctx: ContentApiContext = {
-    state: createContentState({ global: {}, config }),
-    config,
+    state: { articles: new Map() },
     global: { isDevelopment: true },
     emit: vi.fn(),
     locales: () => ["en", "ru"],
     defaultLocale: () => "en",
-    articleToUrl: (locale, slug) => `/${locale}/${slug}/`
+    provider: fileSystemContent({ contentDir, trustedContent: true })
   };
   return createContentApi(ctx);
 }

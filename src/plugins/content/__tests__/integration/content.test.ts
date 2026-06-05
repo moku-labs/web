@@ -5,6 +5,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import { i18nPlugin } from "../../../i18n";
 import { logPlugin } from "../../../log";
 import { contentPlugin } from "../../index";
+import { fileSystemContent } from "../../providers";
 import type { Api, Article, ArticleCard, Frontmatter } from "../../types";
 
 const FIXTURE_DIR = fileURLToPath(new URL("../fixtures/content", import.meta.url));
@@ -33,7 +34,7 @@ function buildApp(
     plugins: [i18nPlugin, contentPlugin],
     pluginConfigs: {
       i18n,
-      content: { contentDir: FIXTURE_DIR }
+      content: { providers: [fileSystemContent({ contentDir: FIXTURE_DIR })] }
     }
   });
 }
@@ -66,7 +67,7 @@ describe("content plugin integration", () => {
       plugins: [i18nPlugin, contentPlugin, probePlugin],
       pluginConfigs: {
         i18n: { locales: ["en"], defaultLocale: "en" },
-        content: { contentDir: FIXTURE_DIR }
+        content: { providers: [fileSystemContent({ contentDir: FIXTURE_DIR })] }
       }
     });
     await app.content.loadAll();

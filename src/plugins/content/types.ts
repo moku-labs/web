@@ -1,60 +1,14 @@
 /**
  * @file content plugin — type definitions skeleton.
+ *
+ * Provider-driven, like `env`: the SHELL (browser-safe) owns orchestration — locale
+ * fallback, draft filtering, date sort, the article cache, and events — while a
+ * {@link ContentProvider} owns source I/O + the Markdown pipeline. Compose the node
+ * {@link FileSystemContentOptions}-configured `fileSystemContent` provider for a build;
+ * the shell itself imports zero node code, so `contentPlugin` is browser-safe.
  */
 import type { BundledTheme, ThemeRegistrationAny } from "shiki";
 import type { Pluggable, Processor } from "unified";
-
-/**
- * Configuration for the content plugin.
- *
- * @example
- * ```ts
- * { contentDir: "./src/content", trustedContent: false, shikiTheme: "github-dark" }
- * ```
- */
-export type Config = {
-  /** Absolute or project-relative path to the content directory. Validated in onInit. */
-  contentDir: string;
-  /**
-   * SECURITY GATE. When false (the default), rehype-sanitize runs as the final
-   * pipeline step. Set true ONLY for fully author-controlled Markdown — true
-   * disables sanitize and trusts all raw HTML.
-   */
-  trustedContent: boolean;
-  /** Additional remark plugins, concatenated AFTER framework defaults. Defaults to []. */
-  extraRemarkPlugins?: readonly Pluggable[];
-  /** Additional rehype plugins, concatenated after custom transforms, before Shiki + sanitize. Defaults to []. */
-  extraRehypePlugins?: readonly Pluggable[];
-  /**
-   * Shiki theme for syntax highlighting: a bundled theme NAME — typed as Shiki's
-   * `BundledTheme` union so editors autocomplete the ~60 built-ins (default
-   * "github-dark") — or a custom `ThemeRegistration` object. Passed straight through
-   * to `@shikijs/rehype`'s `theme`. (Like Shiki's own theme type, an arbitrary string
-   * still compiles via the object arm, so this is autocomplete, not typo-rejection.)
-   */
-  shikiTheme?: BundledTheme | ThemeRegistrationAny;
-  /** Author applied to articles whose frontmatter omits author. Defaults to undefined. */
-  defaultAuthor?: string;
-};
-
-/**
- * Internal mutable state for the content plugin.
- *
- * @example
- * ```ts
- * { processor: null, articles: new Map(), slugs: null, dirtyPaths: new Set() }
- * ```
- */
-export type State = {
-  /** Lazily-created unified processor singleton. null until first render()/loadAll(). */
-  processor: Processor | null;
-  /** Article cache keyed locale -> (slug -> Article). Starts empty. */
-  articles: Map<string, Map<string, Article>>;
-  /** Discovered, sorted slug list cached after first disk scan. null until first discovery. */
-  slugs: string[] | null;
-  /** Paths marked stale by invalidate(); next loadAll() re-reads only these. Starts empty. */
-  dirtyPaths: Set<string>;
-};
 
 /**
  * YAML frontmatter parsed from each article file.
@@ -77,7 +31,7 @@ export type Frontmatter = {
   language: string;
   /** Draft flag. Excluded from output in production mode. Defaults to false. */
   draft?: boolean;
-  /** Author name. Falls back to config.defaultAuthor when omitted. */
+  /** Author name. Falls back to the provider's defaultAuthor when omitted. */
   author?: string;
 };
 
@@ -153,6 +107,137 @@ export type ArticleCard = {
 };
 
 /**
+ * A pluggable content SOURCE. The shell calls these to read articles; whether content
+ * is read from the filesystem (Node) or some other source is chosen by which provider
+ * you compose — exactly like `env` providers (`dotenv`/`processEnv` vs `browserEnv`).
+ * The shell adds locale fallback, draft filtering, sorting, caching, and events on top.
+ *
+ * @example
+ * ```ts
+ * const provider = fileSystemContent({ contentDir: "./content" });
+ * ```
+ */
+export interface ContentProvider {
+  /** Human-readable provider name, used in diagnostics. */
+  readonly name: string;
+  /** Source directory surfaced via `api.contentDir()` (filesystem providers; "" otherwise). */
+  readonly contentDir: string;
+  /**
+   * Discover the article slugs this provider can supply.
+   *
+   * @returns The provider's slug list.
+   */
+  slugs(): Promise<readonly string[]>;
+  /**
+   * Read + render ONE article for a file-locale; `null` if this provider has no such file.
+   *
+   * @param slug - Article directory name.
+   * @param fileLocale - Locale whose source file is read.
+   * @param outLocale - Locale the resulting Article represents (the requested locale).
+   * @param isFallback - Whether this resolution used the default-locale fallback.
+   * @returns The constructed Article, or `null` when absent.
+   */
+  readArticle(
+    slug: string,
+    fileLocale: string,
+    outLocale: string,
+    isFallback: boolean
+  ): Promise<Article | null>;
+  /**
+   * Render a standalone Markdown string to HTML through the provider's pipeline.
+   *
+   * @param markdown - Raw Markdown source.
+   * @returns The rendered HTML.
+   */
+  render(markdown: string): Promise<string>;
+  /**
+   * Optional dev hook: drop cached discovery so stale paths are re-read next time.
+   *
+   * @param paths - Stale file paths.
+   */
+  invalidate?(paths: readonly string[]): void;
+}
+
+/**
+ * Options for the node filesystem provider {@link ContentProvider} `fileSystemContent`.
+ * These are the markdown-pipeline + source concerns that used to live on the content
+ * plugin config; they now belong to the provider you compose.
+ *
+ * @example
+ * ```ts
+ * fileSystemContent({ contentDir: "./content", shikiTheme: "github-dark", defaultAuthor: "Ada" });
+ * ```
+ */
+export type FileSystemContentOptions = {
+  /** Absolute or project-relative path to the content directory. */
+  contentDir: string;
+  /**
+   * SECURITY GATE. When false (the default), rehype-sanitize runs as the final
+   * pipeline step. Set true ONLY for fully author-controlled Markdown.
+   */
+  trustedContent?: boolean;
+  /** Additional remark plugins, concatenated AFTER framework defaults. Defaults to []. */
+  extraRemarkPlugins?: readonly Pluggable[];
+  /** Additional rehype plugins, concatenated after custom transforms, before Shiki + sanitize. Defaults to []. */
+  extraRehypePlugins?: readonly Pluggable[];
+  /**
+   * Shiki theme for syntax highlighting: a bundled theme NAME (default "github-dark")
+   * or a custom `ThemeRegistration` object. Passed straight through to `@shikijs/rehype`.
+   */
+  shikiTheme?: BundledTheme | ThemeRegistrationAny;
+  /** Author applied to articles whose frontmatter omits author. Defaults to undefined. */
+  defaultAuthor?: string;
+};
+
+/**
+ * Internal mutable state of the filesystem provider: the lazy unified processor and
+ * the discovery caches. Owned by the provider closure, never by the plugin shell.
+ *
+ * @example
+ * ```ts
+ * { processor: null, slugs: null, dirtyPaths: new Set() }
+ * ```
+ */
+export type ContentProviderState = {
+  /** Lazily-created unified processor singleton. null until first render()/readArticle(). */
+  processor: Processor | null;
+  /** Discovered, sorted slug list cached after first disk scan. null until first discovery. */
+  slugs: string[] | null;
+  /** Paths marked stale by invalidate(); next discovery re-reads only these. Starts empty. */
+  dirtyPaths: Set<string>;
+};
+
+/**
+ * Configuration for the content plugin (shell).
+ *
+ * @example
+ * ```ts
+ * { providers: [fileSystemContent({ contentDir: "./content" })] }
+ * ```
+ */
+export type Config = {
+  /**
+   * Ordered content sources. Compose at least one (e.g. `fileSystemContent(...)` on
+   * Node). The first provider that supplies an article for a slug+locale wins;
+   * `slugs()` are unioned. The plugin's own spec default is `[]` (a build must supply one).
+   */
+  providers: ContentProvider[];
+};
+
+/**
+ * Internal mutable state for the content plugin shell: the locale-keyed article cache.
+ *
+ * @example
+ * ```ts
+ * { articles: new Map() }
+ * ```
+ */
+export type State = {
+  /** Article cache keyed locale -> (slug -> Article). Starts empty. */
+  articles: Map<string, Map<string, Article>>;
+};
+
+/**
  * Notification-only events emitted by the content plugin.
  *
  * @example
@@ -169,19 +254,18 @@ export type ContentEvents = {
 
 /**
  * Kernel-free domain context handed to createContentApi by the wiring harness.
- * Carries ctx.state (mutable escape hatch), config, global, emit, and the
- * i18n-derived locale/url helpers — so api.ts stays free of createPlugin/ctx.
+ * Carries the shell state (article cache), global flag, emit, the i18n-derived
+ * locale helpers, and the resolved content {@link ContentProvider} — so api.ts stays
+ * free of createPlugin/ctx AND of any node/pipeline import.
  *
  * @example
  * ```ts
- * const apiContext: ContentApiContext = { state, config, global, emit, locales, defaultLocale, articleToUrl };
+ * const apiContext: ContentApiContext = { state, global, emit, locales, defaultLocale, provider };
  * ```
  */
 export type ContentApiContext = {
-  /** Mutable plugin state (article cache + lazy processor). */
+  /** Mutable shell state (article cache). */
   state: State;
-  /** Resolved plugin configuration. */
-  config: Config;
   /** Global framework configuration (development flag). */
   global: { isDevelopment: boolean };
   /** Emit a registered content event. */
@@ -190,8 +274,8 @@ export type ContentApiContext = {
   locales: () => readonly string[];
   /** Default locale code from i18n (fallback source). */
   defaultLocale: () => string;
-  /** Build a canonical article URL for a locale + slug. */
-  articleToUrl: (locale: string, slug: string) => string;
+  /** The resolved content source (merged from `config.providers`). */
+  provider: ContentProvider;
 };
 
 /**
@@ -234,9 +318,9 @@ export type Api = {
    */
   articleToCard(article: Article): ArticleCard;
   /**
-   * The configured content source directory (e.g. `"./content"`). Lets the build copy each
-   * article's co-located assets (`<contentDir>/<slug>/images/`) into the output so the absolute
-   * image URLs the renderer emits resolve.
+   * The configured content source directory (e.g. `"./content"`), from the first
+   * provider. Lets the build copy each article's co-located assets
+   * (`<contentDir>/<slug>/images/`) into the output.
    */
   contentDir(): string;
 };
