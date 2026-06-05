@@ -23,9 +23,9 @@ import type {
 const ERROR_PREFIX = "[web] router";
 
 /**
- * Minimal context shared by the router's `onInit` and its `set()` API: the mutable
+ * Minimal context the router's `onInit` consumes to compile config routes: the mutable
  * state holder, the global render `mode`, and `require` (to resolve site/i18n while
- * compiling). Both `registerRoutes` entry points consume exactly this surface.
+ * compiling). Also the surface {@link createApi} reads (`state` + `global.mode`).
  */
 interface RouterRegisterContext {
   /** Mutable router state holding the compiled matcher table. */
@@ -39,8 +39,7 @@ interface RouterRegisterContext {
 /**
  * Validate a route map and compile it into the matcher table on `ctx.state`,
  * resolving the global render `mode` + site base URL + i18n locales at call time.
- * Shared by the router's `onInit` (config routes) and its `set()` API (runtime
- * registration), so both paths compile identically. Re-calling replaces the table.
+ * Called by the router's `onInit` to compile `config.routes`. Re-calling replaces the table.
  *
  * @param ctx - The router register context (state + global mode + require).
  * @param routes - The route map to compile (an `import * as routes` namespace works).
@@ -77,7 +76,7 @@ export function registerRoutes(ctx: RouterRegisterContext, routes: RouteMap): vo
 function readTable(state: RouterState): MatcherTable {
   if (state.table === null) {
     throw new Error(
-      `${ERROR_PREFIX}: routes not registered.\n  Set pluginConfigs.router.routes, or call app.router.set(routes), before app.start() / app.build.run().`
+      `${ERROR_PREFIX}: routes not registered.\n  Set pluginConfigs.router.routes before app.start() / app.build.run().`
     );
   }
   return state.table;
@@ -136,22 +135,6 @@ export function createApi(ctx: RouterRegisterContext): RouterApi {
   const { state } = ctx;
   return {
     /**
-     * Register the route map and compile the matcher table at runtime. The declarative
-     * path is `pluginConfigs.router.routes` (compiled in `onInit`); call `set()` for
-     * imperative (re-)registration — e.g. a browser app building routes dynamically.
-     * Resolves `site`/`i18n` and the global render `mode` at call time. Last write wins.
-     *
-     * @param routes - The route map (route name → `route(...)`); an `import * as` namespace works.
-     * @throws {Error} If the route map is empty or a pattern is malformed.
-     * @example
-     * ```ts
-     * app.router.set(routes);
-     * ```
-     */
-    set(routes: RouteMap) {
-      registerRoutes(ctx, routes);
-    },
-    /**
      * Match a pathname against the compiled route table (specificity-sorted).
      *
      * @param pathname - URL pathname, e.g. `/en/hello/`.
@@ -180,7 +163,7 @@ export function createApi(ctx: RouterRegisterContext): RouterApi {
       const entry = readTable(state).byName.get(routeName);
       if (!entry) {
         throw new Error(
-          `${ERROR_PREFIX}: unknown route name "${routeName}".\n  Check the name matches a key in the route map registered via pluginConfigs.router.routes or app.router.set(routes).`
+          `${ERROR_PREFIX}: unknown route name "${routeName}".\n  Check the name matches a key in the route map registered via pluginConfigs.router.routes.`
         );
       }
       return entry.toUrl(params);

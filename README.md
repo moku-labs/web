@@ -193,7 +193,7 @@ route("/{lang:?}/{slug}/")        // path-params are inferred → ctx.params.{la
 - **`ctx.url(name, params)`** — type-safe link builder. Available in `render` / `head`.
 - **`ctx.data`** — typed from `.load()`'s return. On a client nav the fetched JSON *is* `ctx.data` directly (no validation step); a missing or malformed sidecar simply falls back to HTML-over-fetch. Omit `.load()` for a static page — `build` still emits an empty `{}` sidecar so hybrid nav resolves cleanly.
 
-Register routes declaratively via `pluginConfigs.router.routes` (compiled at init) or at runtime via `app.router.set(routes)`.
+Register routes declaratively via `pluginConfigs.router.routes` — the single source of truth, compiled once at init.
 
 SEO `<head>` primitives are exported for `.head()` handlers: `meta`, `og`, `twitter`, `jsonLd`, `canonical`, `hreflang`, `feedLink`, and `buildArticleHead`.
 

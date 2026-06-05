@@ -34,10 +34,10 @@ function makeDeployApp() {
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
       content: { providers: [fileSystemContent({ contentDir: FIXTURE_CONTENT_DIR })] },
-      deploy: { target: "cloudflare-pages", outDir: "dist" }
+      deploy: { target: "cloudflare-pages", outDir: "dist" },
+      router: { routes: defineRoutes({ home: route("/") }) }
     }
   });
-  app.router.set(defineRoutes({ home: route("/") }));
   return app;
 }
 

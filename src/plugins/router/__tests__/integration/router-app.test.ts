@@ -22,9 +22,8 @@ function buildApp(routes: RouteMap) {
   const { createApp } = coreConfig.createCore(coreConfig, { plugins: [] });
   const app = createApp({
     plugins: [sitePlugin, i18nPlugin, routerPlugin],
-    pluginConfigs: { site: siteConfig, i18n: i18nConfig }
+    pluginConfigs: { site: siteConfig, i18n: i18nConfig, router: { routes } }
   });
-  app.router.set(routes);
   return app;
 }
 

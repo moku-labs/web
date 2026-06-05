@@ -54,10 +54,10 @@ function makeApp(
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
       head: {},
-      spa: { progressBar: false }
+      spa: { progressBar: false },
+      router: { routes }
     }
   });
-  app.router.set(routes);
   return app;
 }
 
@@ -174,10 +174,10 @@ describe("spa integration", () => {
         site: SITE,
         i18n: { locales: ["en"], defaultLocale: "en" },
         head: {},
-        spa: { progressBar: false }
+        spa: { progressBar: false },
+        router: { routes }
       }
     });
-    app.router.set(routes);
     await app.start();
     // The client fetches the PERSISTED page data (not an HTML page) via data.at →
     // the data URL. Serve it; assert the fetch targeted the data file, then render.

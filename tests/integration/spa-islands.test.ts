@@ -45,10 +45,10 @@ function makeSpaApp() {
       i18n: { locales: ["en"], defaultLocale: "en" },
       content: { providers: [fileSystemContent({ contentDir: FIXTURE_CONTENT_DIR })] },
       head: {},
-      spa: { progressBar: false, components: [counter] }
+      spa: { progressBar: false, components: [counter] },
+      router: { routes }
     }
   });
-  app.router.set(routes);
   return app;
 }
 

@@ -98,10 +98,10 @@ function makeMigratedBlog(outDir: string, byLocale: ArticlesByLocale) {
         ogImage: false,
         minify: false
       },
-      deploy: { target: "cloudflare-pages", outDir: "dist" }
+      deploy: { target: "cloudflare-pages", outDir: "dist" },
+      router: { routes: defineRoutes({ home, article }) }
     }
   });
-  app.router.set(defineRoutes({ home, article }));
   return app;
 }
 

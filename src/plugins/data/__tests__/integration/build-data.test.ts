@@ -103,10 +103,10 @@ function makeApp(outDir: string, bySlug: Map<string, Article>, cards: ArticleCar
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
       content: { providers: [fileSystemContent({ contentDir: FIXTURE_DIR })] },
-      build: { outDir, feeds: false, sitemap: false, images: false, ogImage: false, minify: false }
+      build: { outDir, feeds: false, sitemap: false, images: false, ogImage: false, minify: false },
+      router: { routes }
     }
   });
-  app.router.set(routes);
   return app;
 }
 

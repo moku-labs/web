@@ -2,7 +2,7 @@
 
 > **Isomorphic default** — the single source of truth for the route table: a typed `route()` DSL, compile-time path-param inference, a specificity-sorted matcher, and locale-aware URL/file derivation.
 
-The router owns route definition and resolution. Authors describe routes with the fluent `route()` builder (a pure helper that runs before `createApp`, with no `ctx`), register them declaratively via `pluginConfigs.router.routes` (compiled in `onInit`) or imperatively at runtime with `app.router.set(routes)`, and downstream plugins (`build`, `head`, `spa`) consult the compiled table the canonical way via `ctx.require(routerPlugin)` — never by config readback. It `depends` on `site` (base URL) and `i18n` (locales + default locale), which it `ctx.require`s at compile time to build the lang-aware matchers. The render `mode` is **not** router config — it is a GLOBAL framework option (`createApp({ config: { mode } })`) that the router merely re-exposes via `mode()` as the single source of truth `build`/`spa` gate data navigation on.
+The router owns route definition and resolution. Authors describe routes with the fluent `route()` builder (a pure helper that runs before `createApp`, with no `ctx`), register them declaratively via `pluginConfigs.router.routes` (the sole registration path, compiled in `onInit`), and downstream plugins (`build`, `head`, `spa`) consult the compiled table the canonical way via `ctx.require(routerPlugin)` — never by config readback. It `depends` on `site` (base URL) and `i18n` (locales + default locale), which it `ctx.require`s at compile time to build the lang-aware matchers. The render `mode` is **not** router config — it is a GLOBAL framework option (`createApp({ config: { mode } })`) that the router merely re-exposes via `mode()` as the single source of truth `build`/`spa` gate data navigation on.
 
 Lifecycle stance: pure compute, **`onInit` only** — no `onStart`/`onStop`, because the router manages no browser or process resource. Its `ctx.state` is just a mutable `{ table }` holder, `null` until compiled. The single most important design decision is the **generic-erasure boundary**: per-route `TParams`/`TData` are a call-site property of `route()` + `defineRoutes()` and erase at the `RouteMap = Record<string, RouteDefinition>` carrier; build-time type recovery happens through the `manifest()` **API return**, not a config readback. The same `iso-match` core (placeholder parsing, specificity ordering, matcher compilation) is shared by the server table and the browser SPA so the two can never diverge.
 
@@ -33,8 +33,7 @@ const app = createApp({
     router: { routes }                       // declarative route map (an `import * as` namespace works)
   }
 });
-await app.build.run();    // or: await app.start(); — routes compiled at init
-// Runtime alternative (e.g. (re-)registering dynamically): app.router.set(routes)
+await app.build.run();    // or: await app.start(); — routes compiled at init from config
 ```
 
 > [!NOTE]
@@ -45,7 +44,6 @@ Reachable via `app.router` and `ctx.require(routerPlugin)`.
 
 | Method | Signature | Notes |
 |---|---|---|
-| `set` | `(routes: RouteMap) => void` | Imperative (re-)registration — the declarative path is `pluginConfigs.router.routes`. Validates, then compiles, resolving `site`/`i18n` + the global `mode` at call time. Re-calling recompiles (last write wins). Throws on an empty/invalid map. |
 | `match` | `(pathname: string) => { params; route: RouteDefinition } \| null` | Scans the specificity-sorted table; the most specific match wins, else `null`. |
 | `toUrl` | `(routeName: string, params: Record<string, string>) => string` | Substitutes `{param}` / `{param:?}` into the named route's pattern; throws on an unknown name. |
 | `entries` | `() => readonly TypedRoute[]` | URL-utility view (`pattern`/`name`/`meta` + `toUrl`/`toFile`/`match`), in **specificity** order. |
@@ -64,14 +62,14 @@ Registered as plugin `helpers` and re-exported from the `@moku-labs/web` barrel.
 | `createUrls` | `<T extends RouteMap>(routes: T) => Urls<T>` | A pure, app-free URL builder. `url.toUrl(name, params)` reuses the SAME `buildUrl` as `RouterApi.toUrl`, so helper and API can never diverge — no running app, router instance, base URL, or i18n needed. Names are typed to the map's keys; throws on an unknown name. |
 
 > [!NOTE]
-> Routes are normally provided declaratively via `pluginConfigs.router.routes` (compiled in `onInit`). `set()` is the imperative runtime equivalent — use it to (re-)register routes after `createApp`, e.g. a browser app that builds routes dynamically.
+> Routes are registered **only** declaratively via `pluginConfigs.router.routes`, compiled once in `onInit` — the config route map is the single source of truth. (A browser app that builds routes dynamically composes them into that config before `createApp`.)
 
 ## Configuration
 `pluginConfigs.router` — all fields optional (defaults to `{}`).
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `routes` | `RouteMap` | _omitted_ | Declarative route map (route name → `route(...)`); compiled at init. An `import * as routes` namespace is a valid value. Omit it and register imperatively at runtime with `app.router.set(routes)` instead. |
+| `routes` | `RouteMap` | _omitted_ | Declarative route map (route name → `route(...)`); compiled at init. An `import * as routes` namespace is a valid value. It is the sole registration path — omit it and the matcher table stays empty, so every read (`match`/`toUrl`/`entries`/…) throws. |
 
 The render `mode` is **not** here — it is a GLOBAL framework option (`createApp({ config: { mode } })`), read by the router via `ctx.global`.
 
@@ -88,7 +86,7 @@ The render `mode` is read from `ctx.global.mode`, not from a dependency.
 
 **Matching model.** Each route compiles to **two** `URLPattern` matchers: `withLang` (the locale alternation injected for `{lang:?}`) and `bare` (the `{lang:?}/` segment stripped). The match function tries `withLang` first; on a miss it falls back to `bare` and injects the `defaultLocale`. The `compiled` array is sorted ascending by `dynamicSegmentCount` (static beats dynamic; fewer dynamic segments win), with declaration order as a **stable** tiebreak. The optional `{lang:?}` segment is excluded from the specificity count so locale-prefixing never changes priority. Numeric/regex group keys are stripped from extracted params (`extractGroups`).
 
-**Validation.** Both registration paths (`onInit` config routes and `set()`) run `validateRoutes` and compile synchronously into `ctx.state.table`. It fails fast with the `[web] router` prefix on: an empty map, a pattern not starting with `/`, unbalanced `{…}` braces, or more than one `{lang:?}` segment.
+**Validation.** Registration (`onInit` compiling `config.routes`) runs `validateRoutes` and compiles synchronously into `ctx.state.table`. It fails fast with the `[web] router` prefix on: an empty map, a pattern not starting with `/`, unbalanced `{…}` braces, or more than one `{lang:?}` segment.
 
 **Generic-erasure mitigation.** The route map is an opaque carrier (`RouteMap = Record<string, RouteDefinition>`); per-route `TParams`/`TData` erase at that boundary. Type safety is a **call-site** property of `route()` + `defineRoutes()`, and per-route definition types are recovered for build time via the `manifest()` **API return**.
 
@@ -103,7 +101,7 @@ The render `mode` is read from `ctx.global.mode`, not from a dependency.
 | `builders/route-builder.ts` | `route()` fluent builder + `defineRoutes()` identity + `createUrls()` pure URL builder. |
 | `builders/compile.ts` | `validateRoutes`, `patternToUrlPattern`, `buildUrl`, `buildFilePath`, `compileRoutes`. |
 | `builders/match.ts` | `createMatchFunction`, `extractParams` (re-exported `extractGroups`), `matchRoute`. |
-| `api.ts` | `registerRoutes` + the `createApi` closures: `set`/`match`/`toUrl`/`entries`/`manifest`/`clientManifest`/`mode`. |
+| `api.ts` | `registerRoutes` (called by `onInit`) + the `createApi` closures: `match`/`toUrl`/`entries`/`manifest`/`clientManifest`/`mode`. |
 | `state.ts` | The `{ table: null }` holder filled in `onInit`. |
 | `types.ts` | Public DSL + internals: `RouteBuilder`, `RouteDefinition`, `RouteMap`, `ExtractRouteParams`, `TypedRoute`, `Urls<T>`, `CompiledRoute`, `MatcherTable`, `RouterConfig`, `RouterState`, `RouterApi`, plus the render/load/generate/layout context types. |
 

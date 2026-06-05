@@ -25,7 +25,7 @@ const ERROR_PREFIX = "[web] router";
  * naming the offending route/pattern on any failure: empty map, a pattern not
  * starting with `/`, unbalanced `{…}` braces, or more than one `{lang:?}` segment.
  *
- * @param routes - The route map registered via `app.router.set(routes)`.
+ * @param routes - The route map registered via `pluginConfigs.router.routes`.
  * @throws {Error} If routes are empty or a pattern is malformed.
  * @example
  * ```ts
@@ -36,7 +36,7 @@ export function validateRoutes(routes: RouteMap): void {
   const names = Object.keys(routes);
   if (names.length === 0) {
     throw new Error(
-      `${ERROR_PREFIX}: route map is empty.\n  Register at least one route via pluginConfigs.router.routes or app.router.set(routes).`
+      `${ERROR_PREFIX}: route map is empty.\n  Register at least one route via pluginConfigs.router.routes.`
     );
   }
   for (const name of names) {

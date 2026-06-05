@@ -20,7 +20,7 @@ function makeInput(routes: CompileInput["routes"]): CompileInput {
 function makeApi(routes: CompileInput["routes"]) {
   const table = compileRoutes(makeInput(routes));
   const state: RouterState = { table };
-  // `global`/`require` are only used by `set()`/`mode()`, which these tests never call.
+  // `global`/`require` are only used by `registerRoutes`/`mode()`, which these tests never call.
   return createApi({ state, global: { mode: "hybrid" }, require: (() => undefined) as never });
 }
 

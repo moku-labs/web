@@ -24,6 +24,6 @@ export function createState(_ctx: {
   readonly global: Readonly<Record<string, unknown>>;
   readonly config: Readonly<RouterConfig>;
 }): RouterState {
-  // eslint-disable-next-line unicorn/no-null -- `table` is `MatcherTable | null` until set() compiles it
+  // eslint-disable-next-line unicorn/no-null -- `table` is `MatcherTable | null` until onInit compiles config.routes
   return { table: null };
 }

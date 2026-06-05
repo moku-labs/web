@@ -38,10 +38,10 @@ function bootApp(routes: ReturnType<typeof defineRoutes>, mode: "ssg" | "spa" | 
     pluginConfigs: {
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
-      content: { providers: [fileSystemContent({ contentDir: FIXTURE_CONTENT_DIR })] }
+      content: { providers: [fileSystemContent({ contentDir: FIXTURE_CONTENT_DIR })] },
+      router: { routes }
     }
   });
-  app.router.set(routes);
   return app;
 }
 
@@ -68,15 +68,17 @@ describe("integration: framework boots (whole app)", () => {
   });
 
   it("fails fast on an empty route map", () => {
-    const app = createApp({
-      plugins: [contentPlugin],
-      config: { mode: "ssg" },
-      pluginConfigs: {
-        site: SITE,
-        content: { providers: [fileSystemContent({ contentDir: FIXTURE_CONTENT_DIR })] }
-      }
-    });
-    expect(() => app.router.set(defineRoutes({}))).toThrow(/\[web\]/);
+    expect(() =>
+      createApp({
+        plugins: [contentPlugin],
+        config: { mode: "ssg" },
+        pluginConfigs: {
+          site: SITE,
+          router: { routes: defineRoutes({}) },
+          content: { providers: [fileSystemContent({ contentDir: FIXTURE_CONTENT_DIR })] }
+        }
+      })
+    ).toThrow(/\[web\]/);
   });
 
   // Different "site variants" all boot through the same shipped wiring.
