@@ -100,7 +100,7 @@ const app = createApp({
   }
 });
 
-await app.start();          // boots the browser runtime (no-op under SSR/build)
+await app.start();          // boots the browser runtime (no-op under SSR/build); routes compiled at init
 app.spa.register(counter);  // also registerable at runtime
 app.spa.navigate("/about"); // fetch → swap → head-sync → emit
 app.spa.current();          // "/about"

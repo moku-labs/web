@@ -33,12 +33,12 @@ function buildApp(root: string, overrides: { notFound?: boolean; cliPort?: numbe
   const routes = defineRoutes({ home });
 
   const coreConfig = createCoreConfig("web-test", {
-    config: { mode: "production" as const },
+    config: { isDevelopment: false, mode: "ssg" as const },
     plugins: [logPlugin],
     pluginConfigs: { log: { mode: "test" as const } }
   });
   const { createApp } = coreConfig.createCore(coreConfig, { plugins: [] });
-  return createApp({
+  const app = createApp({
     plugins: [
       sitePlugin,
       i18nPlugin,
@@ -52,7 +52,6 @@ function buildApp(root: string, overrides: { notFound?: boolean; cliPort?: numbe
     pluginConfigs: {
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
-      router: { routes, mode: "ssg" as const },
       content: { contentDir },
       build: {
         outDir,
@@ -67,6 +66,8 @@ function buildApp(root: string, overrides: { notFound?: boolean; cliPort?: numbe
       cli: { outDir, port: overrides.cliPort ?? 4173, watchDirs: ["content", "src"] }
     }
   });
+  app.router.set(routes);
+  return app;
 }
 
 describe("cli wiring (createApp → start → app.cli → stop)", () => {

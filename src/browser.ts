@@ -41,10 +41,6 @@ export { browserEnv } from "./plugins/env/providers.browser";
 
 // ─── Consumer helpers: route DSL, SPA islands, SEO <head> primitives ──────────
 export { createUrls, defineRoutes, route } from "./plugins/router";
-// Browser-safe by-name handle for resolving the (node-only) content plugin inside a
-// route loader at build time (`ctx.require(contentRef)`) — pure literal, type-only
-// import, so it stays out of the client runtime graph (bundle-safety gate).
-export { contentRef } from "./plugins/content/ref";
 export { createComponent } from "./plugins/spa";
 export {
   buildArticleHead,
@@ -94,13 +90,9 @@ const core = createCore(coreConfig, {
  * @example
  * ```ts
  * // Client SPA — env works with no wiring (browserEnv is the default provider):
- * const app = createApp({
- *   plugins: [dataPlugin],
- *   pluginConfigs: {
- *     router: { mode: "spa", routes: defineRoutes({ home: route("/"), post: route("/blog/{slug}/") }) }
- *   }
- * });
- * await app.start();
+ * import * as routes from "./routes";
+ * const app = createApp({ config: { mode: "spa" }, pluginConfigs: { router: { routes } } });
+ * await app.start();             // routes compiled at init from config
  * app.env.get("PUBLIC_API_URL"); // resolved from import.meta.env
  * ```
  */

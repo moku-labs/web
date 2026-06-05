@@ -19,8 +19,9 @@ function makeInput(routes: CompileInput["routes"]): CompileInput {
 /** Build an api over a compiled table from the given declaration-ordered routes. */
 function makeApi(routes: CompileInput["routes"]) {
   const table = compileRoutes(makeInput(routes));
-  const state: RouterState = { table, mode: "hybrid" };
-  return createApi({ state });
+  const state: RouterState = { table };
+  // `global`/`require` are only used by `set()`/`mode()`, which these tests never call.
+  return createApi({ state, global: { mode: "hybrid" }, require: (() => undefined) as never });
 }
 
 describe("manifest()", () => {

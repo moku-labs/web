@@ -20,17 +20,18 @@ Two published entries; pick by target:
 | `./browser` | **client/browser bundle** | ESM-only | isomorphic surface, node-free, env pre-wired |
 
 - **`.`** — unchanged. Add `contentPlugin`/`buildPlugin`/`deployPlugin`, wire `dotenv`/`processEnv`/`cloudflareBindings` for `env`.
-- **`./browser`** — exports the SAME `createApp` / `createPlugin` over the SAME isomorphic default set (`site`, `i18n`, `router`, `head`, `spa` + `log`/`env` core), PLUS `dataPlugin`, `defineRoutes`, `route`, `createUrls`, `contentRef`, `createComponent` (spa islands), `browserEnv`, the SEO head primitives (`meta`, `og`, `twitter`, `jsonLd`, `canonical`, `hreflang`, `feedLink`, `buildArticleHead`), and the browser-relevant type namespaces (`Data`, `Env`, `Head`, `Log`, `Router`, `Spa`). It EXCLUDES everything node-only: `contentPlugin`, `buildPlugin`, `deployPlugin`, the node env providers `dotenv`/`processEnv`/`cloudflareBindings`, and the `Build`/`Content`/`Deploy` type namespaces.
+- **`./browser`** — exports the SAME `createApp` / `createPlugin` over the SAME isomorphic default set (`site`, `i18n`, `router`, `head`, `spa` + `log`/`env` core), PLUS `dataPlugin`, `defineRoutes`, `route`, `createUrls`, `createComponent` (spa islands), `browserEnv`, the SEO head primitives (`meta`, `og`, `twitter`, `jsonLd`, `canonical`, `hreflang`, `feedLink`, `buildArticleHead`), and the browser-relevant type namespaces (`Data`, `Env`, `Head`, `Log`, `Router`, `Spa`). It EXCLUDES everything node-only: `contentPlugin`, `buildPlugin`, `deployPlugin`, the node env providers `dotenv`/`processEnv`/`cloudflareBindings`, and the `Build`/`Content`/`Deploy` type namespaces.
 - **env is pre-wired:** `./browser` sets `browserEnv()` as the default `env` provider, so env works with ZERO consumer config in the browser — you do NOT pass `pluginConfigs.env.providers`. It resolves from `import.meta.env` and `globalThis.__ENV__`.
 - **Guarantee:** importing `@moku-labs/web/browser` can NEVER drag node/native code into a client bundle, regardless of the consumer's bundler or tree-shaking — its static import graph references zero node-only modules. This is STRONGER and more reliable than the previous guidance of "import `@moku-labs/web` and rely on `sideEffects: false` tree-shaking" (which is fragile: building entries together can merge node code into a shared chunk).
 - A CI gate (`bun run check:bundle`) asserts the built browser bundle has zero static node/native imports and stays under a gzip size budget (~35 kB gzip).
 - `dataPlugin` stays consumer-composed (NOT a default) — compose it for client DATA navigation (`router.mode` `"spa"` | `"hybrid"`); its node write-half is loaded only via dynamic import.
 
 ```ts
-import { createApp, spaPlugin, dataPlugin, browserEnv, defineRoutes, route } from "@moku-labs/web/browser";
+import { createApp, dataPlugin } from "@moku-labs/web/browser";
+import * as routes from "./routes"; // render shells — no node-only content import
 // env works with no wiring — browserEnv is the default provider
-const app = createApp({ plugins: [dataPlugin], pluginConfigs: { router: { mode: "spa", routes } } });
-await app.start();
+const app = createApp({ plugins: [dataPlugin], config: { mode: "spa" }, pluginConfigs: { router: { routes } } });
+await app.start(); // routes compiled at init (or app.router.set(routes) at runtime)
 ```
 
 ## 1. The three-layer model (from @moku-labs/core)
@@ -53,34 +54,35 @@ are notification-only (no request/response over events). `ctx.has(name)` checks 
 ## 2. The route is the single contract
 
 ```ts
-import { route, defineRoutes, createUrls, contentRef } from "@moku-labs/web";
+import { route, defineRoutes, contentPlugin } from "@moku-labs/web";
 
+// Routes are plain values; register them via pluginConfigs.router.routes (or app.router.set).
 const routes = defineRoutes({
   home: route("/{lang:?}/")
-    .load((ctx) => listCards(ctx.locale))              // ctx: { params, locale, require, has } → D
-    .render((ctx) => <Home cards={ctx.data} />)
+    .load((ctx) => listCards(ctx.require(contentPlugin), ctx.locale))  // ctx: { params, locale, require, has } → D
+    .render((ctx) => <Home cards={ctx.data} url={ctx.url} />)
     .head((ctx) => ({ title: "Home" })),
   post: route("/{lang:?}/{slug}/")
     .generate((ctx) => slugs(ctx.locale).map((slug) => ({ lang: ctx.locale, slug })))  // SSG param sets
-    .load((ctx) => ctx.require(contentRef).load(ctx.params.slug, ctx.locale))          // sibling API via ctx
-    .render((ctx) => <Post post={ctx.data} />)
+    .load((ctx) => ctx.require(contentPlugin).load(ctx.params.slug, ctx.locale))        // sibling API via ctx.require
+    .render((ctx) => <Post post={ctx.data} url={ctx.url} />)
     .head((ctx) => ({ title: ctx.data.title }))
     .meta({ section: "blog" })                         // JSON-serializable bag (clientManifest)
 });
 
-// Links: a PURE, app-free builder over the route map (no app/router/bind/global):
-const url = createUrls(routes);
-url.toUrl("post", { lang: "en", slug: "hello" });     // "/en/hello/"
+// Register: pass createApp({ pluginConfigs: { router: { routes } } }), or call app.router.set(routes)
+// at runtime — an `import * as routes` namespace works for both.
+// Links: inside render/head use ctx.url(name, params); outside routes (islands) use createUrls(routes).
 ```
 
 Builder methods (each returns the builder; `.load` widens the data generic `D`):
-- `.load((ctx) => D | Promise<D>)` — OPTIONAL data loader. `ctx` is a `LoadContext` `{ params, locale, require, has }`; pull sibling plugin APIs via `ctx.require(plugin | contentRef)` (no module global). Runs at BUILD only. Omit it for a static page — `ctx.data` is then `unknown`.
-- `.render((ctx: { params, data: D, locale }) => VNode)` — Preact render. Runs at build (→ `renderToString`) AND on the client (→ Preact `render`). On a client nav `ctx.data` is the fetched JSON (which the build wrote from `load()`) used directly — no validation step; a malformed/missing file falls back to HTML-over-fetch.
+- `.load((ctx) => D | Promise<D>)` — OPTIONAL data loader. `ctx` is a `LoadContext` `{ params, locale, require, has }`; pull sibling plugin APIs the spec way — `ctx.require(contentPlugin)` (instance-only, no module global). Runs at BUILD only. Omit it for a static page — `ctx.data` is then `unknown`.
+- `.render((ctx: { params, data: D, locale, url }) => VNode)` — Preact render. `ctx.url(name, params)` builds links (backed by `router.toUrl`). Runs at build (→ `renderToString`) AND on the client (→ Preact `render`). On a client nav `ctx.data` is the fetched JSON (which the build wrote from `load()`) used directly — no validation step; a malformed/missing file falls back to HTML-over-fetch.
 - `.head((ctx) => HeadConfig)` — SEO head.
 - `.generate((ctx) => params[])` — OPTIONAL SSG param producer. `ctx` is a `GenerateContext` `{ locale, require, has }`.
 - `.meta(record)` — JSON-serializable metadata (shipped in `clientManifest`).
 
-Helpers (pure, app-free — `helpers`, like `route`/`defineRoutes`): `createUrls(routes)` → `{ toUrl(name, params) }` builds a route's path by name + params via pattern substitution, with NO running app/router/i18n — import it in components/islands directly (replaces the old `bindRouter` module-global). `contentRef` is a browser-safe by-name handle so a loader resolves the node-only content API via `ctx.require(contentRef)` WITHOUT importing `contentPlugin` (keeps the client bundle node-free).
+Helpers (pure, app-free — `helpers`, like `route`/`defineRoutes`): `createUrls(routes)` → `{ toUrl(name, params) }` builds a route's path by name + params via pattern substitution, with NO running app/router/i18n — import it in components/islands directly (replaces the old `bindRouter` module-global). Inside a route, `.render`/`.head` get the same builder as `ctx.url(name, params)` (no import). A loader reaches the node-only content API via `ctx.require(contentPlugin)` — keep loaders in a node-imported module so `contentPlugin` never enters the client bundle (the `data` plugin bridges page data to the browser).
 - `.toJson((ctx) => unknown)` — JSON serializer (e.g. feeds), separate from the data path.
 - `.toFile((params) => string)` — output path override.
 - `.layout((ctx, children) => VNode)` — persistent chrome wrapper. `ctx` is a `LayoutContext` (render ctx + `meta`), so chrome can read `ctx.locale` / `ctx.meta.activeTab`. Applied in SSG ONLY — on client (spa) navigation the chrome persists and only the inner swap region is replaced.
@@ -88,6 +90,7 @@ Helpers (pure, app-free — `helpers`, like `route`/`defineRoutes`): `createUrls
 Pattern syntax: `{name}` required param, `{name:?}` optional, `{lang:?}` is the locale-prefix slot (excluded from specificity).
 
 ### RouterApi (`ctx.require(routerPlugin)` / `app.router`)
+- `set(routes) => void` — register the route map + compile the table at runtime. Resolves `site`/`i18n` + the global render `mode` at call time. Re-calling recompiles. Accepts an `import * as routes` namespace. The declarative equivalent is `pluginConfigs.router.routes` (compiled in `onInit`); call `set` for imperative (re-)registration.
 - `match(pathname) => { params, route } | null` — specificity-sorted; most specific wins.
 - `toUrl(name, params) => string` — substitute params; throws on unknown name.
 - `entries() => readonly TypedRoute[]` — URL-utility view, specificity order.
@@ -95,7 +98,7 @@ Pattern syntax: `{name}` required param, `{name:?}` optional, `{lang:?}` is the 
 - `clientManifest() => readonly { pattern, name, meta }[]` — serializable projection (no closures).
 - `mode() => "ssg" | "spa" | "hybrid"` — the SINGLE source of truth for static/hybrid/spa behavior.
 
-Config: `router: { routes, mode?: "ssg" | "spa" | "hybrid" }` (default `"hybrid"`).
+Config: router config is just `{ routes?: RouteMap }` — the declarative route map (compiled in `onInit`); routes can also be registered at runtime via `app.router.set(routes)`. The render mode is NOT router config — it is the GLOBAL `config.mode` (`"ssg" | "spa" | "hybrid"`, default `"hybrid"`).
 
 ## 3. SSG → DATA → SPA (the data flow)
 

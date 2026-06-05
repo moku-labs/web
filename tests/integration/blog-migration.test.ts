@@ -80,13 +80,13 @@ function makeMigratedBlog(outDir: string, byLocale: ArticlesByLocale) {
       };
     });
 
-  return createApp({
+  const app = createApp({
     // Node-only SSG plugins — composed by the consumer (not framework defaults).
     plugins: [contentPlugin, buildPlugin, deployPlugin],
+    config: { mode: "ssg" },
     pluginConfigs: {
       site: SITE,
       i18n: { ...I18N },
-      router: { routes: defineRoutes({ home, article }), mode: "ssg" },
       content: { contentDir: FIXTURE_CONTENT_DIR },
       head: { titleTemplate: "%s — Moku Blog", twitterHandle: "@moku_labs" },
       build: {
@@ -100,6 +100,8 @@ function makeMigratedBlog(outDir: string, byLocale: ArticlesByLocale) {
       deploy: { target: "cloudflare-pages", outDir: "dist" }
     }
   });
+  app.router.set(defineRoutes({ home, article }));
+  return app;
 }
 
 describe("integration: future blog migration (end-to-end)", () => {

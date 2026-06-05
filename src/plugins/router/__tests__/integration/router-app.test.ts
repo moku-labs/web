@@ -20,10 +20,12 @@ const i18nConfig = { locales: ["en", "uk"], defaultLocale: "en" };
 function buildApp(routes: RouteMap) {
   const coreConfig = createCoreConfig("web", { config: {}, plugins: [], pluginConfigs: {} });
   const { createApp } = coreConfig.createCore(coreConfig, { plugins: [] });
-  return createApp({
+  const app = createApp({
     plugins: [sitePlugin, i18nPlugin, routerPlugin],
-    pluginConfigs: { site: siteConfig, i18n: i18nConfig, router: { routes } }
+    pluginConfigs: { site: siteConfig, i18n: i18nConfig }
   });
+  app.router.set(routes);
+  return app;
 }
 
 describe("router integration", () => {

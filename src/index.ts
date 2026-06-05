@@ -30,9 +30,6 @@ export { browserEnv } from "./plugins/env/providers.browser";
 
 // ─── Consumer helpers: route DSL, SPA islands, SEO <head> primitives ──────────
 export { createUrls, defineRoutes, route } from "./plugins/router";
-// Browser-safe by-name handle for resolving the node-only content plugin inside a
-// route loader (`ctx.require(contentRef)`) — pure literal, no node code.
-export { contentRef } from "./plugins/content/ref";
 export { createComponent } from "./plugins/spa";
 export {
   buildArticleHead,
@@ -72,16 +69,16 @@ const core = createCore(coreConfig, {
  * @returns The initialized app: `start()`, `stop()`, every plugin's API, and `log`.
  * @example
  * ```ts
- * // Node SSG build — add the node-only plugins:
+ * // Node SSG build — add the node-only plugins, register routes via config, then build:
+ * import * as routes from "./routes";
  * const app = createApp({
  *   plugins: [contentPlugin, buildPlugin, deployPlugin],
  *   pluginConfigs: {
  *     site: { name: "My Blog", url: "https://blog.dev", author: "Ada", description: "Notes" },
- *     router: { routes: defineRoutes({ home: route("/"), post: route("/blog/{slug}/") }) }
+ *     router: { routes }
  *   }
  * });
- * await app.start();
- * await app.build.run();
+ * await app.build.run();   // routes compiled at init; or app.router.set(routes) at runtime
  * ```
  */
 export const createApp = core.createApp;

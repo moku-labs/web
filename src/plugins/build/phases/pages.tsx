@@ -269,8 +269,10 @@ async function renderInstance(
   // A route is client-navigable when it has a `render` handler (the build re-runs it
   // on client navigation). Such routes ALWAYS get a data sidecar — `{}` when there is
   // no `.load()` — so hybrid data-nav resolves cleanly instead of falling back to a
-  // full HTML fetch. The loader receives a LoadContext (params + locale + require/has)
-  // so it can pull sibling plugin APIs (e.g. ctx.require(contentRef)) with no global.
+  // full HTML fetch. The loader receives a LoadContext (params + locale + require/has),
+  // so it pulls sibling plugin APIs the spec way (`ctx.require(contentPlugin)`) with no
+  // module global. Loaders run build-only, never on the client.
+  const router = ctx.require(routerPlugin);
   const clientNavigable = definition._handlers.render !== undefined;
   const loadContext: LoadContext<RouteState> = {
     params,
@@ -279,7 +281,12 @@ async function renderInstance(
     has: ctx.has
   };
   const data = definition._handlers.load ? await definition._handlers.load(loadContext) : {};
-  const routeContext: RouteContext<RouteState> = { params, data, locale };
+  const routeContext: RouteContext<RouteState> = {
+    params,
+    data,
+    locale,
+    url: (routeName, routeParams = {}) => router.toUrl(routeName, routeParams)
+  };
   const headConfig: HeadConfig | undefined = definition._handlers.head?.(routeContext);
   const url = entry.toUrl(params);
   const resolved: ResolvedRoute = { path: url, name, params, locale };

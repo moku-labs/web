@@ -90,11 +90,10 @@ export async function loadFixtureArticles(
   const app = createApp({
     // content is node-only — added explicitly (not a framework default).
     plugins: [contentPlugin],
-    config: { mode },
+    config: { isDevelopment: mode === "development" },
     pluginConfigs: {
       site: SITE,
       i18n: { locales: [...locales], defaultLocale: locales[0] ?? "en" },
-      router: { routes: defineRoutes({ home: route("/") }), mode: "ssg" },
       content: { contentDir: FIXTURE_CONTENT_DIR }
     }
   });
@@ -183,14 +182,13 @@ export function buildBlogApp(options: {
 }) {
   const locales = options.locales ?? ["en"];
   const localized = options.localized ?? locales.length > 1;
-  return createApp({
+  const app = createApp({
     // Node-only SSG plugins — composed by the consumer (not framework defaults).
     plugins: [contentPlugin, buildPlugin, deployPlugin],
-    config: { mode: options.mode ?? "production" },
+    config: { isDevelopment: (options.mode ?? "production") === "development", mode: "ssg" },
     pluginConfigs: {
       site: SITE,
       i18n: { ...I18N, locales: [...locales], defaultLocale: locales[0] ?? "en" },
-      router: { routes: blogRoutes(options.byLocale, localized), mode: "ssg" },
       content: { contentDir: FIXTURE_CONTENT_DIR },
       head: { titleTemplate: "%s — Moku Blog", twitterHandle: "@moku_labs" },
       build: {
@@ -203,4 +201,6 @@ export function buildBlogApp(options: {
       }
     }
   });
+  app.router.set(blogRoutes(options.byLocale, localized));
+  return app;
 }

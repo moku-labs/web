@@ -17,13 +17,13 @@ import type { RouterConfig, RouterState } from "./types";
  * @returns The initial router state holder.
  * @example
  * ```ts
- * const state = createState({ global: {}, config: { routes: {} } });
+ * const state = createState({ global: {}, config: { mode: "hybrid" } });
  * ```
  */
 export function createState(_ctx: {
   readonly global: Readonly<Record<string, unknown>>;
   readonly config: Readonly<RouterConfig>;
 }): RouterState {
-  // eslint-disable-next-line unicorn/no-null -- `table` is `MatcherTable | null` until onInit compiles it
-  return { table: null, mode: _ctx.config.mode ?? "hybrid" };
+  // eslint-disable-next-line unicorn/no-null -- `table` is `MatcherTable | null` until set() compiles it
+  return { table: null };
 }

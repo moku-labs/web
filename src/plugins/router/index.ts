@@ -5,32 +5,27 @@
 import { createPlugin } from "../../config";
 import { i18nPlugin } from "../i18n";
 import { sitePlugin } from "../site";
-import { createApi } from "./api";
-import { buildRouterTable } from "./builders/compile";
+import { createApi, registerRoutes } from "./api";
 import { createUrls, defineRoutes, route } from "./builders/route-builder";
 import { createState } from "./state";
 import type { RouterConfig } from "./types";
 
-/** Default router config: empty route map (validated in onInit), hybrid mode. */
-const defaultConfig: RouterConfig = { routes: {}, mode: "hybrid" };
+/** Default router config: `routes` omitted — provide it via `pluginConfigs.router.routes`. */
+const defaultConfig: RouterConfig = {};
 /**
  * Router plugin — typed, named route definitions with locale-aware URL generation
- * and matching. Author routes with {@link route} + {@link defineRoutes}. Depends
- * on site (base URL) and i18n (locales).
+ * and matching. Author routes with {@link route}, then register them the normal config
+ * way via `pluginConfigs.router.routes` (compiled at init) or imperatively at runtime
+ * with `app.router.set(routes)`. Depends on site (base URL) and i18n (locales).
  *
- * @example Define routes and choose a render mode
+ * @example Register routes via config, then start/build
  * ```ts
+ * import * as routes from "./routes";
  * const app = createApp({
- *   pluginConfigs: {
- *     router: {
- *       routes: defineRoutes({
- *         home: route("/"),
- *         article: route("/blog/{slug}/")
- *       }),
- *       mode: "hybrid" // "ssg" | "spa" | "hybrid" (default)
- *     }
- *   }
+ *   config: { mode: "hybrid" },               // render mode is GLOBAL config
+ *   pluginConfigs: { router: { routes } }     // declarative route map (a namespace works)
  * });
+ * await app.build.run();    // or: await app.start();  — routes compiled at init
  * ```
  */
 export const routerPlugin = createPlugin("router", {
@@ -38,12 +33,10 @@ export const routerPlugin = createPlugin("router", {
   helpers: { route, defineRoutes, createUrls },
   config: defaultConfig,
   createState,
-  api: createApi,
-  // eslint-disable-next-line jsdoc/require-jsdoc -- thin wiring; logic in builders/compile.ts
-  onInit(ctx) {
-    const i18n = ctx.require(i18nPlugin);
-    const baseUrl = ctx.require(sitePlugin).url();
-    ctx.state.table = buildRouterTable(ctx.config, baseUrl, i18n.locales(), i18n.defaultLocale());
-  }
+  // eslint-disable-next-line jsdoc/require-jsdoc -- thin wiring: compile config routes (if any) at init
+  onInit: ctx => {
+    if (ctx.config.routes) registerRoutes(ctx, ctx.config.routes);
+  },
+  api: createApi
 });
 export { createUrls, defineRoutes, route } from "./builders/route-builder";

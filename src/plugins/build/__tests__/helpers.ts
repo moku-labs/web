@@ -46,7 +46,7 @@ export function makeCtx(options: {
       ogImageHashCache: new Map<string, string>()
     },
     config,
-    global: { mode: "production" as const },
+    global: { isDevelopment: false },
     require: ((plugin: { name: string }) => requireMap[plugin.name]) as PhaseContext["require"],
     has: (name: string) => name in requireMap,
     emit: emit as unknown as PhaseContext["emit"],

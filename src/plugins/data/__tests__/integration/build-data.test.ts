@@ -7,7 +7,6 @@ import { h } from "preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildPlugin } from "../../../build";
 import { contentPlugin } from "../../../content";
-import { contentRef } from "../../../content/ref";
 import type { Article, ArticleCard } from "../../../content/types";
 import { headPlugin } from "../../../head";
 import { i18nPlugin } from "../../../i18n";
@@ -33,7 +32,7 @@ function RawArticle(props: { html: string }) {
 /** Preload the production-filtered article set (drafts excluded) for the route loaders. */
 async function loadArticles(): Promise<{ bySlug: Map<string, Article>; cards: ArticleCard[] }> {
   const coreConfig = createCoreConfig("web-test", {
-    config: { mode: "production" as const },
+    config: { isDevelopment: false },
     plugins: [logPlugin],
     pluginConfigs: { log: { mode: "test" as const } }
   });
@@ -70,11 +69,11 @@ function makeApp(outDir: string, bySlug: Map<string, Article>, cards: ArticleCar
   const about = route("/about/")
     .render(() => h("h1", {}, "About"))
     .head(() => ({ title: "About" }));
-  // #3b — loader resolves the content API via ctx.require(contentRef) (no module global).
+  // #3b — loader resolves the content API the spec way: ctx.require(contentPlugin).
   const viaContent = route("/{slug}/via/")
     .generate(() => [...bySlug.keys()].map(slug => ({ slug })))
     .load(async ctx => {
-      const found = await ctx.require(contentRef).load(ctx.params.slug ?? "", ctx.locale);
+      const found = await ctx.require(contentPlugin).load(ctx.params.slug ?? "", ctx.locale);
       return { html: found.html };
     })
     .render(
@@ -84,12 +83,12 @@ function makeApp(outDir: string, bySlug: Map<string, Article>, cards: ArticleCar
   const routes = defineRoutes({ home, article, about, viaContent });
 
   const coreConfig = createCoreConfig("web-test", {
-    config: { mode: "production" as const },
+    config: { isDevelopment: false, mode: "hybrid" as const },
     plugins: [logPlugin],
     pluginConfigs: { log: { mode: "test" as const } }
   });
   const { createApp } = coreConfig.createCore(coreConfig, { plugins: [] });
-  return createApp({
+  const app = createApp({
     plugins: [
       sitePlugin,
       i18nPlugin,
@@ -102,11 +101,12 @@ function makeApp(outDir: string, bySlug: Map<string, Article>, cards: ArticleCar
     pluginConfigs: {
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
-      router: { routes, mode: "hybrid" as const },
       content: { contentDir: FIXTURE_DIR },
       build: { outDir, feeds: false, sitemap: false, images: false, ogImage: false, minify: false }
     }
   });
+  app.router.set(routes);
+  return app;
 }
 
 let outDir: string;
@@ -186,7 +186,7 @@ describe("data provider — build writes per-page data → at() reads it", () =>
     expect(html).toContain("About");
   });
 
-  it("#3b a loader resolves content via ctx.require(contentRef) — no bound global", async () => {
+  it("#3b a loader resolves content via ctx.require(contentPlugin)", async () => {
     const { bySlug, cards } = await loadArticles();
     const app = makeApp(outDir, bySlug, cards);
     await app.start();

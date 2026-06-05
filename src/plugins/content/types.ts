@@ -182,8 +182,8 @@ export type ContentApiContext = {
   state: State;
   /** Resolved plugin configuration. */
   config: Config;
-  /** Global framework configuration (mode, etc.). */
-  global: { mode: "production" | "development" };
+  /** Global framework configuration (development flag). */
+  global: { isDevelopment: boolean };
   /** Emit a registered content event. */
   emit: <K extends keyof ContentEvents>(event: K, payload: ContentEvents[K]) => void;
   /** Active locale codes from i18n. */

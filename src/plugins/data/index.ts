@@ -27,13 +27,14 @@ import { validateDataConfig } from "./validate";
  * @example
  * ```ts
  * // Node build: `build` calls app.data.write(...) during its pages phase when
- * // router.mode !== "ssg". Just compose the plugin:
+ * // router.mode() !== "ssg". Compose the plugin + set the global render mode:
+ * import * as routes from "./routes";
  * const app = createApp({
  *   plugins: [dataPlugin, contentPlugin, buildPlugin],
- *   pluginConfigs: { content: { contentDir: "./content" }, router: { routes, mode: "hybrid" } }
+ *   config: { mode: "hybrid" },
+ *   pluginConfigs: { content: { contentDir: "./content" }, router: { routes } }
  * });
- * await app.start();
- * await app.build.run();   // writes HTML + per-page data sidecars
+ * await app.build.run();   // writes HTML + per-page data sidecars (routes compiled at init)
  *
  * // Browser app: compose `dataPlugin` too; spa fetches via app.data.at(path) on nav.
  * ```

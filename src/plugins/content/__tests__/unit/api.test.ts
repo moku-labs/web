@@ -32,7 +32,7 @@ function makeCtx(
   const ctx: ContentApiContext = {
     state,
     config,
-    global: { mode: overrides.mode ?? "development" },
+    global: { isDevelopment: (overrides.mode ?? "development") === "development" },
     emit,
     locales: () => overrides.locales ?? ["en", "uk"],
     defaultLocale: () => overrides.defaultLocale ?? "en",

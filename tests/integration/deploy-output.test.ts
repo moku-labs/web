@@ -19,17 +19,19 @@ import { cleanup, FIXTURE_CONTENT_DIR, SITE, tmpDir } from "./helpers/harness";
 
 /** The real createApp configured for deploy scaffolding (slug derives from SITE.name). */
 function makeDeployApp() {
-  return createApp({
+  const app = createApp({
     // content + deploy are node-only — composed explicitly (not framework defaults).
     plugins: [contentPlugin, deployPlugin],
+    config: { mode: "ssg" },
     pluginConfigs: {
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
-      router: { routes: defineRoutes({ home: route("/") }), mode: "ssg" },
       content: { contentDir: FIXTURE_CONTENT_DIR },
       deploy: { target: "cloudflare-pages", outDir: "dist" }
     }
   });
+  app.router.set(defineRoutes({ home: route("/") }));
+  return app;
 }
 
 describe("integration: Cloudflare deploy scaffolding (init, network-free)", () => {

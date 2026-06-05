@@ -36,18 +36,20 @@ function makeSpaApp() {
       .render(() => undefined as never)
       .head(() => ({ title: "About" }))
   });
-  return createApp({
+  const app = createApp({
     // content is node-only — composed explicitly (not a framework default).
     plugins: [contentPlugin],
+    config: { mode: "spa" },
     pluginConfigs: {
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
-      router: { routes, mode: "spa" },
       content: { contentDir: FIXTURE_CONTENT_DIR },
       head: {},
       spa: { progressBar: false, components: [counter] }
     }
   });
+  app.router.set(routes);
+  return app;
 }
 
 /** Full HTML document returned by the mocked fetch for a navigated page. */

@@ -13,7 +13,7 @@ import type {
   CompileInput,
   MatcherTable,
   RouteDefinition,
-  RouterConfig
+  RouteMap
 } from "../types";
 import { createMatchFunction } from "./match";
 
@@ -25,18 +25,18 @@ const ERROR_PREFIX = "[web] router";
  * naming the offending route/pattern on any failure: empty map, a pattern not
  * starting with `/`, unbalanced `{…}` braces, or more than one `{lang:?}` segment.
  *
- * @param routes - The route map from config.
+ * @param routes - The route map registered via `app.router.set(routes)`.
  * @throws {Error} If routes are empty, a pattern is malformed, or names collide.
  * @example
  * ```ts
  * validateRoutes({ home: route("/") });
  * ```
  */
-export function validateRoutes(routes: RouterConfig["routes"]): void {
+export function validateRoutes(routes: RouteMap): void {
   const names = Object.keys(routes);
   if (names.length === 0) {
     throw new Error(
-      `${ERROR_PREFIX}: route map is empty — provide at least one route via pluginConfigs.router.routes.`
+      `${ERROR_PREFIX}: route map is empty.\n  Register at least one route via pluginConfigs.router.routes or app.router.set(routes).`
     );
   }
   for (const name of names) {
@@ -271,34 +271,4 @@ export function compileRoutes(input: CompileInput): MatcherTable {
   // client reproduces from `clientManifest()` — single source of truth).
   const compiled = declarationOrder.toSorted(bySpecificity);
   return { compiled, byName };
-}
-
-/**
- * onInit orchestrator (data-only seam, keeps `index.ts` wiring-only). Validates
- * the route map then compiles the matcher table from resolved dependency data.
- *
- * @param config - Resolved router config (`routes` + `mode`).
- * @param baseUrl - Site base URL from `ctx.require(sitePlugin).url()`.
- * @param locales - Available locales from `ctx.require(i18nPlugin).locales()`.
- * @param defaultLocale - Default locale from `ctx.require(i18nPlugin).defaultLocale()`.
- * @returns The compiled, immutable matcher table for `ctx.state.table`.
- * @example
- * ```ts
- * ctx.state.table = buildRouterTable(ctx.config, site.url(), i18n.locales(), i18n.defaultLocale());
- * ```
- */
-export function buildRouterTable(
-  config: RouterConfig,
-  baseUrl: string,
-  locales: readonly string[],
-  defaultLocale: string
-): MatcherTable {
-  validateRoutes(config.routes);
-  return compileRoutes({
-    routes: config.routes,
-    mode: config.mode ?? "hybrid",
-    baseUrl,
-    locales,
-    defaultLocale
-  });
 }

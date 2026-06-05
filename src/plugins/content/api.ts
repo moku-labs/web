@@ -34,8 +34,8 @@ export type ContentPluginContext = {
   state: State;
   /** Resolved plugin configuration. */
   config: Config;
-  /** Global framework configuration (mode, etc.). */
-  global: { mode: "production" | "development" };
+  /** Global framework configuration (development flag). */
+  global: { isDevelopment: boolean };
   /** Emit a registered content event. */
   emit: <K extends keyof ContentEvents>(event: K, payload: ContentEvents[K]) => void;
   /** Resolve a depended-upon plugin's API (here the i18n plugin). */
@@ -325,7 +325,7 @@ export function createContentApi(ctx: ContentApiContext): Api {
     async loadAll(): Promise<Map<string, Article[]>> {
       const slugs = ctx.state.slugs ?? (await discoverSlugs(ctx.config.contentDir));
       ctx.state.slugs = slugs;
-      const isProduction = ctx.global.mode === "production";
+      const isProduction = !ctx.global.isDevelopment;
 
       const result = new Map<string, Article[]>();
       let total = 0;
@@ -365,7 +365,7 @@ export function createContentApi(ctx: ContentApiContext): Api {
      * @param locale - Requested locale code.
      * @returns The resolved Article.
      * @throws {Error} `[web] content` not-found when no file matches, or when the
-     *   resolved article is a draft and `global.mode === "production"`.
+     *   resolved article is a draft and `!global.isDevelopment` (production).
      * @example
      * ```ts
      * const article = await api.load("intro", "uk");
@@ -376,7 +376,7 @@ export function createContentApi(ctx: ContentApiContext): Api {
       if (article === null) {
         throw articleNotFound(slug, locale);
       }
-      const isProduction = ctx.global.mode === "production";
+      const isProduction = !ctx.global.isDevelopment;
       if (isProduction && article.computed.status === "draft") {
         throw articleNotFound(slug, locale);
       }

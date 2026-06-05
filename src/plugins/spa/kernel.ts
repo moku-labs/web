@@ -193,7 +193,13 @@ export function createSpaKernel(
       // HTML-over-fetch fallback (dataAt → null, or the surrounding try/catch).
       const data = raw;
       const locale = hit.params.lang ?? document.documentElement.lang ?? "";
-      const routeContext: RouteContext<RouteState> = { params: hit.params, data, locale };
+      const routeContext: RouteContext<RouteState> = {
+        params: hit.params,
+        data,
+        locale,
+        // eslint-disable-next-line jsdoc/require-jsdoc -- inline link builder; delegates to router.toUrl
+        url: (routeName, routeParams = {}) => deps.router.toUrl(routeName, routeParams)
+      };
       // NB: the route's `.layout()` is intentionally NOT applied here. The layout
       // chrome (TopBar/TabNav/Footer) is persistent — rendered once by SSG and left
       // in place across navigations. Client nav replaces ONLY the inner swap region

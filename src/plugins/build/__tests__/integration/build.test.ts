@@ -26,7 +26,7 @@ const SITE = {
 /** Load the fixture articles once so route loaders can close over them by slug. */
 async function loadFixtureArticles(): Promise<Map<string, Article>> {
   const coreConfig = createCoreConfig("web-test", {
-    config: { mode: "production" as const },
+    config: { isDevelopment: false, mode: "ssg" as const },
     plugins: [logPlugin],
     pluginConfigs: { log: { mode: "test" as const } }
   });
@@ -64,12 +64,12 @@ function buildApp(outDir: string, bySlug: Map<string, Article>, extraPlugins: un
   const routes = defineRoutes({ home: homeRoute, article: articleRoute });
 
   const coreConfig = createCoreConfig("web-test", {
-    config: { mode: "production" as const },
+    config: { isDevelopment: false, mode: "ssg" as const },
     plugins: [logPlugin],
     pluginConfigs: { log: { mode: "test" as const } }
   });
   const { createApp } = coreConfig.createCore(coreConfig, { plugins: [] });
-  return createApp({
+  const app = createApp({
     plugins: [
       sitePlugin,
       i18nPlugin,
@@ -82,11 +82,12 @@ function buildApp(outDir: string, bySlug: Map<string, Article>, extraPlugins: un
     pluginConfigs: {
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
-      router: { routes, mode: "ssg" as const },
       content: { contentDir: FIXTURE_DIR },
       build: { outDir, feeds: true, sitemap: true, images: false, ogImage: false, minify: false }
     }
   });
+  app.router.set(routes);
+  return app;
 }
 
 describe("build integration", () => {
@@ -114,7 +115,7 @@ describe("build integration", () => {
     const out = path.join(tmp, "dist");
     const events: string[] = [];
     const coreConfig = createCoreConfig("web-test", {
-      config: { mode: "production" as const },
+      config: { isDevelopment: false, mode: "ssg" as const },
       plugins: [logPlugin],
       pluginConfigs: { log: { mode: "test" as const } }
     });
@@ -225,7 +226,7 @@ describe("build integration", () => {
     const routes = defineRoutes({ home: homeRoute, guide: localized });
 
     const coreConfig = createCoreConfig("web-test", {
-      config: { mode: "production" as const },
+      config: { isDevelopment: false, mode: "ssg" as const },
       plugins: [logPlugin],
       pluginConfigs: { log: { mode: "test" as const } }
     });
@@ -235,7 +236,6 @@ describe("build integration", () => {
       pluginConfigs: {
         site: SITE,
         i18n: { locales: ["en", "uk"], defaultLocale: "en" },
-        router: { routes, mode: "ssg" as const },
         content: { contentDir: FIXTURE_DIR },
         build: {
           outDir: out,
@@ -252,6 +252,7 @@ describe("build integration", () => {
         }
       }
     });
+    app.router.set(routes);
 
     await app.build.run();
 

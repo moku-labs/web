@@ -36,32 +36,35 @@ import {
   processEnv
 } from "@moku-labs/web";
 
-const routes = defineRoutes({
-  home: route("/")
-    .render(() => <h1>My Blog</h1>)
-    .head(() => ({ title: "My Blog" })),
-  article: route("/{lang:?}/{slug}/")
-    .generate((ctx) => listSlugs(ctx.locale).map((slug) => ({ lang: ctx.locale, slug })))
-    .load((ctx) => loadArticle(ctx.params.slug, ctx.locale)) // widens ctx.data
-    .render((ctx) => <Article article={ctx.data} />)
-    .head((ctx) => ({ title: ctx.data.title, description: ctx.data.description }))
-});
+// routes.tsx — loaders pull sibling APIs the spec way (ctx.require); links via ctx.url
+export const home = route("/")
+  .render(() => <h1>My Blog</h1>)
+  .head(() => ({ title: "My Blog" }));
+export const article = route("/{lang:?}/{slug}/")
+  .generate((ctx) => listSlugs(ctx.locale).map((slug) => ({ lang: ctx.locale, slug })))
+  .load((ctx) => ctx.require(contentPlugin).load(ctx.params.slug, ctx.locale)) // widens ctx.data
+  .render((ctx) => <Article article={ctx.data} url={ctx.url} />)
+  .head((ctx) => ({ title: ctx.data.title, description: ctx.data.description }));
+
+// app.ts — create (routes via config) → run
+import * as routes from "./routes";
 
 const app = createApp({
   plugins: [contentPlugin, buildPlugin, deployPlugin], // node-only — added per target
-  config: { mode: "production" },
+  config: { mode: "ssg" },                             // GLOBAL render mode: "ssg" | "spa" | "hybrid"
   pluginConfigs: {
     env: { providers: [dotenv(), processEnv()] },
     site: { name: "My Blog", url: "https://blog.dev", author: "Me", description: "A personal blog." },
     i18n: { locales: ["en", "uk"], defaultLocale: "en" },
     content: { contentDir: "./content" },
-    router: { routes, mode: "ssg" },
+    router: { routes },                                // declarative route map (an `import * as` namespace works)
     head: { titleTemplate: "%s — My Blog" },
     build: { outDir: "dist", feeds: true, sitemap: true }
   }
 });
 
-await app.build.run(); // → static site in dist/ (HTML, feed.xml, sitemap.xml)
+await app.build.run();   // → static site in dist/ (HTML, feed.xml, sitemap.xml); routes compiled at init
+// Runtime (re-)registration alternative: app.router.set(routes)
 ```
 
 Content lives on disk as `content/{slug}/{locale}.md` with YAML frontmatter
@@ -84,7 +87,7 @@ Two entry points pick the right surface per target:
 - **`@moku-labs/web/browser`** (ESM-only) — the recommended **client/browser** entry. It
   re-exports the SAME `createApp`/`createPlugin` over the SAME isomorphic default set
   (`site`, `i18n`, `router`, `head`, `spa` + `log`/`env`), plus `dataPlugin`, `defineRoutes`,
-  `route`, `createUrls`, `contentRef`, `createComponent`, `browserEnv`, the SEO head primitives, and the browser-relevant type namespaces
+  `route`, `createUrls`, `createComponent`, `browserEnv`, the SEO head primitives, and the browser-relevant type namespaces
   (`Data`, `Env`, `Head`, `Log`, `Router`, `Spa`). It **excludes** everything node-only
   (`contentPlugin`, `buildPlugin`, `deployPlugin`, the `dotenv`/`processEnv`/`cloudflareBindings`
   env providers, and the `Build`/`Content`/`Deploy` type namespaces), and **pre-wires
@@ -107,12 +110,13 @@ Node, `build` calls `data.write(...)` to persist each page's real `load()` outpu
 build (SSG) and on the client, so parity is structural. Add `data` on both sides for
 client DATA navigation; omit it for a plain static site (HTML-over-fetch).
 
-The single switch is **`router.mode`** (`"ssg" | "spa" | "hybrid"`): `build` writes data +
-`spa` data-renders only when it is not `"ssg"`. On a client nav the fetched JSON (which the
-build wrote from `load()`) is used directly as `ctx.data` — no validation step; a missing or
-malformed file simply falls back to HTML-over-fetch. `ctx.data` is typed from `.load()`'s
-return. A route may also omit `.load()` entirely (a static page); `build` still emits an
-empty `{}` data sidecar so hybrid nav resolves cleanly.
+The single switch is the global **`config.mode`** (`"ssg" | "spa" | "hybrid"`, read by
+plugins via `router.mode()`): `build` writes data + `spa` data-renders only when it is not
+`"ssg"`. On a client nav the fetched JSON (which the build wrote from `load()`) is used
+directly as `ctx.data` — no validation step; a missing or malformed file simply falls back
+to HTML-over-fetch. `ctx.data` is typed from `.load()`'s return. A route may also omit
+`.load()` entirely (a static page); `build` still emits an empty `{}` data sidecar so hybrid
+nav resolves cleanly.
 
 A browser entry is `createApp(...).start()` imported from `@moku-labs/web/browser` over the
 defaults (plus `dataPlugin` for DATA nav) — `spa`'s `onStart` mounts islands onto the SSR'd
@@ -122,11 +126,12 @@ write-half is loaded only via dynamic import.
 
 ```ts
 // A browser bundle — guaranteed node-free, env pre-wired:
-import { createApp, spaPlugin, dataPlugin, browserEnv, defineRoutes, route } from "@moku-labs/web/browser";
+import { createApp, dataPlugin } from "@moku-labs/web/browser";
+import * as routes from "./routes"; // render shells only — no node-only content import
 
 // env works with no wiring — browserEnv is the default provider
-const app = createApp({ plugins: [dataPlugin], pluginConfigs: { router: { mode: "spa", routes } } });
-await app.start();
+const app = createApp({ plugins: [dataPlugin], config: { mode: "spa" }, pluginConfigs: { router: { routes } } });
+await app.start(); // routes compiled at init (or app.router.set(routes) at runtime)
 ```
 
 ## Plugins
@@ -135,7 +140,7 @@ await app.start();
 |---|---|---|
 | `site` | ✅ isomorphic | Site identity (name, URL, author) + canonical URL helper |
 | `i18n` | ✅ isomorphic | Locales, default-locale fallback, translations, hreflang/ogLocale maps |
-| `router` | ✅ isomorphic | Type-safe route DSL (`route`/`defineRoutes`) — optional `.load` (receives one `ctx`), `.render`/`.head`/`.generate`; pure `createUrls(routes)` link builder; matching, `mode()`, URL/file derivation |
+| `router` | ✅ isomorphic | Type-safe route DSL (`route`) — optional `.load` (gets `ctx.require`/`has`), `.render`/`.head` (get `ctx.url`), `.generate`; routes registered via `pluginConfigs.router.routes` (or `app.router.set(routes)` at runtime); matching, `mode()` (from global config), URL/file derivation |
 | `head` | ✅ isomorphic | SEO `<head>` composition: title template, canonical, OG/Twitter, JSON-LD, hreflang |
 | `spa` | ✅ isomorphic | Client runtime: island hydration + intercepted navigation (inert on Node) |
 | `content` | ➕ node-only | Markdown pipeline → sanitized HTML, frontmatter, reading time, locale model |

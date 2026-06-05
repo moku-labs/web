@@ -18,7 +18,7 @@ function makeApi(contentDir: string) {
   const ctx: ContentApiContext = {
     state: createContentState({ global: {}, config }),
     config,
-    global: { mode: "development" },
+    global: { isDevelopment: true },
     emit: vi.fn(),
     locales: () => ["en", "ru"],
     defaultLocale: () => "en",

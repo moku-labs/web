@@ -109,9 +109,19 @@ describe("route() / defineRoutes() type-level proofs", () => {
     route("/{lang:?}/{slug}/").load(ctx => {
       expectTypeOf(ctx.params).toExtend<{ slug: string; lang?: string }>();
       expectTypeOf(ctx.locale).toBeString();
+      // Sibling plugin APIs come the spec way: ctx.require(pluginInstance).
       expectTypeOf(ctx.require).toBeFunction();
       expectTypeOf(ctx.has).toBeFunction();
       return { ok: true };
+    });
+  });
+
+  it("the render/head ctx exposes url(name, params) for building links", () => {
+    route("/{slug}/").render(ctx => {
+      // `url` is delivered by the build/spa (backed by router.toUrl) — links with no app ref.
+      expectTypeOf(ctx.url).toBeFunction();
+      expectTypeOf(ctx.url("home")).toBeString();
+      return null as never;
     });
   });
 });
