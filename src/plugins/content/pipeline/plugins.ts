@@ -80,6 +80,41 @@ function pullQuoteTransform(tree: MdastRoot): void {
   });
 }
 
+/** CSS class for the divider wrapper that replaces an `<hr>`. */
+const SECTION_DIVIDER_CLASS = "section-divider";
+
+/** CSS class for the inner ornament span inside the section divider. */
+const SECTION_DIVIDER_ORNAMENT_CLASS = "section-divider-ornament";
+
+/** Glyphs rendered inside the section-divider ornament span. */
+const SECTION_DIVIDER_ORNAMENT = "***";
+
+/**
+ * Rewrite one `<hr>` element in place into an ornamental section divider:
+ * a `<div>` wrapper carrying a single ornament `<span>`.
+ *
+ * @param node - The hast element to rewrite (expected to be an `<hr>`).
+ * @example
+ * ```ts
+ * rewriteHrToDivider(node);
+ * ```
+ */
+function rewriteHrToDivider(node: Element): void {
+  // Promote the rule to a styled divider wrapper.
+  node.tagName = "div";
+  node.properties = { class: SECTION_DIVIDER_CLASS };
+
+  // Replace its (empty) children with the ornament span.
+  node.children = [
+    {
+      type: "element",
+      tagName: "span",
+      properties: { class: SECTION_DIVIDER_ORNAMENT_CLASS },
+      children: [{ type: "text", value: SECTION_DIVIDER_ORNAMENT }]
+    }
+  ];
+}
+
 /**
  * Hast transformer rewriting `<hr>` into an ornamental section divider.
  *
@@ -91,18 +126,8 @@ function pullQuoteTransform(tree: MdastRoot): void {
  */
 function sectionDividerTransform(tree: HastRoot): void {
   visit(tree, "element", (node: Element) => {
-    if (node.tagName === "hr") {
-      node.tagName = "div";
-      node.properties = { class: "section-divider" };
-      node.children = [
-        {
-          type: "element",
-          tagName: "span",
-          properties: { class: "section-divider-ornament" },
-          children: [{ type: "text", value: "***" }]
-        }
-      ];
-    }
+    if (node.tagName !== "hr") return;
+    rewriteHrToDivider(node);
   });
 }
 

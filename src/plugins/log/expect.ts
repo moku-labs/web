@@ -46,6 +46,54 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * Tests whether `actual` is an array that recursively matches every element of
+ * the `partial` array (element-wise, with equal length).
+ *
+ * @param actual - The value to test against (must be an array of equal length).
+ * @param partial - The expected partial array shape.
+ * @returns `true` when `actual` is an equal-length array matching `partial` element-wise.
+ * @example
+ * ```ts
+ * matchesPartialArray([1, 2], [1, 2]); // true
+ * matchesPartialArray([1], [1, 2]); // false (length mismatch)
+ * ```
+ */
+function matchesPartialArray(actual: unknown, partial: readonly unknown[]): boolean {
+  // Guard: only an array of identical length can be a subset.
+  if (!Array.isArray(actual) || actual.length !== partial.length) {
+    return false;
+  }
+
+  // Every expected element must recursively match the same position.
+  return partial.every((value, index) => matchesPartial(actual[index], value));
+}
+
+/**
+ * Tests whether `actual` is a plain object in which every `partial` key
+ * recursively matches (extra `actual` keys are ignored).
+ *
+ * @param actual - The value to test against (must be a plain object).
+ * @param partial - The expected partial object shape.
+ * @returns `true` when every `partial` key exists in `actual` and matches recursively.
+ * @example
+ * ```ts
+ * matchesPartialObject({ a: 1, b: 2 }, { a: 1 }); // true
+ * matchesPartialObject({ a: 1 }, { b: 1 }); // false (missing key)
+ * ```
+ */
+function matchesPartialObject(actual: unknown, partial: Record<string, unknown>): boolean {
+  // Guard: only a plain object can satisfy an object subset.
+  if (!isPlainObject(actual)) {
+    return false;
+  }
+
+  // Every expected key must be present and recursively match.
+  return Object.keys(partial).every(
+    key => key in actual && matchesPartial(actual[key], partial[key])
+  );
+}
+
+/**
  * Subset-equality matcher: is `partial` a recursive subset of `actual`?
  *
  * Fast path via `Object.is` (covers identical primitives/references and
@@ -63,23 +111,21 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * ```
  */
 export function matchesPartial(actual: unknown, partial: unknown): boolean {
+  // Fast path: identical primitives/references (also covers `null`/`NaN`).
   if (Object.is(actual, partial)) {
     return true;
   }
+
+  // Array partial: delegate to element-wise subset matching.
   if (Array.isArray(partial)) {
-    if (!Array.isArray(actual) || actual.length !== partial.length) {
-      return false;
-    }
-    return partial.every((value, index) => matchesPartial(actual[index], value));
+    return matchesPartialArray(actual, partial);
   }
+
+  // Object partial: delegate to key-wise recursive subset matching.
   if (isPlainObject(partial)) {
-    if (!isPlainObject(actual)) {
-      return false;
-    }
-    return Object.keys(partial).every(
-      key => key in actual && matchesPartial(actual[key], partial[key])
-    );
+    return matchesPartialObject(actual, partial);
   }
+
   // Primitive (or array-vs-non-array) `partial` that is not `Object.is`-equal.
   return false;
 }

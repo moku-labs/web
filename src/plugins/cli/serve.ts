@@ -86,6 +86,7 @@ async function runOneRebuild(input: {
   file: string;
 }): Promise<void> {
   try {
+    // Run the build, then report the changed file alongside its fresh summary.
     const summary = await input.runBuild();
     input.onReloaded({
       file: input.file,
@@ -93,6 +94,7 @@ async function runOneRebuild(input: {
       durationMs: summary.durationMs
     });
   } catch (error) {
+    // Route failures to onError so the dev loop keeps running instead of throwing.
     input.onError(error);
   }
 }
@@ -125,23 +127,16 @@ export function createRebuilder(input: {
   let dirty = false;
 
   /**
-   * Run the queued rebuild once, then — if a change arrived while it was in flight —
-   * re-run exactly once more so no change is dropped. Marks `dirty` (instead of
-   * running) when a rebuild is already underway, resetting the in-flight flag when
-   * each run settles.
+   * Rebuild repeatedly until no change arrived mid-flight: each pass clears `dirty`,
+   * runs one build, then loops again if a `schedule()` set `dirty` while it ran, so
+   * no change is dropped.
    *
-   * @returns Resolves once the rebuild (and any coalesced re-run) settles (errors are
-   *   routed, never thrown).
+   * @returns Resolves once a pass completes with no pending change (errors are routed,
+   *   never thrown).
    * @example
-   * await fire();
+   * await drainPendingRebuilds();
    */
-  const fire = async (): Promise<void> => {
-    timer = undefined;
-    if (building) {
-      dirty = true;
-      return;
-    }
-    building = true;
+  const drainPendingRebuilds = async (): Promise<void> => {
     do {
       dirty = false;
       await runOneRebuild({
@@ -151,6 +146,32 @@ export function createRebuilder(input: {
         file: pendingFile
       });
     } while (dirty);
+  };
+
+  /**
+   * Run the queued rebuild once the debounce timer fires. Marks `dirty` (instead of
+   * running) when a rebuild is already underway, otherwise holds the in-flight flag
+   * across a full {@link drainPendingRebuilds} so concurrent changes coalesce into
+   * exactly one extra re-run.
+   *
+   * @returns Resolves once the rebuild (and any coalesced re-run) settles (errors are
+   *   routed, never thrown).
+   * @example
+   * await fire();
+   */
+  const fire = async (): Promise<void> => {
+    // The timer just fired; release it so a later schedule() arms a fresh one.
+    timer = undefined;
+
+    // A rebuild is already running: record the change so it gets a coalesced re-run.
+    if (building) {
+      dirty = true;
+      return;
+    }
+
+    // Hold the in-flight flag across the drain so concurrent schedules coalesce, not overlap.
+    building = true;
+    await drainPendingRebuilds();
     building = false;
   };
 
@@ -332,6 +353,28 @@ export function createReloadHub(): ReloadHub {
   };
 }
 
+/** The content-type sent on rewritten HTML responses (live-reload injection). */
+const HTML_CONTENT_TYPE = "text/html; charset=utf-8";
+
+/**
+ * Re-render a static file response with the live-reload client injected, preserving
+ * the resolved status. Reads the original body to text so {@link injectReloadClient}
+ * can splice the snippet in before `</body>`.
+ *
+ * @param response - The original static file response to rewrite.
+ * @param status - The resolved status to carry onto the rewritten response.
+ * @returns A fresh HTML response containing the injected reload client.
+ * @example
+ * const injected = await injectReloadResponse(fileResponse, 200);
+ */
+async function injectReloadResponse(response: Response, status: number): Promise<Response> {
+  const html = injectReloadClient(await response.text());
+  return new Response(html, {
+    status,
+    headers: { "content-type": HTML_CONTENT_TYPE }
+  });
+}
+
 /**
  * Build the live-reload-aware request handler for the dev server: serves the SSE
  * stream at {@link RELOAD_PATH}, injects the reload client into HTML responses (when
@@ -349,20 +392,18 @@ export function createDevHandler(
   hub: ReloadHub
 ): (request: Request) => Promise<Response> {
   return async request => {
+    // Live-reload clients connect to the SSE endpoint; hand them the hub stream.
     const pathname = decodeURIComponent(new URL(request.url).pathname);
     if (pathname === RELOAD_PATH) return hub.connect();
 
+    // Map the clean URL to a built file, or 404 when nothing matches.
     const resolved = resolveCleanUrl(ctx.config.outDir, pathname);
     if (resolved.file === null) return new Response("Not Found", { status: 404 });
 
+    // HTML pages get the reload snippet spliced in (when live-reload is on); everything else passes through.
     const response = ctx.state.fileResponse(resolved.file, resolved.status);
-    if (ctx.config.liveReload && resolved.file.endsWith(".html")) {
-      const html = injectReloadClient(await response.text());
-      return new Response(html, {
-        status: resolved.status,
-        headers: { "content-type": "text/html; charset=utf-8" }
-      });
-    }
+    const shouldInjectReload = ctx.config.liveReload && resolved.file.endsWith(".html");
+    if (shouldInjectReload) return injectReloadResponse(response, resolved.status);
     return response;
   };
 }

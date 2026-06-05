@@ -83,6 +83,27 @@ function resetRun(ctx: Pick<PhaseContext, "state">): void {
 }
 
 /**
+ * Report each rejected outcome from a settled output batch as a `build:outputs`
+ * error, leaving fulfilled outcomes untouched (failures are isolated, not fatal).
+ *
+ * @param ctx - The phase context (used to log rejections).
+ * @param settled - The settled results from the `runOutputs` task batch.
+ * @example
+ * ```ts
+ * reportOutputFailures(ctx, await Promise.allSettled(tasks));
+ * ```
+ */
+function reportOutputFailures(
+  ctx: Pick<PhaseContext, "log">,
+  settled: readonly PromiseSettledResult<unknown>[]
+): void {
+  for (const outcome of settled) {
+    if (outcome.status !== "rejected") continue;
+    ctx.log.error("build:outputs", { reason: String(outcome.reason) });
+  }
+}
+
+/**
  * Phase 4 — run feeds / sitemap / og-images / public / not-found / locale-redirects
  * concurrently, each gated by its config flag (or, for `public`, the presence of the
  * source dir), isolated with `Promise.allSettled` so one failure does not lose the
@@ -101,20 +122,24 @@ function resetRun(ctx: Pick<PhaseContext, "state">): void {
  */
 async function runOutputs(ctx: PhaseContext): Promise<void> {
   const tasks: Promise<unknown>[] = [];
+
+  // Document outputs (feeds, sitemap, og-images) — each gated on its config flag.
   if (ctx.config.feeds) tasks.push(withPhase(ctx, "feeds", () => generateFeeds(ctx)));
   if (ctx.config.sitemap) tasks.push(withPhase(ctx, "sitemap", () => generateSitemap(ctx)));
   if (ctx.config.ogImage) tasks.push(withPhase(ctx, "og-images", () => generateOgImages(ctx)));
-  if (existsSync(ctx.config.publicDir ?? DEFAULT_PUBLIC_DIR))
-    tasks.push(withPhase(ctx, "public", () => copyPublic(ctx)));
+
+  // Static-asset output — gated on the presence of the public source dir.
+  const hasPublicDir = existsSync(ctx.config.publicDir ?? DEFAULT_PUBLIC_DIR);
+  if (hasPublicDir) tasks.push(withPhase(ctx, "public", () => copyPublic(ctx)));
+
+  // Fallback outputs (404 page, locale redirects) — each gated on its config flag.
   if (ctx.config.notFound) tasks.push(withPhase(ctx, "not-found", () => generateNotFound(ctx)));
   if (ctx.config.localeRedirects)
     tasks.push(withPhase(ctx, "locale-redirects", () => generateLocaleRedirects(ctx)));
+
+  // Run all enabled outputs concurrently, then surface any failures without aborting.
   const settled = await Promise.allSettled(tasks);
-  for (const outcome of settled) {
-    if (outcome.status === "rejected") {
-      ctx.log.error("build:outputs", { reason: String(outcome.reason) });
-    }
-  }
+  reportOutputFailures(ctx, settled);
 }
 
 /**

@@ -117,18 +117,27 @@ function validateFonts(og: OgImageConfig): void {
  * ```
  */
 export function validateConfig(config: Config): void {
+  // Output directory must name a real build target (non-empty string).
   if (typeof config.outDir !== "string" || config.outDir.trim().length === 0) {
     throw new Error(`${ERROR_PREFIX}.outDir: must be a non-empty string.`);
   }
+
+  // Optional public asset directory, when set, must be a string path.
   if (config.publicDir !== undefined && typeof config.publicDir !== "string") {
     throw new Error(`${ERROR_PREFIX}.publicDir: must be a string when set.`);
   }
+
+  // Optional HTML template, when set, must be a string path.
   if (config.template !== undefined && typeof config.template !== "string") {
     throw new Error(`${ERROR_PREFIX}.template: must be a string path when set.`);
   }
+
+  // Optional client hydration entry, when set, must be a string path.
   if (config.clientEntry !== undefined && typeof config.clientEntry !== "string") {
     throw new Error(`${ERROR_PREFIX}.clientEntry: must be a string path when set.`);
   }
+
+  // When OG-image generation is enabled, its font directory must be usable.
   if (config.ogImage) {
     validateFonts(config.ogImage);
   }

@@ -22,6 +22,34 @@ const ERROR_PREFIX = "[web]";
 const HOOK_NAME_SET: ReadonlySet<string> = new Set(COMPONENT_HOOK_NAMES);
 
 /**
+ * Validate a single hook entry: its key must be a known hook name and its value
+ * must be a function. Throws fail-fast on the first violation.
+ *
+ * @param componentName - The owning component name (for error messages).
+ * @param hooks - The hooks object being validated.
+ * @param key - The hook key to validate.
+ * @throws {Error} If `key` is not in `COMPONENT_HOOK_NAMES`.
+ * @throws {TypeError} If the hook value is not a function.
+ * @example
+ * validateHookEntry("counter", hooks, "onMount");
+ */
+function validateHookEntry(componentName: string, hooks: ComponentHooks, key: string): void {
+  // Reject typo'd / unknown hook names so e.g. `onMout` fails immediately.
+  if (!HOOK_NAME_SET.has(key)) {
+    throw new Error(
+      `${ERROR_PREFIX} unknown component hook "${key}" on "${componentName}"\n  → valid hooks: ${COMPONENT_HOOK_NAMES.join(", ")}`
+    );
+  }
+
+  // Reject non-function values for an otherwise-valid hook name.
+  if (typeof (hooks as Record<string, unknown>)[key] !== "function") {
+    throw new TypeError(
+      `${ERROR_PREFIX} component hook "${key}" on "${componentName}" must be a function\n  → provide a function or omit the hook`
+    );
+  }
+}
+
+/**
  * Create a validated component definition. Validates hook names at registration
  * for fail-fast typo detection (e.g. `onMout` throws immediately) and asserts
  * each provided hook is a function.
@@ -37,23 +65,19 @@ const HOOK_NAME_SET: ReadonlySet<string> = new Set(COMPONENT_HOOK_NAMES);
  * });
  */
 export function createComponent(name: string, hooks: ComponentHooks): ComponentDef {
-  if (name.trim() === "") {
+  // Guard: the name must be a non-empty (post-trim) identifier.
+  const hasEmptyName = name.trim() === "";
+  if (hasEmptyName) {
     throw new Error(
       `${ERROR_PREFIX} component name must be a non-empty string\n  → pass a unique name to createComponent("name", hooks)`
     );
   }
+
+  // Validate every provided hook entry (unknown key or non-function throws).
   for (const key of Object.keys(hooks)) {
-    if (!HOOK_NAME_SET.has(key)) {
-      throw new Error(
-        `${ERROR_PREFIX} unknown component hook "${key}" on "${name}"\n  → valid hooks: ${COMPONENT_HOOK_NAMES.join(", ")}`
-      );
-    }
-    if (typeof (hooks as Record<string, unknown>)[key] !== "function") {
-      throw new TypeError(
-        `${ERROR_PREFIX} component hook "${key}" on "${name}" must be a function\n  → provide a function or omit the hook`
-      );
-    }
+    validateHookEntry(name, hooks, key);
   }
+
   return { name, hooks };
 }
 
@@ -126,6 +150,48 @@ function makeContext(element: Element, data: PageData): ComponentContext {
 }
 
 /**
+ * Mounts a single `data-component` element: classifies persistent vs
+ * page-specific, builds the instance, fires `onCreate` then `onMount`, records
+ * it in state, and emits `spa:component-mount`. No-ops if the element is already
+ * mounted, has no component name, or names an unregistered component.
+ *
+ * @param state - The plugin state (registeredComponents + instances).
+ * @param emit - The event emitter for spa:component-mount.
+ * @param swapArea - The swap-region element, or null when none was found.
+ * @param data - The current page data payload.
+ * @param element - The candidate element carrying a `data-component` attribute.
+ * @example
+ * mountElement(state, emit, swapArea, data, element);
+ */
+function mountElement(
+  state: SpaState,
+  emit: SpaEmitFunction,
+  swapArea: Element | null,
+  data: PageData,
+  element: HTMLElement
+): void {
+  // Skip elements already bound to a live instance.
+  if (state.instances.has(element)) return;
+
+  // Skip elements whose component name is missing or unregistered.
+  const name = element.dataset.component;
+  if (!name) return;
+  const definition = state.registeredComponents.get(name);
+  if (!definition) return;
+
+  // Persistent when outside the swap area (or when there is no swap area).
+  const isPersistent = swapArea ? !swapArea.contains(element) : true;
+  const instance = createInstance(definition, element, isPersistent);
+  const ctx = makeContext(element, data);
+
+  // Run creation hooks, record the instance, and announce the mount.
+  runHook(instance, "onCreate", ctx);
+  runHook(instance, "onMount", ctx);
+  state.instances.set(element, instance);
+  emit("spa:component-mount", { name: definition.name, el: element });
+}
+
+/**
  * Scans the swap region, mounts components for matching `data-component`
  * elements, classifies persistent (outside swap area) vs page-specific (inside),
  * fires `onCreate` then `onMount`, and emits `spa:component-mount` per instance.
@@ -138,25 +204,16 @@ function makeContext(element: Element, data: PageData): ComponentContext {
  * scanAndMount(state, emit, "main > section");
  */
 export function scanAndMount(state: SpaState, emit: SpaEmitFunction, swapSelector: string): void {
+  // No-op outside a DOM (SSR / non-browser environments).
   if (typeof document === "undefined") return;
+
+  // Resolve the swap-region boundary and the page data shared by every mount.
   const swapArea = document.querySelector(swapSelector);
   const data = extractPageData(document);
 
+  // Mount each candidate element (the helper skips already-mounted/invalid ones).
   for (const element of document.querySelectorAll<HTMLElement>("[data-component]")) {
-    if (state.instances.has(element)) continue;
-    const name = element.dataset.component;
-    if (!name) continue;
-    const definition = state.registeredComponents.get(name);
-    if (!definition) continue;
-
-    const persistent = swapArea ? !swapArea.contains(element) : true;
-    const instance = createInstance(definition, element, persistent);
-    const ctx = makeContext(element, data);
-
-    runHook(instance, "onCreate", ctx);
-    runHook(instance, "onMount", ctx);
-    state.instances.set(element, instance);
-    emit("spa:component-mount", { name: definition.name, el: element });
+    mountElement(state, emit, swapArea, data, element);
   }
 }
 
