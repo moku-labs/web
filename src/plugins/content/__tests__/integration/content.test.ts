@@ -14,7 +14,7 @@ const GOLDEN_PATH = fileURLToPath(new URL("../fixtures/golden-hello-world.html",
 /** Fresh framework config registering the log core plugin (for the event harness). */
 function makeConfig(mode: "production" | "development") {
   return createCoreConfig("web-test", {
-    config: { isDevelopment: mode === "development" },
+    config: { stage: mode },
     plugins: [logPlugin],
     pluginConfigs: { log: { mode: "test" as const } }
   });

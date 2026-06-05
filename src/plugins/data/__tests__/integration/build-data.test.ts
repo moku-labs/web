@@ -33,7 +33,7 @@ function RawArticle(props: { html: string }) {
 /** Preload the production-filtered article set (drafts excluded) for the route loaders. */
 async function loadArticles(): Promise<{ bySlug: Map<string, Article>; cards: ArticleCard[] }> {
   const coreConfig = createCoreConfig("web-test", {
-    config: { isDevelopment: false },
+    config: { stage: "production" },
     plugins: [logPlugin],
     pluginConfigs: { log: { mode: "test" as const } }
   });
@@ -84,7 +84,7 @@ function makeApp(outDir: string, bySlug: Map<string, Article>, cards: ArticleCar
   const routes = defineRoutes({ home, article, about, viaContent });
 
   const coreConfig = createCoreConfig("web-test", {
-    config: { isDevelopment: false, mode: "hybrid" as const },
+    config: { stage: "production", mode: "hybrid" as const },
     plugins: [logPlugin],
     pluginConfigs: { log: { mode: "test" as const } }
   });

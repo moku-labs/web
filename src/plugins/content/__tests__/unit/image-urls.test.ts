@@ -10,7 +10,7 @@ import type { ContentApiContext } from "../../types";
 function makeApi(contentDir: string) {
   const ctx: ContentApiContext = {
     state: { articles: new Map() },
-    global: { isDevelopment: true },
+    global: { stage: "development" },
     emit: vi.fn(),
     locales: () => ["en", "ru"],
     defaultLocale: () => "en",

@@ -91,7 +91,7 @@ export async function loadFixtureArticles(
   const app = createApp({
     // content is node-only — added explicitly (not a framework default).
     plugins: [contentPlugin],
-    config: { isDevelopment: mode === "development" },
+    config: { stage: mode },
     pluginConfigs: {
       site: SITE,
       i18n: { locales: [...locales], defaultLocale: locales[0] ?? "en" },
@@ -186,7 +186,7 @@ export function buildBlogApp(options: {
   const app = createApp({
     // Node-only SSG plugins — composed by the consumer (not framework defaults).
     plugins: [contentPlugin, buildPlugin, deployPlugin],
-    config: { isDevelopment: (options.mode ?? "production") === "development", mode: "ssg" },
+    config: { stage: options.mode ?? "production", mode: "ssg" },
     pluginConfigs: {
       site: SITE,
       i18n: { ...I18N, locales: [...locales], defaultLocale: locales[0] ?? "en" },

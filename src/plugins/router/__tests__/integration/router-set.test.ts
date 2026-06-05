@@ -16,7 +16,7 @@ const SITE = { name: "Set Test", url: "https://set.dev", author: "T", descriptio
 /** Build a minimal site+i18n+router app at a given global render mode. */
 function makeApp(mode: "ssg" | "spa" | "hybrid" = "hybrid") {
   const coreConfig = createCoreConfig("web", {
-    config: { isDevelopment: false, mode },
+    config: { stage: "production", mode },
     plugins: [],
     pluginConfigs: {}
   });

@@ -34,7 +34,7 @@ function buildApp(root: string) {
   const routes = defineRoutes({ home });
 
   const coreConfig = createCoreConfig("web-test", {
-    config: { isDevelopment: false, mode: "ssg" as const },
+    config: { stage: "production", mode: "ssg" as const },
     plugins: [logPlugin],
     pluginConfigs: { log: { mode: "test" as const } }
   });
