@@ -2,6 +2,7 @@
  * @file build plugin — type definitions (Config, State, Api, public output types).
  */
 import type { EmitFn } from "@moku-labs/core";
+import type { Stage } from "../../config";
 import type { RouteDefinition } from "../router/types";
 
 /**
@@ -90,8 +91,8 @@ export type PhaseContext = {
   state: State;
   /** Resolved, frozen build config. */
   readonly config: Readonly<Config>;
-  /** Global framework config (development flag; render mode is read via `router.mode()`). */
-  readonly global: Readonly<{ isDevelopment: boolean }>;
+  /** Global framework config (deployment stage; render mode is read via `router.mode()`). */
+  readonly global: Readonly<{ stage: Stage }>;
   /** Resolve a depended-upon plugin instance to its public API. */
   require: PhaseRequire;
   /** Whether a plugin is registered (by name) — used to detect the OPTIONAL `data` plugin. */

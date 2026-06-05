@@ -9,6 +9,7 @@
  */
 import type { BundledTheme, ThemeRegistrationAny } from "shiki";
 import type { Pluggable, Processor } from "unified";
+import type { Stage } from "../../config";
 
 /**
  * YAML frontmatter parsed from each article file.
@@ -266,8 +267,8 @@ export type ContentEvents = {
 export type ContentApiContext = {
   /** Mutable shell state (article cache). */
   state: State;
-  /** Global framework configuration (development flag). */
-  global: { isDevelopment: boolean };
+  /** Global framework configuration (deployment stage). */
+  global: { stage: Stage };
   /** Emit a registered content event. */
   emit: <K extends keyof ContentEvents>(event: K, payload: ContentEvents[K]) => void;
   /** Active locale codes from i18n. */

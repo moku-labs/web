@@ -1,115 +1,146 @@
 # content
 
-> Complex plugin — Markdown content pipeline: discover article source files, parse YAML frontmatter, compute reading time, render to security-hardened HTML through a [unified](https://unified.js.org/) processor, and expose a locale-keyed `Article` model. Depends on `i18n` for active locales and default-locale fallback.
+> **Node-only** — the Markdown content layer: discover article sources, parse YAML frontmatter, compute reading time, render to security-hardened HTML, and expose a locale-keyed `Article` model.
 
-## API
+`content` owns the article model and its orchestration: locale fallback, draft filtering, date-descending sort, stable `contentId` assignment, the in-memory article cache, and notification events. It is **provider-driven** — exactly like `env`. The plugin *shell* (`api.ts`, `state.ts`, `config.ts`, `validate.ts`) imports zero node code and is browser-safe; all source I/O and the actual Markdown pipeline (gray-matter → unified → Shiki → sanitize) live in a [`ContentProvider`](#dependencies) you compose. The built-in `fileSystemContent` provider is the Node source — and the *only* module that touches `node:fs` and the pipeline — which is why this plugin is classed Node-only even though `contentPlugin` itself ships in the browser bundle.
 
-| Method | Signature | Purpose |
-|--------|-----------|---------|
-| `loadAll` | `() => Promise<Map<string, Article[]>>` | Load every article across every active locale, date-descending. Emits `content:ready`. |
-| `load` | `(slug, locale) => Promise<Article>` | Resolve + render one article with locale fallback. Throws `[web] content ...` if neither the requested nor default-locale file exists. |
-| `renderMarkdown` | `(md) => Promise<string>` | Render a raw Markdown fragment to HTML through the full pipeline. |
-| `invalidate` | `(paths) => void` | Mark file paths stale for incremental dev rebuilds. Emits `content:invalidated`. |
-| `articleToCard` | `(article) => ArticleCard` | Pure projection of an `Article` to a lightweight card (no HTML). |
+Routes pull it via `ctx.require(contentPlugin)` inside build-only loaders, and apps reach it at `app.content`. It [depends on `i18n`](../i18n/README.md) for the active locale set and the default-locale fallback source. Lifecycle stance: **pure in-process compute** — `onInit` only (a fail-fast config check), no `onStart`/`onStop`. There is no live resource to warm or release; the costly unified/Shiki processor is a lazy singleton built on first use and parked inside the *provider's* closure, never on plugin state.
 
-### Events
-
-- `content:ready` — `{ locales, articleCount }` — emitted at the end of every `loadAll()`. Notification-only; fetch data via `loadAll()`, not off the event.
-- `content:invalidated` — `{ paths }` — emitted on every `invalidate(paths)`.
-
-## Configuration
+## Example
 
 ```ts
-import { contentPlugin, fileSystemContent } from "@moku-labs/web";
+import { createApp, contentPlugin, fileSystemContent } from "@moku-labs/web";
 
-createApp({
-  plugins: [contentPlugin],
+const app = createApp({
+  plugins: [contentPlugin], // node-only — add it explicitly for a build
   pluginConfigs: {
+    i18n: { locales: ["en", "uk"], defaultLocale: "en" },
     content: {
-      // The content plugin SHELL is browser-safe (orchestration only). Source I/O +
-      // the Markdown pipeline live in a provider you compose — mirrors `env` providers.
       providers: [
         fileSystemContent({
-          contentDir: "./src/content",  // article root: content/<slug>/<locale>.md
-          trustedContent: false,         // SECURITY GATE — see below
+          contentDir: "./content", // article root: content/<slug>/<locale>.md
           shikiTheme: "github-dark",
-          defaultAuthor: "Alex",         // optional; applied when frontmatter omits author
-          extraRemarkPlugins: [],        // additive — concatenated AFTER framework defaults
-          extraRehypePlugins: []         // additive — concatenated AFTER custom transforms
+          defaultAuthor: "Ada"
         })
       ]
     }
   }
 });
+
+// All articles, per locale, date-descending (emits content:ready)
+const byLocale = await app.content.loadAll();
+
+// One article with locale fallback (uk → en) and full pipeline render
+const article = await app.content.load("intro", "uk");
+const card = app.content.articleToCard(article); // lightweight, no HTML
 ```
 
-Compose at least one provider (validated at `onInit`); every `fileSystemContent` option has a
-default except `contentDir` (required) and `defaultAuthor` (resolves to `undefined`). On the browser,
-`contentPlugin` (the shell) is importable from `@moku-labs/web/browser` for `ctx.require(contentPlugin)`
-in build-only loaders, while `fileSystemContent` (node) is exported only from the package root.
+## API
 
-## Key invariants
+Reached via `app.content` or `ctx.require(contentPlugin)`.
+
+| Method | Signature | Notes |
+|---|---|---|
+| `loadAll` | `() => Promise<Map<string, Article[]>>` | Load every article across every active locale. Applies locale fallback, excludes drafts **in production only**, sorts date-descending, assigns `contentId`, caches, and emits `content:ready`. |
+| `load` | `(slug: string, locale: string) => Promise<Article>` | Resolve + render one article with locale fallback. Throws a `[web] content` not-found error if neither the requested-locale nor default-locale file exists. In production a `draft` throws the **same** not-found error (drafts are indistinguishable from missing). |
+| `renderMarkdown` | `(md: string) => Promise<string>` | Render a raw Markdown fragment to HTML through the full provider pipeline. |
+| `invalidate` | `(paths: readonly string[]) => void` | Mark file paths stale for incremental dev rebuilds: fans invalidation to the provider and drops affected slugs from the cache. Empty/whitespace paths are ignored. Emits `content:invalidated`. |
+| `articleToCard` | `(article: Article) => ArticleCard` | Pure projection of an `Article` to a lightweight card (no rendered HTML) for lists/grids. |
+| `contentDir` | `() => string` | The configured content source directory (from the first provider, e.g. `"./content"`). Lets a build copy each article's co-located assets (`<contentDir>/<slug>/images/`). |
+
+The `Article` model: `{ frontmatter, computed, html, locale, isFallback, url }`. `frontmatter` carries the authored fields (`title`, `date`, `description`, `tags`, `language`, optional `draft`/`author`); `computed` carries `{ slug, readingTime, contentId, status, wordCount }`. On fallback, `locale` and `url` stay the *requested* locale while `isFallback` is `true`.
+
+## Configuration
+
+`pluginConfigs.content` — one required field.
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `providers` | `ContentProvider[]` | `[]` | Ordered content sources. Compose **at least one** (e.g. `fileSystemContent(...)`); the empty default is rejected at `onInit`. First provider to supply a slug+locale wins; `slugs()` are unioned across providers. |
+
+Per-source options live on the provider, not here. The Node `fileSystemContent(options)` factory takes `FileSystemContentOptions`:
+
+| Option | Type | Default | Notes |
+|---|---|---|---|
+| `contentDir` | `string` | — (required) | Absolute or project-relative path to the article root. |
+| `trustedContent` | `boolean` | `false` | SECURITY GATE. When `false`, `rehype-sanitize` runs as the final step. Set `true` only for fully author-controlled Markdown — it skips sanitize entirely. |
+| `shikiTheme` | `BundledTheme \| ThemeRegistrationAny` | `"github-dark"` | Passed straight to `@shikijs/rehype`. |
+| `defaultAuthor` | `string` | `undefined` | Applied to articles whose frontmatter omits `author`. |
+| `extraRemarkPlugins` | `readonly Pluggable[]` | `[]` | Concatenated **after** the framework remark defaults (additive — never replaces them). |
+| `extraRehypePlugins` | `readonly Pluggable[]` | `[]` | Concatenated after the custom transforms, before Shiki + sanitize (additive). |
+
+## Dependencies
+
+`depends: [i18nPlugin]`. The shell PULLs the `i18n` API via `ctx.require(i18nPlugin)` for `locales()` (which locales `loadAll` iterates) and `defaultLocale()` (the fallback source for `load`). See [`../i18n/README.md`](../i18n/README.md).
+
+`ContentProvider` is the composition seam the shell drives:
+
+| Member | Signature | Role |
+|---|---|---|
+| `name` | `string` | Human-readable, used in diagnostics. |
+| `contentDir` | `string` | Surfaced via `api.contentDir()` (`""` for non-filesystem sources). |
+| `slugs` | `() => Promise<readonly string[]>` | Discover the slugs this provider can supply. |
+| `readArticle` | `(slug, fileLocale, outLocale, isFallback) => Promise<Article \| null>` | Read + render one article; `null` when absent. |
+| `render` | `(markdown: string) => Promise<string>` | Render a standalone Markdown string. |
+| `invalidate?` | `(paths: readonly string[]) => void` | Optional dev hook to drop stale discovery. |
+
+When more than one provider is composed, the shell collapses them into a single facade: `slugs()` are unioned and sorted, `readArticle`/`render` use first-match, `invalidate` fans out. A single-provider list (the common case) is used directly.
+
+## Events
+
+Notification-only — fetch real data via the API, never off the payload.
+
+| Event | Payload | Emitted by |
+|---|---|---|
+| `content:ready` | `{ locales: readonly string[]; articleCount: number }` | end of every `loadAll()` |
+| `content:invalidated` | `{ paths: readonly string[] }` | every `invalidate(paths)` (only the accepted, non-empty paths) |
+
+## Design notes
 
 ### The sanitize-last XSS boundary (`trustedContent`)
 
-`rehype-sanitize` runs as the **last** rehype step — after Shiki highlighting — whenever
-`trustedContent: false` (the default). Sanitizing last means even the markup Shiki
-generates is scrubbed, and dangerous payloads (`<script>`, `onerror=`, `javascript:`
-URLs) are stripped from rendered HTML.
+`rehype-sanitize` runs as the **last** rehype step — after Shiki highlighting — whenever `trustedContent: false` (the default). Sanitizing last means even the markup Shiki emits is scrubbed, and dangerous payloads (`<script>`, `onerror=`, `javascript:` URLs) are stripped from the output. The extended schema (`pipeline/sanitize.ts`) clones the library default and *additively* allowlists exactly what the framework transforms produce: the `pull-quote`, `section-divider`, and `section-divider-ornament` classes on `aside`/`div`/`span`, `loading="lazy"` on `<img>`, and `class`/`className`/`style` globally (`*`) so Shiki's inline token colors survive.
 
-Setting `trustedContent: true` **skips** the sanitize step entirely and trusts all raw
-HTML in the source. Use it **only** when the framework author controls 100% of the
-Markdown (no user-submitted content). The extended sanitize schema additively
-allowlists exactly the markup the framework transforms emit: the `pull-quote`,
-`section-divider`, and `section-divider-ornament` classes, and `loading="lazy"` on
-`<img>`.
+> [!WARNING]
+> `trustedContent: true` **skips** sanitize entirely and trusts all raw HTML in the source. Use it only when the framework author controls 100% of the Markdown (no user-submitted content).
 
 ### Additive `extraRemarkPlugins` / `extraRehypePlugins`
 
-The framework default remark/rehype plugin arrays are **hardcoded** in
-`pipeline/plugins.ts` (and wired by `pipeline/markdown.ts`) — never exposed as a
-config-array default. A consumer-facing full-array config key would be **replaced**,
-not merged, by the shallow merge (spec/05 §3), silently erasing the framework
-pipeline. The additive `extraRemarkPlugins` / `extraRehypePlugins` keys avoid this:
-defaults are never in config, so they cannot be replaced; consumer extras are
-**concatenated** after the defaults at processor-build time.
+The framework default remark/rehype arrays are **hardcoded** in `pipeline/plugins.ts` (wired by `pipeline/markdown.ts`) — never a config-array default. A full-array config key would be *replaced*, not merged, by the shallow plugin-config merge, silently erasing the framework pipeline. Keeping defaults out of config and exposing only additive `extra*` keys means consumer extras are **concatenated** after the defaults, never able to wipe them.
 
 ### Lazy processor singleton (in the provider)
 
-The Shiki/unified processor is a **lazy singleton stored on the provider's private
-`ContentProviderState.processor`** — never on the plugin shell's `ctx.state`, never a
-module-level cache. It is built on the first `loadAll()` / `renderMarkdown()` via
-`ensureProcessor(state, options)` inside the `fileSystemContent` provider, then reused
-for every article. Because the processor lives in the provider closure, two apps in one
-process never share one (no cross-app Shiki leak). `createState`/`onInit` do no async
-work, keeping `createApp` synchronous.
+The Shiki/unified processor is a **lazy singleton stored on the provider's private `ContentProviderState.processor`** — never on the shell's `ctx.state`, never a module-level cache. It is built on the first `render()`/`readArticle()` via `ensureProcessor(state, options)` inside `fileSystemContent`, then reused. Because it lives in the provider closure, two apps in one process never share one (no cross-app Shiki leak), and `createState`/`onInit` do no async work, keeping `createApp` synchronous.
 
-### Locale fallback & draft filtering
+### Locale fallback & draft filtering (stage-gated)
 
-`load(slug, locale)` prefers the native `content/<slug>/<locale>.md`
-(`isFallback: false`); when absent it falls back to the default-locale file
-(`isFallback: true`, requested locale retained on `locale`/`url`). `loadAll()` and
-`load()` exclude articles whose status is `draft` only when `!global.isDevelopment`
-(i.e. in non-development mode).
+`load(slug, locale)` prefers the native `<contentDir>/<slug>/<locale>.md` (`isFallback: false`); when absent it falls back to the default-locale file (`isFallback: true`, requested locale retained on `locale`/`url`). Drafts (frontmatter `draft: true` → `computed.status === "draft"`) are excluded by `loadAll` and `load` **only when `global.stage === "production"`** — they load normally in `development` and `test`. In production a draft surfaces as the *identical* not-found error a missing article does, so drafts cannot be probed.
 
-## Structure
+### Computed fields
 
-```
-content/
-  index.ts             # wiring harness only
-  types.ts             # Config, State, Api, Article, Frontmatter, ArticleCard, ContentEvents, ContentApiContext
-  config.ts            # defaultContentConfig
-  events.ts            # contentEvents register callback
-  validate.ts          # validateContentConfig (onInit fail-fast)
-  state.ts             # createContentState — empty containers, null processor
-  api.ts               # contentApi + createContentApi (loadAll/load/renderMarkdown/invalidate/articleToCard + loader/invalidate logic)
-  pipeline/
-    markdown.ts        # ensureProcessor — lazy builder, sanitize-last, extra-plugin concat
-    frontmatter.ts     # parseFrontmatter (gray-matter, Date→ISO, defaults)
-    reading-time.ts    # calculateReadingTime
-    plugins.ts         # framework default remark/rehype arrays + the 3 custom transforms
-    sanitize.ts        # extended rehype-sanitize schema
-```
+`readingTime` is `reading-time`'s estimate, `Math.ceil`-ed with a 1-minute floor; `wordCount` is its raw word count. `contentId` is the slug on read, then rewritten by `loadAll` to a sortable `${locale}:${index4}:${slug}` *after* the date sort. `fileSystemContent` also rewrites co-located relative image `src`s (`./images/…` → `/<slug>/images/…`) so they resolve from any locale page. Frontmatter `Date` values are coerced to ISO `YYYY-MM-DD` (avoiding timezone shift), and the five required fields throw a `[web] content` error if missing.
 
-> Lifecycle: no `onStart`/`onStop` — the plugin is pure in-process compute with no
-> live resource to warm or release; the lazy processor is created on first use.
+## Files
+
+| File | Responsibility |
+|---|---|
+| `index.ts` | Wiring harness only (`depends`, `events`, `config`, `createState`, `onInit`, `api`). |
+| `types.ts` | `Config`, `State`, `Api`, `Article`, `ArticleCard`, `Frontmatter`, `ComputedFields`, `ContentProvider`, `FileSystemContentOptions`, `ContentEvents`, `ContentApiContext`. |
+| `config.ts` | `defaultContentConfig` — `{ providers: [] }`. |
+| `events.ts` | `contentEvents` register callback. |
+| `validate.ts` | `validateContentConfig` — `onInit` fail-fast when no provider is composed. |
+| `state.ts` | `createContentState` — the empty locale-keyed article cache. |
+| `api.ts` | `contentApi` (kernel-facing) + `createContentApi` (kernel-free) + `mergeProviders`. All orchestration: fallback, draft filtering, sort, cache, events. Imports zero node code. |
+| `providers.ts` | `fileSystemContent` — the Node provider (`node:fs` + pipeline). Root export only, never `/browser`. |
+| `pipeline/markdown.ts` | `ensureProcessor` — lazy builder, sanitize-last, extra-plugin concat. |
+| `pipeline/plugins.ts` | Framework default remark/rehype arrays + the 3 custom transforms (lazy-images, pull-quote, section-divider). |
+| `pipeline/frontmatter.ts` | `parseFrontmatter` (gray-matter, `Date`→ISO, required-field + default handling). |
+| `pipeline/reading-time.ts` | `calculateReadingTime`. |
+| `pipeline/sanitize.ts` | `buildSanitizeSchema` — the extended rehype-sanitize schema. |
+
+> [!NOTE]
+> The shell (`contentPlugin`) is re-exported from `@moku-labs/web/browser` so build-only loaders can `ctx.require(contentPlugin)` on either side, while `fileSystemContent` is exported **only** from the package root — mirroring the node `env` providers (`dotenv`/`processEnv`).
+
+---
+
+<sub>Part of <strong><a href="../../../README.md">@moku-labs/web</a></strong> — built on <a href="https://github.com/moku-labs/core">@moku-labs/core</a>.</sub>

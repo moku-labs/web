@@ -21,7 +21,7 @@ const SITE = {
 /** Build the core (router+head+spa over happy-dom) exposing createPlugin for probes. */
 function makeCore() {
   const coreConfig = createCoreConfig("web-test", {
-    config: { isDevelopment: false, mode: "spa" as const },
+    config: { stage: "production", mode: "spa" as const },
     plugins: [logPlugin],
     pluginConfigs: { log: { mode: "test" as const } }
   });

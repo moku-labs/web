@@ -27,7 +27,7 @@ const SITE = {
 /** Load the fixture articles once so route loaders can close over them by slug. */
 async function loadFixtureArticles(): Promise<Map<string, Article>> {
   const coreConfig = createCoreConfig("web-test", {
-    config: { isDevelopment: false, mode: "ssg" as const },
+    config: { stage: "production", mode: "ssg" as const },
     plugins: [logPlugin],
     pluginConfigs: { log: { mode: "test" as const } }
   });
@@ -65,7 +65,7 @@ function buildApp(outDir: string, bySlug: Map<string, Article>, extraPlugins: un
   const routes = defineRoutes({ home: homeRoute, article: articleRoute });
 
   const coreConfig = createCoreConfig("web-test", {
-    config: { isDevelopment: false, mode: "ssg" as const },
+    config: { stage: "production", mode: "ssg" as const },
     plugins: [logPlugin],
     pluginConfigs: { log: { mode: "test" as const } }
   });
@@ -116,7 +116,7 @@ describe("build integration", () => {
     const out = path.join(tmp, "dist");
     const events: string[] = [];
     const coreConfig = createCoreConfig("web-test", {
-      config: { isDevelopment: false, mode: "ssg" as const },
+      config: { stage: "production", mode: "ssg" as const },
       plugins: [logPlugin],
       pluginConfigs: { log: { mode: "test" as const } }
     });
@@ -227,7 +227,7 @@ describe("build integration", () => {
     const routes = defineRoutes({ home: homeRoute, guide: localized });
 
     const coreConfig = createCoreConfig("web-test", {
-      config: { isDevelopment: false, mode: "ssg" as const },
+      config: { stage: "production", mode: "ssg" as const },
       plugins: [logPlugin],
       pluginConfigs: { log: { mode: "test" as const } }
     });
