@@ -42,6 +42,8 @@ const HEAD_PLACEHOLDER = "<!--moku:head-->";
 const BODY_PLACEHOLDER = "<!--moku:body-->";
 /** Template placeholder for the injected asset `<link>`/`<script>` tags. */
 const ASSETS_PLACEHOLDER = "<!--moku:assets-->";
+/** Template placeholder for the page's locale (`<html lang>`). */
+const LANG_PLACEHOLDER = "<!--moku:lang-->";
 
 /** Result of the pages phase: page count + the captured root/default-page HTML. */
 export type PagesResult = {
@@ -164,11 +166,13 @@ function renderDocument(parts: DocumentParts): string {
 }
 
 /**
- * Fill a shell template's `<!--moku:head-->` / `<!--moku:body-->` /
- * `<!--moku:assets-->` placeholders deterministically at build time.
+ * Fill a shell template's `<!--moku:lang-->` / `<!--moku:head-->` /
+ * `<!--moku:body-->` / `<!--moku:assets-->` placeholders deterministically at build
+ * time. `<!--moku:lang-->` carries the page locale (for `<html lang>`), so a single
+ * shared template stays locale-correct across every locale.
  *
  * @param template - The raw shell template HTML.
- * @param parts - The composed head/body/assets pieces.
+ * @param parts - The composed head/body/assets/locale pieces.
  * @returns The filled document string.
  * @example
  * ```ts
@@ -177,6 +181,7 @@ function renderDocument(parts: DocumentParts): string {
  */
 function fillTemplate(template: string, parts: DocumentParts): string {
   return template
+    .replaceAll(LANG_PLACEHOLDER, parts.locale)
     .replaceAll(HEAD_PLACEHOLDER, parts.head)
     .replaceAll(BODY_PLACEHOLDER, parts.body)
     .replaceAll(ASSETS_PLACEHOLDER, parts.assets);

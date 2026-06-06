@@ -257,6 +257,34 @@ describe("build/phases/pages", () => {
     expect(html).not.toContain("<!--moku:");
   });
 
+  it("substitutes <!--moku:lang--> with the page locale in a custom template", async () => {
+    const templatePath = path.join(tmp, "shell.html");
+    writeFileSync(
+      templatePath,
+      '<!doctype html><html lang="<!--moku:lang-->"><head><!--moku:head--></head><body><!--moku:body--></body></html>'
+    );
+    const home = makeRoute("/", { render: () => h("h1", {}, "Home") });
+    const ctx = makeCtx({
+      config: { outDir: tmp, template: templatePath, injectAssets: false },
+      requireMap: {
+        router: {
+          mode: () => "ssg",
+          manifest: () => [home],
+          entries: makeEntries([{ name: "home", pattern: "/" }])
+        },
+        i18n: { locales: () => ["en"], defaultLocale: () => "en" },
+        head: { render: () => "<title>Home</title>" }
+      }
+    });
+
+    await renderPages(ctx);
+
+    const html = readFileSync(path.join(tmp, "index.html"), "utf8");
+    // A shared custom shell stays locale-correct rather than hardcoding lang.
+    expect(html).toContain('<html lang="en">');
+    expect(html).not.toContain("<!--moku:");
+  });
+
   it("passes loaded data into head.render and the renderer", async () => {
     const load = vi.fn(async () => ({ title: "Loaded" }));
     const route = makeRoute("/post/", {

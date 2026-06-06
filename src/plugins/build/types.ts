@@ -216,7 +216,16 @@ export type Config = {
   localeRedirects?: boolean;
   /** Authoritative client bundle entry path (overrides the conventional scan). */
   clientEntry?: string;
-  /** HTML shell template with `<!--moku:head-->`/`<!--moku:body-->`/`<!--moku:assets-->` placeholders. */
+  /**
+   * Path to a custom HTML document shell, giving the app full control over the
+   * scaffold (charset, viewport, `<html lang>`, body attributes, wrapper markup).
+   * Placeholders, substituted per page at build time:
+   * `<!--moku:lang-->` (page locale for `<html lang>`),
+   * `<!--moku:head-->` (composed `<head>` inner HTML),
+   * `<!--moku:assets-->` (injected `<link>`/`<script>` tags),
+   * `<!--moku:body-->` (SSR body HTML).
+   * When unset, the built-in shell is used (it emits charset + viewport by default).
+   */
   template?: string;
 };
 
