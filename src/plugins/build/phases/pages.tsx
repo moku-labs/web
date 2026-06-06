@@ -9,6 +9,7 @@
  * {@link writeDocument}) → {@link writeDataSidecars} (hybrid/spa data) →
  * {@link findRootHtml}.
  */
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -416,6 +417,84 @@ function renderBody(definition: RouteDefinition, routeContext: RouteContext<Rout
 }
 
 /**
+ * Hash a page's render inputs (its loaded data) for the render cache. `null` when the
+ * data is not JSON-serializable — such a page is never cached and always re-renders.
+ *
+ * @param data - The route's loaded data (the only per-page input besides params/locale/code).
+ * @returns The hex SHA-256 of the serialized data, or `null` when it cannot be serialized.
+ * @example
+ * ```ts
+ * hashData({ title: "Hi" }); // "9f8e…"
+ * ```
+ */
+function hashData(data: unknown): string | null {
+  try {
+    // JSON.stringify returns undefined for undefined / functions — coalesce so the hash is
+    // always over a string; a throw (circular / BigInt) drops to the never-cache path below.
+    const serialized = JSON.stringify(data) ?? "";
+    return createHash("sha256").update(serialized).digest("hex");
+  } catch {
+    // eslint-disable-next-line unicorn/no-null -- `null` = non-serializable data ⇒ never cached
+    return null;
+  }
+}
+
+/**
+ * The render-cache key for one page instance: name + params + locale (the stable identity
+ * that, together with the data hash, determines its body). NUL-joined so no value collides.
+ *
+ * @param instance - The page instance.
+ * @returns The cache key string.
+ * @example
+ * ```ts
+ * renderCacheKey(instance); // "article {\"slug\":\"x\"} en"
+ * ```
+ */
+function renderCacheKey(instance: PageInstance): string {
+  return `${instance.name} ${JSON.stringify(instance.params)} ${instance.locale}`;
+}
+
+/**
+ * Render one page's body, reusing the cached body when this page's data is unchanged.
+ * The body is the synchronous, dominant-cost step ({@link renderBody}); an incremental
+ * dev rebuild (`reuse`, code unchanged) skips it for every page whose data hash matches
+ * the cache, and a changed page (or a non-`reuse` run) renders + refreshes the cache.
+ *
+ * @param ctx - Plugin context (provides the cross-run `state.renderCache`).
+ * @param instance - The page instance being rendered.
+ * @param routeContext - The route context passed to `.render()`/`.layout()`.
+ * @param data - The route's loaded data (hashed to detect a change).
+ * @param reuse - Whether this run may reuse a cached body (incremental, no code change).
+ * @returns The SSR-rendered body HTML.
+ * @example
+ * ```ts
+ * const body = renderBodyCached(ctx, instance, routeContext, data, true);
+ * ```
+ */
+function renderBodyCached(
+  ctx: Pick<PhaseContext, "state">,
+  instance: PageInstance,
+  routeContext: RouteContext<RouteState>,
+  data: unknown,
+  reuse: boolean
+): string {
+  const cache = ctx.state.renderCache;
+  const key = renderCacheKey(instance);
+  const hash = hashData(data);
+
+  // Reuse the cached body only when allowed AND the data is unchanged + serializable.
+  if (reuse && hash !== null) {
+    const hit = cache.get(key);
+    if (hit?.dataHash === hash) return hit.body;
+  }
+
+  // Otherwise render the body and (when serializable) refresh the cache entry.
+  const body = renderBody(instance.definition, routeContext);
+  if (hash !== null) cache.set(key, { dataHash: hash, body });
+  return body;
+}
+
+/**
  * Write a rendered page document to its on-disk path. The path comes from the
  * compiled `TypedRoute.toFile(params)` (honoring any route-level `.toFile()`
  * override), resolved under the build `outDir`; parent directories are created first.
@@ -450,16 +529,18 @@ async function writeDocument(
  * @param ctx - Plugin context (provides `require`, `state`, `config`, `has`).
  * @param instance - The concrete page instance to render.
  * @param shell - Per-build wiring shared across instances (asset tags + template).
+ * @param reuse - Whether this run may reuse a cached body (incremental, no code change).
  * @returns The instance's URL, rendered HTML, loaded data, and client-nav flag.
  * @example
  * ```ts
- * await renderInstance(ctx, instance, { assets: "", template: null });
+ * await renderInstance(ctx, instance, { assets: "", template: null }, false);
  * ```
  */
 async function renderInstance(
   ctx: Pick<PhaseContext, "require" | "state" | "config" | "has">,
   instance: PageInstance,
-  shell: RenderShell
+  shell: RenderShell,
+  reuse: boolean
 ): Promise<RenderedPage> {
   const { definition, entry, params, locale } = instance;
   const router = ctx.require(routerPlugin);
@@ -475,10 +556,11 @@ async function renderInstance(
     url: (routeName, routeParams = {}) => router.toUrl(routeName, routeParams)
   };
 
-  // Compose the page's head and body into the document parts.
+  // Compose the page's head and body into the document parts (body reused from the
+  // render cache when this page's data is unchanged on an incremental rebuild).
   const parts: DocumentParts = {
     head: composeHeadHtml(ctx, instance, url, routeContext, data),
-    body: renderBody(definition, routeContext),
+    body: renderBodyCached(ctx, instance, routeContext, data, reuse),
     assets: shell.assets,
     locale
   };
@@ -599,6 +681,13 @@ function findRootHtml(rendered: readonly RenderedPage[]): string | null {
 const RENDER_BATCH_SIZE = 2;
 
 /**
+ * Batch size for an incremental (`reuse`) rebuild. Most instances are cheap cache hits, so
+ * a larger batch cuts the per-batch `setImmediate` round-trips (which would otherwise add
+ * pure latency to an otherwise-fast rebuild) without starving the dev spinner.
+ */
+const INCREMENTAL_BATCH_SIZE = 32;
+
+/**
  * Render `items` through `worker` in bounded-size batches, yielding a macrotask
  * (`setImmediate`) between batches. Beyond bounding peak concurrency/memory for large
  * sites, the yield lets the single JS thread breathe: one un-yielded `Promise.all` over
@@ -642,7 +731,13 @@ async function renderInBatches<Item, Out>(
  * bounded batches ({@link renderInBatches}) → write data sidecars (hybrid/spa) →
  * capture the root page's HTML for the root-index phase.
  *
+ * On an incremental rebuild (`options.reuse`) the cross-run render cache is kept and each
+ * unchanged-data page reuses its cached body; a full render clears the cache first so a
+ * removed/renamed route's stale body never lingers.
+ *
  * @param ctx - Plugin context (provides `require`, `state`, `config`, `log`, `has`).
+ * @param options - Optional incremental hint; omit for a full render.
+ * @param options.reuse - Reuse cached page bodies for unchanged-data pages (dev incremental rebuild).
  * @returns The number of pages rendered and the captured default-page HTML.
  * @example
  * ```ts
@@ -650,22 +745,29 @@ async function renderInBatches<Item, Out>(
  * ```
  */
 export async function renderPages(
-  ctx: Pick<PhaseContext, "require" | "state" | "config" | "log" | "has">
+  ctx: Pick<PhaseContext, "require" | "state" | "config" | "log" | "has">,
+  options?: { reuse?: boolean }
 ): Promise<PagesResult> {
   // Resolve dependencies + snapshot the manifest into state for later phases.
+  const reuse = options?.reuse === true;
   const router = ctx.require(routerPlugin);
   const manifest = router.manifest();
   ctx.state.manifest = [...manifest];
   const locales = ctx.require(i18nPlugin).locales();
   const byPattern = makeEntryMap(router);
 
+  // A full render drops the stale render cache (so removed/renamed routes never linger);
+  // an incremental render keeps it to reuse the body of any page whose data is unchanged.
+  if (!reuse) ctx.state.renderCache.clear();
+
   // Expand → render every page instance (shell read + asset tags computed once). Rendered
   // in bounded batches with a macrotask yield between them so a watching dev server's
   // spinner keeps animating instead of freezing for the whole (large) phase.
   const shell = await prepareShell(ctx);
   const instances = await expandAllInstances(manifest, locales, byPattern, ctx);
-  const rendered = await renderInBatches(instances, RENDER_BATCH_SIZE, instance =>
-    renderInstance(ctx, instance, shell)
+  const batchSize = reuse ? INCREMENTAL_BATCH_SIZE : RENDER_BATCH_SIZE;
+  const rendered = await renderInBatches(instances, batchSize, instance =>
+    renderInstance(ctx, instance, shell, reuse)
   );
 
   // Persist client-data sidecars (hybrid/spa) + capture the root page for root-index.

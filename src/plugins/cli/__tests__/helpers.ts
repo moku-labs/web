@@ -157,6 +157,8 @@ export function makeCtx(options: MakeCtxOptions = {}): {
     networkUrl: () => null,
     // eslint-disable-next-line unicorn/no-null -- State.fileMtime returns `number | null`; tests default to "missing" (every event is a change).
     fileMtime: () => null,
+    // eslint-disable-next-line unicorn/no-null -- State.fileHash returns `string | null`; tests default to "no hash" (the no-op-save short-circuit is off).
+    fileHash: () => null,
     ...options.state
   };
 

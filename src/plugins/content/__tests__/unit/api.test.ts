@@ -103,6 +103,68 @@ describe("content/api", () => {
     expect(state.articles.get("en")?.has("hello-world")).toBe(false);
   });
 
+  it("loadAll({ reuse }) reuses cached articles and re-reads only invalidated slugs", async () => {
+    const { ctx } = makeCtx({ locales: ["en"], defaultLocale: "en" });
+    const api = createContentApi(ctx);
+    await api.loadAll(); // full load populates the cache
+
+    // With nothing invalidated, a reuse load re-reads zero articles.
+    const spy = vi.spyOn(ctx.provider, "readArticle");
+    await api.loadAll({ reuse: true });
+    expect(spy).not.toHaveBeenCalled();
+
+    // Invalidate one slug → only THAT slug is re-read; the rest come from the cache.
+    api.invalidate([`${FIXTURE_DIR}/hello-world/en.md`]);
+    spy.mockClear();
+    await api.loadAll({ reuse: true });
+    expect(spy.mock.calls.map(call => call[0])).toEqual(["hello-world"]);
+  });
+
+  it("loadAll({ reuse }) recomputes contentId ordinals across the FULL set after a partial reload", async () => {
+    const { ctx } = makeCtx({ locales: ["en"], defaultLocale: "en" });
+    const api = createContentApi(ctx);
+    const full = await api.loadAll();
+    const fullIds = (full.get("en") ?? []).map(a => a.computed.contentId);
+
+    // Reload incrementally after invalidating one slug — ids + order must match a full load.
+    api.invalidate([`${FIXTURE_DIR}/second-post/en.md`]);
+    const incremental = await api.loadAll({ reuse: true });
+    expect((incremental.get("en") ?? []).map(a => a.computed.contentId)).toEqual(fullIds);
+  });
+
+  it("loadAll({ reuse }) renumbers REUSED neighbors when a reloaded article changes the sort order", async () => {
+    const { ctx } = makeCtx({ locales: ["en"], defaultLocale: "en" });
+    const api = createContentApi(ctx);
+    await api.loadAll(); // full: second-post (2026-03-20) newest, then draft-post, then hello-world
+
+    // Re-read second-post with a much OLDER date so it sorts LAST; the two neighbors are
+    // reused from cache (NOT re-read) yet must be renumbered to their new positions.
+    const realRead = ctx.provider.readArticle.bind(ctx.provider);
+    vi.spyOn(ctx.provider, "readArticle").mockImplementation(async (slug, fileLocale, out, fb) => {
+      const article = await realRead(slug, fileLocale, out, fb);
+      if (article && slug === "second-post") {
+        return { ...article, frontmatter: { ...article.frontmatter, date: "2020-01-01" } };
+      }
+      return article;
+    });
+    api.invalidate([`${FIXTURE_DIR}/second-post/en.md`]);
+    const reloadedByLocale = await api.loadAll({ reuse: true });
+    const reloaded = reloadedByLocale.get("en") ?? [];
+
+    // New order: the reused neighbors now precede the re-read (now-oldest) second-post.
+    expect(reloaded.map(a => a.computed.slug)).toEqual([
+      "draft-post",
+      "hello-world",
+      "second-post"
+    ]);
+    // The REUSED neighbors got fresh ordinals matching their new positions (not stale ones).
+    expect(reloaded.map(a => a.computed.contentId)).toEqual([
+      "en:0000:draft-post",
+      "en:0001:hello-world",
+      "en:0002:second-post"
+    ]);
+  });
+
   it("invalidate ignores empty/whitespace paths and emits only the accepted ones", () => {
     const { ctx, emit } = makeCtx();
     createContentApi(ctx).invalidate(["", "   ", "src/content/x/en.md"]);

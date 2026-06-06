@@ -211,7 +211,11 @@ async function runOne(
 /**
  * Bundles CSS and JS into the output directory via two separate runner passes
  * (dodging Bun's mixed-entrypoint segfault), honoring `config.minify`, and caches
- * the resulting hashed asset paths in `state.buildCache` for downstream phases.
+ * the resulting hashed asset paths in `state.buildCache` for downstream phases. The
+ * two passes run CONCURRENTLY (`Promise.all`) — they target disjoint hashed outputs
+ * and distinct `buildCache` keys (`css`/`js`), so overlapping them ~halves bundle
+ * wall-time with no shared-state hazard. The CSS pass is still dispatched first, so
+ * the runner's invocation order stays css-then-js.
  *
  * @param ctx - Plugin context (provides `state`, `config`, `log`).
  * @param options - Optional dependency-injection seam (runner + entrypoints).
@@ -227,8 +231,11 @@ export async function bundle(
 ): Promise<void> {
   const runner = options.runner ?? defaultRunner;
   const { minify, outDir } = ctx.config;
+  const assetsDir = path.join(outDir, "assets");
   const cssEntrypoints = options.cssEntrypoints ?? resolveEntrypoints(CSS_ENTRY_CANDIDATES);
   const jsEntrypoints = options.jsEntrypoints ?? resolveJsEntrypoints(ctx);
-  await runOne(ctx, runner, "css", cssEntrypoints, outDir, path.join(outDir, "assets"), minify);
-  await runOne(ctx, runner, "js", jsEntrypoints, outDir, path.join(outDir, "assets"), minify);
+  await Promise.all([
+    runOne(ctx, runner, "css", cssEntrypoints, outDir, assetsDir, minify),
+    runOne(ctx, runner, "js", jsEntrypoints, outDir, assetsDir, minify)
+  ]);
 }

@@ -6,6 +6,7 @@
  * `TypeError` and tests can inject fakes). Unit tests swap any of these.
  */
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, statSync, watch } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
@@ -183,6 +184,25 @@ function defaultFileMtime(filePath: string): number | null {
 }
 
 /**
+ * Default file-content-hash probe — `sha256` of the file bytes, returning `null` for a
+ * missing/unreadable path. serve()'s change gate compares this against the last
+ * successfully-built bytes to drop a no-op save (a byte-identical double Ctrl-S).
+ *
+ * @param filePath - The absolute path to hash.
+ * @returns The hex SHA-256 of the file's bytes, or `null` when it cannot be read.
+ * @example
+ * const hash = defaultFileHash("/abs/content/a.md");
+ */
+function defaultFileHash(filePath: string): string | null {
+  try {
+    return createHash("sha256").update(readFileSync(filePath)).digest("hex");
+  } catch {
+    // eslint-disable-next-line unicorn/no-null -- contract: null signals a missing/unreadable file.
+    return null;
+  }
+}
+
+/**
  * Default LAN network-URL deriver — wraps {@link networkUrl} so the production seam
  * reads `node:os` interfaces while tests can inject a deterministic value.
  *
@@ -325,6 +345,7 @@ export function createState(_ctx: {
     serveStatic: defaultServeStatic,
     fileResponse: defaultFileResponse,
     networkUrl: defaultNetworkUrl,
-    fileMtime: defaultFileMtime
+    fileMtime: defaultFileMtime,
+    fileHash: defaultFileHash
   };
 }

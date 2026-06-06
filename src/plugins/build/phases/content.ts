@@ -16,7 +16,14 @@ export const CONTENT_CACHE_KEY = "content";
  * pages/feeds/og-images phases. Performs NO Markdown parsing itself — the
  * content plugin owns rendering (god-plugin invariant).
  *
+ * On a dev incremental rebuild (`options.changed` set) it first `invalidate()`s the
+ * changed Markdown so `loadAll({ reuse: true })` re-reads + re-renders ONLY those
+ * articles, reusing the cached HTML for the rest. With no options it does a full load.
+ *
  * @param ctx - Plugin context (provides `require`, `state`, `log`).
+ * @param options - Optional incremental hints; omit for a full load.
+ * @param options.reuse - Reuse cached content for slugs not invalidated (dev incremental rebuild).
+ * @param options.changed - The changed Markdown paths to invalidate before loading.
  * @returns The locale-keyed article map returned by the content plugin.
  * @example
  * ```ts
@@ -24,9 +31,13 @@ export const CONTENT_CACHE_KEY = "content";
  * ```
  */
 export async function loadContent(
-  ctx: Pick<PhaseContext, "require" | "state" | "log">
+  ctx: Pick<PhaseContext, "require" | "state" | "log">,
+  options?: { reuse?: boolean; changed?: readonly string[] }
 ): Promise<Map<string, Article[]>> {
-  const byLocale = await ctx.require(contentPlugin).loadAll();
+  const content = ctx.require(contentPlugin);
+  // Drop only the changed Markdown so the reuse load re-reads + re-highlights just those.
+  if (options?.changed && options.changed.length > 0) content.invalidate(options.changed);
+  const byLocale = await content.loadAll({ reuse: options?.reuse ?? false });
   ctx.state.buildCache.set(CONTENT_CACHE_KEY, byLocale);
   ctx.log.debug("build:content", { locales: byLocale.size });
   return byLocale;

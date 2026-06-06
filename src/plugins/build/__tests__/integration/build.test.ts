@@ -272,6 +272,59 @@ describe("build integration", () => {
     expect(existsSync(path.join(out, "_redirects"))).toBe(false);
   });
 
+  it("skipClean preserves prior outDir contents; a clean run wipes them", async () => {
+    const out = path.join(tmp, "dist");
+    const app = buildApp(out, bySlug);
+    await app.build.run(); // initial full build creates the tree
+    // A sentinel no phase writes — survives only when the clean is skipped.
+    writeFileSync(path.join(out, "sentinel.txt"), "keep", "utf8");
+    await app.build.run({ skipClean: true });
+    expect(existsSync(path.join(out, "sentinel.txt"))).toBe(true);
+    // A normal (clean) run removes it.
+    await app.build.run();
+    expect(existsSync(path.join(out, "sentinel.txt"))).toBe(false);
+  });
+
+  it("an incremental rebuild re-renders a page whose render data changed (render cache miss)", async () => {
+    const out = path.join(tmp, "dist");
+    const app = buildApp(out, bySlug);
+    await app.build.run(); // full build warms the render cache
+
+    // Change the render input for ONE article (the route renders `ctx.data.html`). If the
+    // render cache wrongly reused a stale body, the assertion below would fail — so this
+    // test actually discriminates a stale-cache regression (not just plumbing).
+    const hello = bySlug.get("hello-world");
+    if (hello) (hello as { html: string }).html = "<h1>Hello World UPDATED</h1>";
+
+    const result = await app.build.run({
+      skipClean: true,
+      changed: [path.join(FIXTURE_DIR, "hello-world", "en.md")]
+    });
+
+    expect(result.pageCount).toBeGreaterThan(0);
+    // The changed-data page is a render-cache MISS → its new body is emitted.
+    expect(readFileSync(path.join(out, "hello-world", "index.html"), "utf8")).toContain(
+      "Hello World UPDATED"
+    );
+    // An untouched sibling page is still present + correct after the incremental run.
+    expect(existsSync(path.join(out, "second-post", "index.html"))).toBe(true);
+    expect(readFileSync(path.join(out, "second-post", "index.html"), "utf8")).toContain(
+      "Second Post"
+    );
+  });
+
+  it("overrides disable feeds + sitemap for one run without mutating config", async () => {
+    const out = path.join(tmp, "dist");
+    const app = buildApp(out, bySlug); // config has feeds + sitemap ON
+    await app.build.run({ overrides: { feeds: false, sitemap: false } });
+    expect(existsSync(path.join(out, "feed.xml"))).toBe(false);
+    expect(existsSync(path.join(out, "sitemap.xml"))).toBe(false);
+    // The persisted config is untouched: a later default run emits them again.
+    await app.build.run();
+    expect(existsSync(path.join(out, "feed.xml"))).toBe(true);
+    expect(existsSync(path.join(out, "sitemap.xml"))).toBe(true);
+  });
+
   it("type-level: app.build is Api; run() returns Promise<BuildResult>", async () => {
     const out = path.join(tmp, "dist");
     const app = buildApp(out, bySlug);

@@ -53,6 +53,27 @@ describe("build/phases/bundle", () => {
     expect(Object.values(css)[0]?.startsWith("/")).toBe(false);
   });
 
+  it("runs the CSS + JS passes concurrently (both in flight before either resolves)", async () => {
+    let active = 0;
+    let peak = 0;
+    const runner = vi.fn(async (_opts: Parameters<BundleRunner>[0]) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      // Yield a microtask so the sibling pass can start before this one resolves.
+      await Promise.resolve();
+      active -= 1;
+      return { success: true, outputs: [] };
+    });
+    const ctx = makeCtx({ config: { outDir: "./dist", minify: false } });
+    await bundle(ctx, { runner, cssEntrypoints: ["styles.css"], jsEntrypoints: ["main.ts"] });
+    expect(runner).toHaveBeenCalledTimes(2);
+    // Both passes overlapped (sequential awaits would peak at 1).
+    expect(peak).toBe(2);
+    // CSS is still dispatched first (runner invocation order preserved).
+    expect(runner.mock.calls[0]?.[0].entrypoints).toEqual(["styles.css"]);
+    expect(runner.mock.calls[1]?.[0].entrypoints).toEqual(["main.ts"]);
+  });
+
   it("skips a pass with no entrypoints (no runner call)", async () => {
     const runner = vi.fn(async () => ({ success: true, outputs: [] }));
     const ctx = makeCtx({});

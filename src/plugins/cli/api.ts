@@ -285,17 +285,25 @@ export function createApi(ctx: CliPluginContext): Api {
 
     /**
      * Dev loop: build once, serve `dist/` in-process (live-reload injected), watch
-     * `watchDirs`, debounced rebuild + reload. Resolves on SIGINT/SIGTERM.
+     * `watchDirs`, debounced + incremental rebuild + reload. For a fast rebuild the dev
+     * build disables minification + expensive, preview-irrelevant outputs (feeds /
+     * sitemap / og-images / locale-redirects); pass `og`/`sitemap`/`feeds`/
+     * `localeRedirects` to re-enable any of them for the session. Resolves on SIGINT/SIGTERM.
      *
-     * @param options - Optional port override (defaults to `config.port`).
+     * @param options - Optional port override + per-session dev feature opt-ins.
      * @returns Resolves once the server has been torn down.
      * @example
-     * await api.serve({ port: 3000 });
+     * await api.serve({ port: 3000, og: true });
      */
     serve(options = {}) {
       const { port = ctx.config.port } = options;
       ctx.state.render.header("serve");
-      return runDevServer(ctx, port);
+      return runDevServer(ctx, port, {
+        og: options.og ?? false,
+        sitemap: options.sitemap ?? false,
+        feeds: options.feeds ?? false,
+        localeRedirects: options.localeRedirects ?? false
+      });
     },
 
     /**

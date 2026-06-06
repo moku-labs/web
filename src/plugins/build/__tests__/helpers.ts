@@ -43,7 +43,8 @@ export function makeCtx(options: {
       manifest: null,
       buildCache: new Map<string, unknown>(),
       runId: options.runId ?? "test-run",
-      ogImageHashCache: new Map<string, string>()
+      ogImageHashCache: new Map<string, string>(),
+      renderCache: new Map()
     },
     config,
     global: { stage: "production" },
