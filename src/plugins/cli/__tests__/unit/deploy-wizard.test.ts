@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -118,6 +118,35 @@ describe("cli/runDeployWizard (guided deploy)", () => {
     // init was called once for the scaffold (workflow setup was skipped → option 2).
     expect(deploy.init).toHaveBeenCalledWith({});
     expect(outcome.deployed).toBe(true);
+  });
+
+  it("offers to create a placeholder .env when the Cloudflare credentials are missing", async () => {
+    writeWrangler(tmp); // wrangler present; only the credentials are missing
+    const { ctx } = makeCtx({ state: { confirm: vi.fn(async () => true) } });
+
+    const outcome = await runDeployWizard(ctx, { guided: true });
+
+    // Still blocked — empty placeholders do not satisfy the gate...
+    expect(outcome).toEqual({ deployed: false, reason: "blocked" });
+    // ...but a .env was scaffolded with placeholders for both missing secrets.
+    const env = readFileSync(path.join(tmp, ".env"), "utf8");
+    expect(env).toContain("CLOUDFLARE_API_TOKEN=");
+    expect(env).toContain("CLOUDFLARE_ACCOUNT_ID=");
+  });
+
+  it("appends only the missing key to an existing .env, never clobbering one present", async () => {
+    writeWrangler(tmp);
+    // .env already carries the account id (with a value); only the token is missing.
+    writeFileSync(path.join(tmp, ".env"), "CLOUDFLARE_ACCOUNT_ID=existing-acct\n", "utf8");
+    process.env[ACCOUNT] = "existing-acct";
+    const { ctx } = makeCtx({ state: { confirm: vi.fn(async () => true) } });
+
+    await runDeployWizard(ctx, { guided: true });
+
+    const env = readFileSync(path.join(tmp, ".env"), "utf8");
+    expect(env).toContain("CLOUDFLARE_ACCOUNT_ID=existing-acct"); // existing value untouched
+    expect(env).toContain("CLOUDFLARE_API_TOKEN="); // missing key appended
+    expect(env.match(/CLOUDFLARE_ACCOUNT_ID=/g)?.length).toBe(1); // no duplicate/clobber
   });
 
   it("declines cleanly when the user says no at the deploy confirm", async () => {

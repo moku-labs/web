@@ -226,12 +226,12 @@ function deployFailureHint(error: unknown): string {
   if (PREREQUISITE_ERROR.test(String(error))) {
     return [
       "how to fix:",
-      "1. set the missing secret(s) in .env or your shell — CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID",
-      "2. create a token at https://dash.cloudflare.com/profile/api-tokens (template: Cloudflare Pages — Edit)",
-      "3. or run the guided deploy — app.cli.deploy({ guided: true }) — to diagnose & fix prerequisites"
+      "1. run `bun run deploy` (without `--cli`) — the guided setup diagnoses prerequisites and offers to create a starter .env",
+      "2. or set them yourself in .env: CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID",
+      "   token: https://dash.cloudflare.com/profile/api-tokens (template: Cloudflare Pages — Edit)"
     ].join("\n");
   }
-  return "how to fix: run the guided deploy — app.cli.deploy({ guided: true }) — to diagnose prerequisites, then retry";
+  return "how to fix: run `bun run deploy` (without `--cli`) — the guided setup diagnoses prerequisites — then retry";
 }
 
 /**

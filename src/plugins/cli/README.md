@@ -65,10 +65,16 @@ await app.cli.preview();
 
 Scaffolds via `ctx.require(deployPlugin).init({ ci: true })`, then deploys via `.run()`. The y/N confirm is a **local safety net only** — shown **just** on an interactive TTY (`process.stdout.isTTY === true` with `CI` unset). Any non-interactive run (CI, or a piped/non-TTY shell) **skips the prompt and deploys**, so the consumer scripts never hang a pipeline. `options.yes` forces the skip anywhere. The outcome is `{ deployed: true, url, deploymentId, branch, durationMs }` (the awaited deploy result), or `{ deployed: false, reason: "declined" }` only when a TTY user answers no. `options.branch` is forwarded to `deploy.run`.
 
-A **failed** deploy (e.g. a missing `CLOUDFLARE_API_TOKEN`) is surfaced through the Panel renderer — a styled `✗ deploy failed` + the cause + an actionable *how to fix* hint (set the secret, or run `deploy({ guided: true })`) — instead of a raw stack trace, then **re-thrown** so a non-interactive run still exits non-zero. Pass `{ guided: true }` to run the interactive setup wizard, which diagnoses prerequisites (token, account id, `wrangler`) and gates the deploy on everything being green before it ever calls `.run()`.
+**Guided by convention.** The thin deploy script enables guided mode by default — `app.cli.deploy({ guided: !process.argv.includes("--cli") })` — so `bun run deploy` runs the **interactive setup wizard** and `bun run deploy --cli` takes the **direct**, CI-safe path. The wizard diagnoses prerequisites (token, account id, `wrangler.jsonc`), **offers to scaffold a `wrangler.jsonc` and a placeholder `.env`** for any missing credentials (created or appended-to, never clobbering an existing key), hard-gates the deploy on everything being green, runs a local build smoke test, deploys, then offers to scaffold a GitHub Actions workflow.
+
+A **failed** direct (`--cli`) deploy — e.g. a missing `CLOUDFLARE_API_TOKEN` — is surfaced through the Panel renderer (a styled `✗ deploy failed` + the cause + an actionable *how to fix* hint pointing at `bun run deploy` and the `.env` secrets) instead of a raw stack trace, then **re-thrown** so a non-interactive run still exits non-zero.
 
 ```ts
-const outcome = await app.cli.deploy();                          // prompts only on a TTY
+// scripts/deploy.ts — guided by default, `--cli` for the direct/CI path
+await app.cli.deploy({ guided: !process.argv.includes("--cli") });
+
+// or drive it directly:
+const outcome = await app.cli.deploy();                          // direct; prompts only on a TTY
 await app.cli.deploy({ branch: "preview/landing", yes: true });  // forces the deploy anywhere
 ```
 
