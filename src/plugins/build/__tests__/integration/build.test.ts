@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCoreConfig } from "@moku-labs/core";
 import { h } from "preact";
-import { afterEach, beforeEach, describe, expect, expectTypeOf, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { contentPlugin } from "../../../content";
 import { fileSystemContent } from "../../../content/providers";
 import type { Article } from "../../../content/types";
@@ -283,6 +283,52 @@ describe("build integration", () => {
     // A normal (clean) run removes it.
     await app.build.run();
     expect(existsSync(path.join(out, "sentinel.txt"))).toBe(false);
+  });
+
+  it("a list-route loader calling loadAll() on EVERY page re-reads content only once (memoized)", async () => {
+    // Regression: the blog's `allArticles` helper calls content.loadAll() in every list-page
+    // loader, so loadAll ran once per page — each re-reading + re-rendering every article
+    // (≈189 full loads/build → 19s). loadAll must memoize so per-page calls re-read nothing.
+    const out = path.join(tmp, "dist");
+    const provider = fileSystemContent({ contentDir: FIXTURE_DIR });
+    const readSpy = vi.spyOn(provider, "readArticle");
+
+    // 10 pages whose loaders each pull the full set via loadAll() (the hot pattern).
+    const pagedRoute = route("/p/{n}/")
+      .generate(() => Array.from({ length: 10 }, (_, n) => ({ n: String(n) })))
+      .load(async ctx => {
+        await ctx.require(contentPlugin).loadAll();
+        return {};
+      })
+      .render(() => h("p", {}, "x"));
+    const homeRoute = route("/")
+      .render(() => h("h1", {}, "Home"))
+      .head(() => ({ title: "Home" }));
+    const routes = defineRoutes({ home: homeRoute, paged: pagedRoute });
+
+    const coreConfig = createCoreConfig("web-test", {
+      config: { stage: "production", mode: "ssg" as const },
+      plugins: [logPlugin],
+      pluginConfigs: { log: { mode: "test" as const } }
+    });
+    const { createApp } = coreConfig.createCore(coreConfig, { plugins: [] });
+    const app = createApp({
+      plugins: [sitePlugin, i18nPlugin, routerPlugin, contentPlugin, headPlugin, buildPlugin],
+      pluginConfigs: {
+        site: SITE,
+        router: { routes },
+        i18n: { locales: ["en"], defaultLocale: "en" },
+        content: { providers: [provider] },
+        build: { outDir: out, feeds: false, sitemap: false, images: false, ogImage: false }
+      }
+    });
+
+    await app.build.run();
+
+    // One resolve pass over the slugs (memo serves the other ~10 per-page calls). Without the
+    // memo it would be ~11 loadAll passes × the slug count (30+). Bound it well under that.
+    const slugs = await provider.slugs();
+    expect(readSpy.mock.calls.length).toBeLessThanOrEqual(slugs.length * 2);
   });
 
   it("an incremental rebuild re-renders a page whose render data changed (render cache miss)", async () => {

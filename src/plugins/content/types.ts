@@ -230,12 +230,19 @@ export type Config = {
  *
  * @example
  * ```ts
- * { articles: new Map() }
+ * { articles: new Map(), loadedAll: null }
  * ```
  */
 export type State = {
   /** Article cache keyed locale -> (slug -> Article). Starts empty. */
   articles: Map<string, Map<string, Article>>;
+  /**
+   * Memoized full `loadAll()` result, or `null` when not yet loaded / invalidated. List-route
+   * loaders call `loadAll()` once PER PAGE, so without this every page re-reads + re-renders
+   * every article (the dev-loop killer). The memo makes repeated calls O(1); `invalidate()`
+   * clears it so a dev rebuild reloads (re-resolving only the changed slugs). Starts `null`.
+   */
+  loadedAll: Map<string, Article[]> | null;
 };
 
 /**
@@ -289,11 +296,13 @@ export type ContentApiContext = {
  */
 export type LoadAllOptions = {
   /**
-   * Reuse already-cached articles for slugs NOT dropped by a preceding `invalidate()`,
-   * re-reading + re-rendering (Shiki) ONLY the invalidated (dirty) articles. The
-   * post-sort `contentId` ordinals are always recomputed across the full set, so order +
-   * ids match a full load. Default `false` (a full load that re-reads every article).
-   * Used by dev incremental rebuilds; a fresh process / production build never reuses.
+   * Reuse the per-build memo + per-slug cache (re-resolving only slugs a preceding
+   * `invalidate()` dropped). Default `true` — this is what keeps repeated `loadAll()` calls
+   * (a list route's loader runs once per page) cheap, and makes a dev rebuild re-render only
+   * changed articles. Set `false` to force a FRESH full reload (cold build / an
+   * unclassifiable change), which re-reads + re-renders every article and rebuilds the memo.
+   * The post-sort `contentId` ordinals are always recomputed across the full set, so order +
+   * ids match a full load either way.
    */
   reuse?: boolean;
 };
@@ -308,10 +317,13 @@ export type LoadAllOptions = {
  */
 export type Api = {
   /**
-   * Load every article across every active locale, returning a locale-keyed
-   * map of date-descending Article arrays. Emits content:ready.
+   * Load every article across every active locale, returning a locale-keyed map of
+   * date-descending Article arrays. Emits content:ready (once per actual load). Cache-first
+   * + memoized: repeated calls (e.g. a list route's loader on every page) return the SAME
+   * cached result with no re-read — so treat the result as READ-ONLY (do not sort/mutate it
+   * in place; slice/copy first). Pass `{ reuse: false }` to force a fresh full reload.
    *
-   * @param options - Optional load behaviour ({@link LoadAllOptions}); omit for a full load.
+   * @param options - Optional load behaviour ({@link LoadAllOptions}); default reuses the cache.
    */
   loadAll(options?: LoadAllOptions): Promise<Map<string, Article[]>>;
   /**

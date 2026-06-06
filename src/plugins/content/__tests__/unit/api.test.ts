@@ -17,7 +17,8 @@ function makeCtx(
     defaultLocale: string;
   }> = {}
 ) {
-  const state: State = { articles: new Map() };
+  // eslint-disable-next-line unicorn/no-null -- State.loadedAll is `Map | null`; null = "not loaded"
+  const state: State = { articles: new Map(), loadedAll: null };
   const emit = vi.fn() as EmitSpy;
   const ctx: ContentApiContext = {
     state,
@@ -163,6 +164,46 @@ describe("content/api", () => {
       "en:0001:hello-world",
       "en:0002:second-post"
     ]);
+  });
+
+  it("loadAll() is MEMOIZED within a build — repeated calls re-read NOTHING", async () => {
+    // Regression: the blog's list-page loaders call loadAll() once PER PAGE (≈189x/build),
+    // and each call used to re-read + re-run Shiki on every article. loadAll must memoize so
+    // the repeated calls hit the cache.
+    const { ctx } = makeCtx({ locales: ["en"], defaultLocale: "en" });
+    const api = createContentApi(ctx);
+    const spy = vi.spyOn(ctx.provider, "readArticle");
+
+    await api.loadAll();
+    const readsAfterFirst = spy.mock.calls.length;
+    expect(readsAfterFirst).toBeGreaterThan(0); // the first call did the real work
+
+    for (let i = 0; i < 50; i += 1) await api.loadAll();
+    // The 50 repeat calls re-read nothing — they return the memoized result.
+    expect(spy.mock.calls.length).toBe(readsAfterFirst);
+  });
+
+  it("loadAll() emits content:ready ONCE across repeated memoized calls", async () => {
+    const { ctx, emit } = makeCtx({ locales: ["en"], defaultLocale: "en" });
+    const api = createContentApi(ctx);
+    await api.loadAll();
+    await api.loadAll();
+    await api.loadAll();
+    expect(emit.mock.calls.filter(call => call[0] === "content:ready")).toHaveLength(1);
+  });
+
+  it("invalidate() clears the memo so the next loadAll re-reads ONLY the changed slug", async () => {
+    const { ctx } = makeCtx({ locales: ["en"], defaultLocale: "en" });
+    const api = createContentApi(ctx);
+    await api.loadAll();
+
+    const spy = vi.spyOn(ctx.provider, "readArticle");
+    await api.loadAll(); // memo hit → no reads
+    expect(spy).not.toHaveBeenCalled();
+
+    api.invalidate([`${FIXTURE_DIR}/hello-world/en.md`]);
+    await api.loadAll(); // memo cleared → re-reads only the dirty slug
+    expect(spy.mock.calls.map(call => call[0])).toEqual(["hello-world"]);
   });
 
   it("invalidate ignores empty/whitespace paths and emits only the accepted ones", () => {
