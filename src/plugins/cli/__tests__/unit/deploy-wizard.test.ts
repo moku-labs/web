@@ -21,6 +21,13 @@ function writeNotFound(root: string): void {
   writeFileSync(path.join(root, "dist", "404.html"), "<html></html>", "utf8");
 }
 
+/** A project-not-found deploy error (carries the taxonomy code the wizard keys on). */
+function projectNotFoundError(): Error {
+  return Object.assign(new Error("[web] deploy: wrangler failed (exit 1)."), {
+    code: "ERR_DEPLOY_PROJECT_NOT_FOUND"
+  });
+}
+
 describe("cli/runDeployWizard (guided deploy)", () => {
   let tmp: string;
   let prevCwd: string;
@@ -162,5 +169,100 @@ describe("cli/runDeployWizard (guided deploy)", () => {
 
     expect(outcome).toEqual({ deployed: false, reason: "declined" });
     expect(deploy.run).not.toHaveBeenCalled();
+  });
+
+  it("offers to create the missing Pages project and, when declined, fails with a create-it hint", async () => {
+    writeWrangler(tmp);
+    writeNotFound(tmp);
+    process.env[TOKEN] = "tkn";
+    process.env[ACCOUNT] = "acct";
+    // `yes: true` skips the deploy confirm, so the one confirm is the create-project offer.
+    const { ctx, deploy } = makeCtx({ state: { confirm: vi.fn(async () => false) } });
+    deploy.run = vi.fn(async () => {
+      throw projectNotFoundError();
+    });
+
+    const outcome = await runDeployWizard(ctx, { guided: true, yes: true });
+
+    expect(outcome).toEqual({ deployed: false, reason: "failed" });
+    expect(deploy.createProject).not.toHaveBeenCalled(); // declined → never created
+    expect(deploy.run).toHaveBeenCalledTimes(1); // no retry
+    const calls = (ctx.state.render as CaptureRenderer).calls;
+    expect(calls.some(c => c[0] === "info" && /pages project create/i.test(String(c[1])))).toBe(
+      true
+    );
+  });
+
+  it("creates the missing Pages project on confirm, then retries the deploy successfully", async () => {
+    writeWrangler(tmp);
+    writeNotFound(tmp);
+    process.env[TOKEN] = "tkn";
+    process.env[ACCOUNT] = "acct";
+    const deployResult = {
+      url: "https://geek-life.pages.dev",
+      deploymentId: "d1",
+      branch: "main",
+      durationMs: 5
+    };
+    const { ctx, deploy } = makeCtx({
+      // confirm → yes (create); select → 2 (skip the post-deploy workflow offer).
+      state: { confirm: vi.fn(async () => true), select: vi.fn(async () => 2) }
+    });
+    deploy.run = vi
+      .fn()
+      .mockRejectedValueOnce(projectNotFoundError())
+      .mockResolvedValue(deployResult);
+
+    const outcome = await runDeployWizard(ctx, { guided: true, yes: true });
+
+    expect(outcome.deployed).toBe(true);
+    expect(deploy.createProject).toHaveBeenCalledTimes(1);
+    expect(deploy.run).toHaveBeenCalledTimes(2); // first attempt (fails) + retry (succeeds)
+  });
+
+  it("surfaces a create-project failure without retrying the deploy", async () => {
+    writeWrangler(tmp);
+    writeNotFound(tmp);
+    process.env[TOKEN] = "tkn";
+    process.env[ACCOUNT] = "acct";
+    const authError = Object.assign(new Error("[web] deploy: wrangler failed (exit 1)."), {
+      code: "ERR_DEPLOY_AUTH"
+    });
+    const { ctx, deploy } = makeCtx({ state: { confirm: vi.fn(async () => true) } });
+    deploy.run = vi.fn(async () => {
+      throw projectNotFoundError();
+    });
+    deploy.createProject = vi.fn(async () => {
+      throw authError;
+    });
+
+    const outcome = await runDeployWizard(ctx, { guided: true, yes: true });
+
+    expect(outcome).toEqual({ deployed: false, reason: "failed" });
+    expect(deploy.createProject).toHaveBeenCalledTimes(1);
+    expect(deploy.run).toHaveBeenCalledTimes(1); // not retried after a failed create
+    const calls = (ctx.state.render as CaptureRenderer).calls;
+    expect(calls.some(c => c[0] === "error" && /could not create/i.test(String(c[1])))).toBe(true);
+  });
+
+  it("flags a credential present in the raw env but unresolved by the app's providers", async () => {
+    writeWrangler(tmp);
+    // Both creds are in the raw process env, but the app resolved nothing (providers not
+    // wired) — `env: {}` makes ctx.env.get(...) return undefined for every key.
+    process.env[TOKEN] = "tkn";
+    process.env[ACCOUNT] = "acct";
+    const { ctx, deploy } = makeCtx({ env: {} });
+
+    const outcome = await runDeployWizard(ctx, { guided: true });
+
+    expect(outcome).toEqual({ deployed: false, reason: "blocked" });
+    expect(deploy.run).not.toHaveBeenCalled();
+    // Reported failing, and with the providers-not-wired guidance (check tuple: [name, ok, label, detail]).
+    const checks = (ctx.state.render as CaptureRenderer).calls.filter(c => c[0] === "check");
+    expect(
+      checks.some(
+        c => c[1] === false && String(c[2]).includes(TOKEN) && /providers/i.test(String(c[3]))
+      )
+    ).toBe(true);
   });
 });

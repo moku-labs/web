@@ -174,6 +174,16 @@ export type InitResult = {
 };
 
 /**
+ * Result of creating the remote Cloudflare Pages project.
+ */
+export type CreateProjectResult = {
+  /** The created project name (the `toSlug(site.name())` slug). */
+  name: string;
+  /** The production branch the project was created with. */
+  branch: string;
+};
+
+/**
  * Public API of the deploy plugin (returned from the api factory).
  */
 export type Api = {
@@ -218,4 +228,26 @@ export type Api = {
    * if (drift.drifted.length) process.exit(1);
    */
   init(options?: DeployInitOptions): Promise<InitResult>;
+  /**
+   * The Cloudflare Pages project name this app deploys to — `toSlug(site.name())`, the
+   * same slug `run()` passes as `--project-name` and `createProject()` creates. Lets a
+   * caller (e.g. the guided deploy wizard) name the project before it exists.
+   *
+   * @returns The project-name slug.
+   * @example
+   * app.deploy.projectName(); // "my-site"
+   */
+  projectName(): string;
+  /**
+   * Create the remote Cloudflare Pages project (`wrangler pages project create`) so a
+   * first deploy has a target. The slug is derived from `site.name()` and the production
+   * branch from `config.productionBranch` (or `"main"`). Wrangler errors if the project
+   * already exists; the guided wizard calls this only after a project-not-found failure.
+   *
+   * @returns The created project name + production branch.
+   * @throws {Error} With a `code` from the deploy error taxonomy on a non-zero exit.
+   * @example
+   * const created = await app.deploy.createProject(); // { name: "my-site", branch: "main" }
+   */
+  createProject(): Promise<CreateProjectResult>;
 };

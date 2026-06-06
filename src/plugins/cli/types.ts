@@ -408,16 +408,18 @@ export type BuildSummary = {
 /**
  * Outcome returned by `cli.deploy()` — either a completed deploy (with details) or a
  * skipped one. A skip is `"declined"` when a user answers "no" at the confirm prompt,
- * or `"blocked"` when the guided wizard found unmet prerequisites and stopped before
- * deploying. Non-interactive direct runs (CI / non-TTY) never prompt and always proceed,
- * so they never skip — the scripts are CI-safe.
+ * `"blocked"` when the guided wizard found unmet prerequisites and stopped before
+ * deploying, or `"failed"` when the deploy itself errored (e.g. the Pages project does
+ * not exist) and the wizard surfaced it as a styled error + fix hint instead of a raw
+ * throw. Non-interactive direct runs (CI / non-TTY) never prompt and always proceed, so
+ * they never `declined`-skip — the scripts are CI-safe.
  *
  * @example
  * const outcome: DeployOutcome = { deployed: false, reason: "declined" };
  */
 export type DeployOutcome =
   | { deployed: true; url: string; deploymentId: string; branch: string; durationMs: number }
-  | { deployed: false; reason: "declined" | "blocked" };
+  | { deployed: false; reason: "declined" | "blocked" | "failed" };
 
 /**
  * Options for `cli.build()`.

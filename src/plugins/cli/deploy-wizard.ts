@@ -31,6 +31,13 @@ const ACCOUNT_HELP = [
   "  export CLOUDFLARE_ACCOUNT_ID=…   or add it to .env."
 ].join("\n");
 
+/** Shown when a credential is in the raw environment but the app's env providers did not resolve it. */
+const PROVIDERS_HELP = [
+  "Found in your shell/.env but the app's env plugin did not resolve it — its providers",
+  "are not wired. Add the Node providers in createApp so the deploy can read it:",
+  "  pluginConfigs.env = { providers: [processEnv(), dotenv()] }   (import them from @moku-labs/web)."
+].join("\n");
+
 /** The GitHub repo secrets the generated workflow consumes. */
 const SECRETS_HELP = [
   "Add these repo secrets (GitHub → Settings → Secrets and variables → Actions):",
@@ -50,18 +57,50 @@ type Prerequisite = {
 };
 
 /**
- * Evaluate the three deploy prerequisites against the current project: the Cloudflare
- * wrangler config exists, and both Cloudflare credentials are present in the environment.
+ * Build one credential prerequisite by reading the SAME source the deploy reads — the
+ * resolved `ctx.env` table — so a ✓ guarantees `ctx.env.require(key)` will succeed. When
+ * the value is present in the raw `process.env` but unresolved by the app's providers
+ * (the silent "deploy can't see it" trap a bare `process.env` check would mark green),
+ * the fix hint points at wiring the providers instead of re-adding the value.
  *
+ * @param ctx - The cli plugin context (provides the resolved `ctx.env`).
+ * @param key - The credential variable name.
+ * @param label - The diagnostic line label.
+ * @param missingHelp - The fix hint when the credential is genuinely absent everywhere.
+ * @returns The credential prerequisite check.
+ * @example
+ * credentialPrereq(ctx, "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_TOKEN is set", TOKEN_HELP);
+ */
+function credentialPrereq(
+  ctx: CliPluginContext,
+  key: string,
+  label: string,
+  missingHelp: string
+): Prerequisite {
+  // Check what the deploy will actually read (the resolved env), never raw process.env.
+  const resolvedOk = (ctx.env.get(key) ?? "") !== "";
+  if (resolvedOk) return { ok: true, label, detail: undefined, scaffoldable: false };
+
+  // Unresolved: pick the hint by failure mode — present in the raw env but unsurfaced by
+  // the app's providers (wired-but-unresolved trap) vs genuinely absent everywhere.
+  const inRawEnv = (process.env[key] ?? "") !== "";
+  const detail = inRawEnv ? PROVIDERS_HELP : missingHelp;
+  return { ok: false, label, detail, scaffoldable: false };
+}
+
+/**
+ * Evaluate the three deploy prerequisites against the current project: the Cloudflare
+ * wrangler config exists, and both Cloudflare credentials resolve through `ctx.env` (the
+ * deploy's own source of truth — not a bare `process.env` read that can diverge from it).
+ *
+ * @param ctx - The cli plugin context (provides the resolved `ctx.env`).
  * @param cwd - The project root (where `wrangler.jsonc` lives).
  * @returns The ordered prerequisite checks.
  * @example
- * const prereqs = diagnose(process.cwd());
+ * const prereqs = diagnose(ctx, process.cwd());
  */
-function diagnose(cwd: string): Prerequisite[] {
+function diagnose(ctx: CliPluginContext, cwd: string): Prerequisite[] {
   const wranglerOk = existsSync(path.join(cwd, "wrangler.jsonc"));
-  const tokenOk = (process.env.CLOUDFLARE_API_TOKEN ?? "") !== "";
-  const accountOk = (process.env.CLOUDFLARE_ACCOUNT_ID ?? "") !== "";
   return [
     {
       ok: wranglerOk,
@@ -71,18 +110,8 @@ function diagnose(cwd: string): Prerequisite[] {
         : "Missing — scaffold it (offered below) or run app.deploy.init().",
       scaffoldable: true
     },
-    {
-      ok: tokenOk,
-      label: "CLOUDFLARE_API_TOKEN is set",
-      detail: tokenOk ? undefined : TOKEN_HELP,
-      scaffoldable: false
-    },
-    {
-      ok: accountOk,
-      label: "CLOUDFLARE_ACCOUNT_ID is set",
-      detail: accountOk ? undefined : ACCOUNT_HELP,
-      scaffoldable: false
-    }
+    credentialPrereq(ctx, "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_TOKEN is set", TOKEN_HELP),
+    credentialPrereq(ctx, "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_ACCOUNT_ID is set", ACCOUNT_HELP)
   ];
 }
 
@@ -219,8 +248,157 @@ async function offerWorkflowSetup(ctx: CliPluginContext): Promise<void> {
 }
 
 /**
- * Run the deploy step: confirm (unless `yes`), then deploy via the deploy plugin and
- * report the outcome. A declined confirm returns `{ deployed: false, reason: "declined" }`.
+ * Read the taxonomy `code` off a thrown value, when present. Deploy errors carry a
+ * `code` (e.g. `ERR_DEPLOY_PROJECT_NOT_FOUND`) so the wizard can tailor the fix hint.
+ *
+ * @param error - The thrown value.
+ * @returns The `code` string, or `undefined` when absent.
+ * @example
+ * codeOf(deployError("ERR_DEPLOY_AUTH", "…")); // "ERR_DEPLOY_AUTH"
+ */
+function codeOf(error: unknown): string | undefined {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const { code } = error as { code?: unknown };
+    return typeof code === "string" ? code : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * A copy-pasteable "create the project yourself" hint, shown when the user declines the
+ * offer to auto-create. Spells out that the remote project is what's missing (init only
+ * scaffolds local config).
+ *
+ * @param name - The Cloudflare Pages project name (the deploy slug).
+ * @returns The multi-line hint (newline-separated; rendered indented under a `›`).
+ * @example
+ * ctx.state.render.info(projectNotFoundHint("my-site"));
+ */
+function projectNotFoundHint(name: string): string {
+  return [
+    "how to fix: the Cloudflare Pages project does not exist yet — create it once, then",
+    "re-run `bun run deploy`. (app.deploy.init() only scaffolds local config; it does not",
+    "create the remote project.)",
+    `  • CLI:       bunx wrangler pages project create ${name} --production-branch main`,
+    "  • Dashboard: Cloudflare → Workers & Pages → Create → Pages"
+  ].join("\n");
+}
+
+/**
+ * An actionable, error-specific "how to fix" hint for a failed deploy (other than the
+ * project-not-found case, which the wizard handles interactively), so the user never
+ * lands on a raw stack trace.
+ *
+ * @param error - The thrown deploy error.
+ * @returns The fix hint line.
+ * @example
+ * ctx.state.render.info(deployFailureHint(err));
+ */
+function deployFailureHint(error: unknown): string {
+  const code = codeOf(error);
+
+  // A reached-Cloudflare auth failure (token present but rejected/expired).
+  if (code === "ERR_DEPLOY_AUTH" || code === "ERR_DEPLOY_AUTH_EXPIRED") {
+    return "how to fix: refresh CLOUDFLARE_API_TOKEN (scope: Account › Cloudflare Pages › Edit), then re-run `bun run deploy`.";
+  }
+
+  // A transport failure on the way to Cloudflare.
+  if (code === "ERR_DEPLOY_NETWORK") {
+    return "how to fix: a network error reached Cloudflare — check connectivity, then re-run `bun run deploy`.";
+  }
+
+  return "how to fix: resolve the error above, then re-run `bun run deploy`.";
+}
+
+/**
+ * Render a styled deploy failure (✗ + fix hint) and return the `"failed"` outcome, so a
+ * caught error surfaces consistently instead of as a raw throw.
+ *
+ * @param ctx - The cli plugin context.
+ * @param error - The thrown deploy error.
+ * @returns The `"failed"` deploy outcome.
+ * @example
+ * return renderFailure(ctx, error);
+ */
+function renderFailure(ctx: CliPluginContext, error: unknown): DeployOutcome {
+  ctx.state.render.error("deploy failed", error);
+  ctx.state.render.info(deployFailureHint(error));
+  return { deployed: false, reason: "failed" };
+}
+
+/**
+ * Deploy once via the deploy plugin and wrap the result as a successful outcome. Throws
+ * the classified deploy error on failure (the caller decides how to surface it).
+ *
+ * @param ctx - The cli plugin context.
+ * @param options - The deploy options (branch override).
+ * @returns The successful deploy outcome.
+ * @throws {Error} With a `code` from the deploy error taxonomy on any failure.
+ * @example
+ * const outcome = await deployOnce(ctx, { branch: "main" });
+ */
+async function deployOnce(ctx: CliPluginContext, options: DeployOptions): Promise<DeployOutcome> {
+  const result = await ctx
+    .require(deployPlugin)
+    .run(options.branch === undefined ? {} : { branch: options.branch });
+  return { deployed: true, ...result };
+}
+
+/**
+ * Handle a project-not-found deploy failure interactively: ask (a confirmation step)
+ * before creating a real Cloudflare resource, create the Pages project via the deploy
+ * plugin, then retry the deploy once. A declined offer (or a create failure) returns the
+ * `"failed"` outcome with an actionable hint — never a raw stack trace.
+ *
+ * @param ctx - The cli plugin context.
+ * @param options - The deploy options (branch override).
+ * @param originalError - The project-not-found error from the first attempt.
+ * @returns The deploy outcome (deployed after a successful create + retry, else failed).
+ * @example
+ * return createProjectThenRetry(ctx, options, error);
+ */
+async function createProjectThenRetry(
+  ctx: CliPluginContext,
+  options: DeployOptions,
+  originalError: unknown
+): Promise<DeployOutcome> {
+  const deploy = ctx.require(deployPlugin);
+  const name = deploy.projectName();
+
+  // Confirmation step — never create a remote resource without an explicit yes.
+  ctx.state.render.warn(`The Cloudflare Pages project "${name}" does not exist yet.`);
+  const create = await ctx.state.confirm(`Create the Cloudflare Pages project "${name}" now?`);
+  if (!create) {
+    ctx.state.render.error("deploy failed", originalError);
+    ctx.state.render.info(projectNotFoundHint(name));
+    return { deployed: false, reason: "failed" };
+  }
+
+  // Create the project, surfacing a create failure (e.g. auth) as a styled error.
+  try {
+    const created = await deploy.createProject();
+    ctx.state.render.check(true, `created Cloudflare Pages project "${created.name}"`);
+  } catch (error) {
+    ctx.state.render.error("could not create the Pages project", error);
+    ctx.state.render.info(deployFailureHint(error));
+    return { deployed: false, reason: "failed" };
+  }
+
+  // Retry the deploy once now that the project exists.
+  ctx.state.render.info("project created — retrying the deploy…");
+  try {
+    return await deployOnce(ctx, options);
+  } catch (error) {
+    return renderFailure(ctx, error);
+  }
+}
+
+/**
+ * Run the deploy step: confirm (unless `yes`), then deploy via the deploy plugin. A
+ * declined confirm returns `{ deployed: false, reason: "declined" }`. A project-not-found
+ * failure offers to create the project (with a confirmation step) and retries; any other
+ * runtime failure is surfaced as a styled error + fix hint, returning
+ * `{ deployed: false, reason: "failed" }` — never a raw stack trace.
  *
  * @param ctx - The cli plugin context.
  * @param options - The deploy options (branch override + `yes`).
@@ -240,10 +418,16 @@ async function runDeployStep(
     ctx.state.render.warn("deploy skipped");
     return { deployed: false, reason: "declined" };
   }
-  const result = await ctx
-    .require(deployPlugin)
-    .run(options.branch === undefined ? {} : { branch: options.branch });
-  return { deployed: true, ...result };
+
+  try {
+    return await deployOnce(ctx, options);
+  } catch (error) {
+    // Project not created yet → offer to create it (confirmed) and retry; else fail cleanly.
+    if (codeOf(error) === "ERR_DEPLOY_PROJECT_NOT_FOUND") {
+      return createProjectThenRetry(ctx, options, error);
+    }
+    return renderFailure(ctx, error);
+  }
 }
 
 /**
@@ -268,12 +452,12 @@ export async function runDeployWizard(
   // 1. Prerequisites — show every check, then offer to scaffold the fixable ones
   //    (wrangler.jsonc, plus a placeholder .env for any missing Cloudflare credentials).
   ctx.state.render.heading("Checking prerequisites");
-  for (const item of diagnose(cwd)) ctx.state.render.check(item.ok, item.label, item.detail);
-  await offerScaffold(ctx, diagnose(cwd));
+  for (const item of diagnose(ctx, cwd)) ctx.state.render.check(item.ok, item.label, item.detail);
+  await offerScaffold(ctx, diagnose(ctx, cwd));
   await offerEnvScaffold(ctx, cwd);
 
   // 2. Hard gate — re-check and stop (without deploying) while any blocker remains.
-  const blockers = diagnose(cwd).filter(item => !item.ok);
+  const blockers = diagnose(ctx, cwd).filter(item => !item.ok);
   if (blockers.length > 0) {
     ctx.state.render.heading("Not ready to deploy");
     for (const item of blockers) ctx.state.render.check(false, item.label, item.detail);
@@ -297,8 +481,10 @@ export async function runDeployWizard(
   );
   ctx.state.render.info("Tip: run `bun run preview` to eyeball the built site before deploying.");
 
-  // 4. Deploy, then 5. offer CI workflow setup regardless of the deploy choice.
+  // 4. Deploy, then 5. offer CI workflow setup — but not after a hard deploy failure
+  //    (the deploy is broken; don't pile a CI-setup prompt on top of the fix hint).
   const outcome = await runDeployStep(ctx, options);
-  await offerWorkflowSetup(ctx);
+  const deployFailed = outcome.deployed === false && outcome.reason === "failed";
+  if (!deployFailed) await offerWorkflowSetup(ctx);
   return outcome;
 }

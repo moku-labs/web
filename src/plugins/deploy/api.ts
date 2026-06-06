@@ -7,8 +7,9 @@ import { sitePlugin } from "../site";
 import { writeScaffolding } from "./init";
 import { runPreflight } from "./preflight";
 import { toSlug } from "./slug";
-import type { Api, Config, DeployResult, State } from "./types";
+import type { Api, Config, CreateProjectResult, DeployResult, State } from "./types";
 import {
+  buildProjectCreateArgs,
   buildWranglerArgs,
   classifyWranglerError,
   deployError,
@@ -157,15 +158,16 @@ export function validateConfig(ctx: DeployPluginContext): void {
  * Run wrangler for the prepared argv and surface its scrubbed result, translating
  * a non-zero exit into the classified deploy error. The API token is read from env
  * here so it never crosses a logging boundary; only scrubbed output is returned.
+ * Shared by `run()` (deploy) and `createProject()` (project create).
  *
  * @param ctx - Plugin context (provides `state.spawn`, `config`, `env`).
  * @param args - The fully-built, pre-validated wrangler argv.
  * @returns The wrangler `stdout` plus the scrubbed `stderr` to log on success.
  * @throws {Error} With a `code` from the deploy error taxonomy on a non-zero exit.
  * @example
- * const { stdout, scrubbedStderr } = await executeDeploy(ctx, args);
+ * const { stdout, scrubbedStderr } = await executeWrangler(ctx, args);
  */
-async function executeDeploy(
+async function executeWrangler(
   ctx: DeployPluginContext,
   args: string[]
 ): Promise<{ stdout: string; scrubbedStderr: string }> {
@@ -241,7 +243,7 @@ export function createApi(ctx: DeployPluginContext): Api {
 
       // Spawn wrangler and capture its scrubbed output (throws on a failed deploy).
       const start = Date.now();
-      const { stdout, scrubbedStderr } = await executeDeploy(ctx, args);
+      const { stdout, scrubbedStderr } = await executeWrangler(ctx, args);
       ctx.log.info(scrubbedStderr); // only scrubbed* values reach ctx.log
 
       // Record the result as lastDeployment and announce it, then return it.
@@ -280,6 +282,39 @@ export function createApi(ctx: DeployPluginContext): Api {
     async init(options = {}) {
       const slug = toSlug(ctx.require(sitePlugin).name());
       return writeScaffolding({ config: ctx.config, slug, cwd: process.cwd(), options });
+    },
+
+    /**
+     * The Cloudflare Pages project name this app deploys to (`toSlug(site.name())`).
+     *
+     * @returns The project-name slug.
+     * @example
+     * api.projectName(); // "my-site"
+     */
+    projectName() {
+      return toSlug(ctx.require(sitePlugin).name());
+    },
+
+    /**
+     * Create the remote Cloudflare Pages project via wrangler, so a first deploy has a
+     * target. Derives the slug from `site.name()` and the production branch from config.
+     *
+     * @returns The created project name + production branch.
+     * @throws {Error} With a `code` from the deploy error taxonomy on a non-zero exit.
+     * @example
+     * await api.createProject(); // { name: "my-site", branch: "main" }
+     */
+    async createProject(): Promise<CreateProjectResult> {
+      // Derive the same slug run() deploys to, and the production branch to seed.
+      const name = toSlug(ctx.require(sitePlugin).name());
+      const branch = ctx.config.productionBranch ?? "main";
+
+      // Build the guarded argv, spawn wrangler (scrubbed; throws on a non-zero exit).
+      const args = buildProjectCreateArgs({ slug: name, branch });
+      const { scrubbedStderr } = await executeWrangler(ctx, args);
+      ctx.log.info(scrubbedStderr); // only scrubbed* values reach ctx.log
+
+      return { name, branch };
     }
   };
 }

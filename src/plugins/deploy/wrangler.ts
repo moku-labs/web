@@ -223,13 +223,42 @@ export function buildWranglerArgs(input: {
   ];
 }
 
+/**
+ * Assemble the argv for `wrangler pages project create` (no shell). Guards the
+ * production branch against flag injection; the slug is already a safe `toSlug` output.
+ *
+ * @param input - The resolved project-create inputs.
+ * @param input.slug - Cloudflare project-name slug (`toSlug(site.name())`).
+ * @param input.branch - Production branch (guarded by `/^[a-zA-Z0-9/_.-]+$/`).
+ * @returns The wrangler argv array.
+ * @throws {Error} `ERR_DEPLOY_INVALID_BRANCH` when the branch fails the guard.
+ * @example
+ * buildProjectCreateArgs({ slug: "my-site", branch: "main" });
+ */
+export function buildProjectCreateArgs(input: { slug: string; branch: string }): string[] {
+  // Reject an injectable production branch before assembling argv.
+  const branch = guardBranch(input.branch);
+
+  // Assemble the no-shell argv for `wrangler pages project create`.
+  return [
+    "bunx",
+    "wrangler",
+    "pages",
+    "project",
+    "create",
+    input.slug,
+    "--production-branch",
+    branch
+  ];
+}
+
 /** Lowercased substring matchers for the wrangler error taxonomy. */
 const ERROR_SIGNATURES: { match: string[]; kind: WranglerErrorKind; advice: string }[] = [
   {
     match: ["could not find project", "project not found"],
     kind: "ERR_DEPLOY_PROJECT_NOT_FOUND",
     advice:
-      "The Cloudflare Pages project does not exist. Run `app.deploy.init()` or create it in the dashboard, then retry."
+      "The Cloudflare Pages project does not exist yet. Create it in the dashboard (Workers & Pages → Create → Pages) or with `bunx wrangler pages project create <name>`, then retry. (app.deploy.init() only scaffolds local config — it does not create the remote project.)"
   },
   {
     match: ["jwt", "session expired", "expired"],

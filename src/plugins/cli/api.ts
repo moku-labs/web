@@ -65,6 +65,15 @@ export type CliEvents = Record<never, never>;
 export type CliEmit = EmitFn<CliEvents>;
 
 /**
+ * Minimal env slice the cli consumes (the core `env` API) — the deploy's source of
+ * truth for credentials, so the wizard diagnoses against exactly what the deploy reads.
+ *
+ * @example
+ * const env: CliEnv = { get: key => process.env[key] };
+ */
+export type CliEnv = { get(key: string): string | undefined };
+
+/**
  * The plugin-context slice the cli API and `serve`/`preview` modules consume: the
  * mutable `state` (the injectable seams), the resolved `config`, plus
  * `require`/`emit`. Typed to match the kernel's generic context so the framework
@@ -82,6 +91,8 @@ export type CliPluginContext = {
   require: CliRequire;
   /** Emit closure (cli declares no events; present for context compatibility). */
   emit: CliEmit;
+  /** Environment accessor (core `env` API) — the deploy's source of truth for credentials. */
+  readonly env: CliEnv;
 };
 
 /**
