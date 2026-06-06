@@ -1,13 +1,14 @@
 /**
- * @file cli plugin — the guided deploy wizard (`cli.deploy({ guided: true })`). Walks a
- * human through a Cloudflare Pages deploy: checks prerequisites (wrangler config + the
- * Cloudflare credentials) with concrete fix guidance, offers to scaffold/build what is
- * missing, HARD-GATES the deploy on everything being green, runs a local build smoke
- * test, confirms, deploys, then offers to scaffold a GitHub Actions workflow (auto on
- * push to main, or a versioned/manual trigger). The non-guided `--cli` path stays in
- * `api.ts`. Every prompt + line of output flows through injectable `state` seams.
+ * @file cli plugin — the guided deploy wizard (`cli.deploy({ guided: true })`, the default
+ * for `bun run deploy`; the direct `--cli` path stays in `api.ts`). Walks a human through a
+ * Cloudflare Pages deploy: checks prerequisites (wrangler config + the Cloudflare
+ * credentials) with concrete fix guidance, offers to scaffold what is missing (a
+ * `wrangler.jsonc`, and a placeholder `.env` for any missing credentials), HARD-GATES the
+ * deploy on everything being green, runs a local build smoke test, confirms, deploys, then
+ * offers to scaffold a GitHub Actions workflow (auto on push to main, or a versioned/manual
+ * trigger). Every prompt + line of output flows through injectable `state` seams.
  */
-import { existsSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { buildPlugin } from "../build";
 import { deployPlugin } from "../deploy";
@@ -101,6 +102,64 @@ async function offerScaffold(ctx: CliPluginContext, prereqs: Prerequisite[]): Pr
   if (!(await ctx.state.confirm("Scaffold wrangler.jsonc now?"))) return;
   await ctx.require(deployPlugin).init({});
   ctx.state.render.check(true, "wrangler.jsonc scaffolded");
+}
+
+/** The Cloudflare credentials the deploy needs, with the comment written above each in a scaffolded `.env`. */
+const ENV_CREDENTIALS = [
+  {
+    key: "CLOUDFLARE_API_TOKEN",
+    comment:
+      "# Cloudflare API token — https://dash.cloudflare.com/profile/api-tokens (template: Cloudflare Pages — Edit)"
+  },
+  {
+    key: "CLOUDFLARE_ACCOUNT_ID",
+    comment: "# Cloudflare account id — dashboard → Workers & Pages → right-hand sidebar"
+  }
+] as const;
+
+/**
+ * Offer to scaffold a `.env` with placeholders for whichever Cloudflare credentials are
+ * missing — created when absent, appended to (never clobbering a key already present)
+ * when it exists. The placeholders are empty, so the deploy still hard-gates until the
+ * user fills them in; this just removes the "where do I even put these?" friction.
+ *
+ * @param ctx - The cli plugin context.
+ * @param cwd - The project root (where `.env` lives).
+ * @returns Resolves once any accepted scaffold has been written.
+ * @example
+ * await offerEnvScaffold(ctx, process.cwd());
+ */
+async function offerEnvScaffold(ctx: CliPluginContext, cwd: string): Promise<void> {
+  const missing = ENV_CREDENTIALS.filter(({ key }) => (process.env[key] ?? "") === "");
+  if (missing.length === 0) return;
+
+  const envPath = path.join(cwd, ".env");
+  const exists = existsSync(envPath);
+  const verb = exists ? "Add placeholders for the missing secret(s) to" : "Create";
+  if (!(await ctx.state.confirm(`${verb} .env?`))) return;
+
+  // Never overwrite a key already present in an existing .env — only add the ones it lacks.
+  const lines = exists ? readFileSync(envPath, "utf8").split(/\r?\n/) : [];
+  const toAdd = missing.filter(
+    ({ key }) => !lines.some(line => line.trimStart().startsWith(`${key}=`))
+  );
+  if (toAdd.length === 0) {
+    ctx.state.render.info(".env already lists those keys — fill in their values, then re-run.");
+    return;
+  }
+
+  const header = exists
+    ? "\n"
+    : "# Cloudflare Pages deploy credentials — fill these in (keep .env gitignored).\n";
+  const block = toAdd.map(({ key, comment }) => `${comment}\n${key}=`).join("\n\n");
+  appendFileSync(envPath, `${header}${block}\n`);
+
+  const names = toAdd.map(({ key }) => key).join(", ");
+  ctx.state.render.check(
+    true,
+    `${exists ? "added placeholders to" : "created"} .env`,
+    `fill in ${names}, then re-run \`bun run deploy\`.`
+  );
 }
 
 /**
@@ -206,10 +265,12 @@ export async function runDeployWizard(
 ): Promise<DeployOutcome> {
   const cwd = process.cwd();
 
-  // 1. Prerequisites — show every check, then offer to scaffold the fixable one.
+  // 1. Prerequisites — show every check, then offer to scaffold the fixable ones
+  //    (wrangler.jsonc, plus a placeholder .env for any missing Cloudflare credentials).
   ctx.state.render.heading("Checking prerequisites");
   for (const item of diagnose(cwd)) ctx.state.render.check(item.ok, item.label, item.detail);
   await offerScaffold(ctx, diagnose(cwd));
+  await offerEnvScaffold(ctx, cwd);
 
   // 2. Hard gate — re-check and stop (without deploying) while any blocker remains.
   const blockers = diagnose(cwd).filter(item => !item.ok);

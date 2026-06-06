@@ -104,4 +104,24 @@ describe("cli deploy() gate", () => {
     await createApi(ctx).deploy({ yes: true });
     expect(deploy.run).toHaveBeenCalledWith({});
   });
+
+  it("renders a styled '✗ deploy failed' error and rethrows when deploy.run rejects", async () => {
+    restoreTTY = setTTY(false);
+    const render = makeRenderer();
+    const { ctx, deploy } = makeCtx({ render });
+    const failure = new Error(
+      '[web] env: required variable "CLOUDFLARE_API_TOKEN" is not defined.'
+    );
+    deploy.run.mockRejectedValueOnce(failure);
+
+    // The failure still propagates (so a non-interactive run exits non-zero)...
+    await expect(createApi(ctx).deploy({ yes: true })).rejects.toBe(failure);
+    // ...but it is surfaced through the Panel renderer first (the ✗ vibe), with the cause...
+    expect(render.calls).toContainEqual(["error", "deploy failed", failure]);
+    // ...followed by an actionable "how to fix" hint naming the missing secret + guided deploy.
+    const hint = render.calls.find(call => call[0] === "info")?.[1];
+    expect(hint).toContain("how to fix");
+    expect(hint).toContain("CLOUDFLARE_API_TOKEN");
+    expect(hint).toContain("guided");
+  });
 });

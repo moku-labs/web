@@ -682,5 +682,7 @@ export async function runDevServer(ctx: CliPluginContext, port: number): Promise
     for (const watcher of watchers) watcher.close();
     hub.close();
     server.stop();
+    // Stop the persistent idle-pulse ticker so it never outlives the dev server.
+    ctx.state.render.dispose();
   });
 }

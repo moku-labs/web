@@ -207,6 +207,33 @@ async function confirmDeploy(ctx: CliPluginContext, yes: boolean): Promise<boole
   return confirmed;
 }
 
+/** Matches the prerequisite/credential failures a direct deploy most often hits (missing token/account). */
+const PREREQUISITE_ERROR =
+  /required variable|not defined|cloudflare|token|account|unauthor|wrangler/i;
+
+/**
+ * A short, actionable "how to fix" hint for a failed deploy, rendered under the error so
+ * the user is never left at a raw stack trace. A missing-credential/prerequisite failure
+ * (the common case for a first direct deploy) gets the concrete secret-setup steps;
+ * anything else points at the guided deploy, which diagnoses prerequisites step by step.
+ *
+ * @param error - The thrown deploy error.
+ * @returns The multi-line hint (newline-separated; rendered indented under a `›`).
+ * @example
+ * render.info(deployFailureHint(err));
+ */
+function deployFailureHint(error: unknown): string {
+  if (PREREQUISITE_ERROR.test(String(error))) {
+    return [
+      "how to fix:",
+      "1. run `bun run deploy` (without `--cli`) — the guided setup diagnoses prerequisites and offers to create a starter .env",
+      "2. or set them yourself in .env: CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID",
+      "   token: https://dash.cloudflare.com/profile/api-tokens (template: Cloudflare Pages — Edit)"
+    ].join("\n");
+  }
+  return "how to fix: run `bun run deploy` (without `--cli`) — the guided setup diagnoses prerequisites — then retry";
+}
+
 /**
  * Create the cli plugin API surface — exactly `build`, `serve`, `preview`, `deploy`.
  * Each method renders `state.render.header(<command>)` first, then does its work;
@@ -294,17 +321,27 @@ export function createApi(ctx: CliPluginContext): Api {
       ctx.state.render.header("deploy");
       if (options.guided === true) return runDeployWizard(ctx, options);
 
-      // Direct path — scaffold the deploy (CI mode).
-      await ctx.require(deployPlugin).init({ ci: true });
+      try {
+        // Direct path — scaffold the deploy (CI mode).
+        await ctx.require(deployPlugin).init({ ci: true });
 
-      // Gate on confirmation; an interactive "no" returns without deploying.
-      if (!(await confirmDeploy(ctx, yes))) {
-        return { deployed: false, reason: "declined" };
+        // Gate on confirmation; an interactive "no" returns without deploying.
+        if (!(await confirmDeploy(ctx, yes))) {
+          return { deployed: false, reason: "declined" };
+        }
+
+        // Proceed: deploy (progress arrives via hooks) and report the outcome.
+        const result = await ctx.require(deployPlugin).run(branch === undefined ? {} : { branch });
+        return { deployed: true, ...result };
+      } catch (error) {
+        // Surface any deploy failure (e.g. a missing CLOUDFLARE_API_TOKEN) through the
+        // styled Panel renderer — the same ✗ vibe as the other commands — with an actionable
+        // "how to fix" hint instead of a raw stack trace, then rethrow so a non-interactive
+        // run still exits non-zero (the thin consumer scripts never swallow it).
+        ctx.state.render.error("deploy failed", error);
+        ctx.state.render.info(deployFailureHint(error));
+        throw error;
       }
-
-      // Proceed: deploy (progress arrives via hooks) and report the outcome.
-      const result = await ctx.require(deployPlugin).run(branch === undefined ? {} : { branch });
-      return { deployed: true, ...result };
     }
   };
 }

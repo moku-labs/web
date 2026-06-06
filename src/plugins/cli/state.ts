@@ -5,8 +5,11 @@
  * deploy's `defaultSpawn`, so a non-Bun runtime fails coded rather than as a raw
  * `TypeError` and tests can inject fakes). Unit tests swap any of these.
  */
-import { statSync, watch } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { readFileSync, realpathSync, statSync, watch } from "node:fs";
+import path from "node:path";
 import { createInterface } from "node:readline";
+import { fileURLToPath } from "node:url";
 import { networkUrl } from "./network";
 import { createPanelRenderer } from "./render/panel";
 import type {
@@ -192,6 +195,110 @@ function defaultNetworkUrl(port: number): string | null {
   return networkUrl(port);
 }
 
+/** The real version/runtime facts shown in the Panel banner (resolved once per process). */
+type BannerFacts = {
+  /** The display version: `v{release}` when published, else `dev·{commit}` from git, else `dev`. */
+  version: string;
+  /** The pinned `@moku-labs/core` version (from the framework's own dependencies). */
+  coreVersion: string;
+};
+
+/** Memoized banner facts — resolution touches the filesystem + git once, then caches. */
+let cachedBanner: BannerFacts | undefined;
+
+/**
+ * Run a read-only `git` command in `dir`, returning its trimmed stdout (`undefined` on
+ * any failure — not a checkout, git missing, etc.). A thin wrapper so the version
+ * resolver can issue a couple of git queries without repeating the spawn boilerplate.
+ *
+ * @param dir - The working directory to run git in.
+ * @param args - The git arguments (no user input is ever interpolated).
+ * @returns The trimmed command output, or `undefined` on failure.
+ * @example
+ * git("/Users/me/moku/web", ["tag", "--list", "v*"]);
+ */
+function git(dir: string, args: string[]): string | undefined {
+  try {
+    // eslint-disable-next-line sonarjs/no-os-command-from-path -- `git` from PATH is intended; read-only, fixed args, no user input.
+    return execFileSync("git", args, {
+      cwd: dir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"]
+    }).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The framework's source/dev version, derived the SAME way the publish workflow computes
+ * a release: the highest semver `v*` tag is the source of truth (`@moku-labs/web` is
+ * released tag-only — the working-tree `package.json` deliberately carries no `version`).
+ * A `-dev` suffix marks it as a local build off that release line (e.g. `v1.1.0-dev`), so
+ * it never masquerades as the published release. Falls back to the short commit (then
+ * `undefined`) only when no tags exist. `undefined` when `dir` is not a git checkout (a
+ * published npm install — which carries its real `version` instead).
+ *
+ * @param dir - A directory inside the framework's own repository (the realpath of the
+ *   package root, so a symlinked local checkout reports the framework's tag — not the
+ *   consumer's).
+ * @returns The dev version (e.g. `v1.1.0-dev`), or `undefined`.
+ * @example
+ * devVersion("/Users/me/moku/web"); // "v1.1.0-dev"
+ */
+function devVersion(dir: string): string | undefined {
+  // Mirror publish.yml: `git tag --list 'v*' --sort=-v:refname | head -n1`.
+  const latestTag = git(dir, ["tag", "--list", "v*", "--sort=-v:refname"])?.split("\n")[0]?.trim();
+  if (latestTag) return `${latestTag}-dev`;
+  // No tags yet — fall back to the short commit so the build is still identifiable.
+  const sha = git(dir, ["rev-parse", "--short", "HEAD"]);
+  return sha ? `${sha}-dev` : undefined;
+}
+
+/**
+ * Resolve the real version/runtime facts shown in the Panel banner (memoized). Reads the
+ * `package.json` shipped beside the built bundle (`dist/../package.json`): a PUBLISHED
+ * release carries a `version` and reports `v{version}`; a source/dev build (no `version`
+ * field — `@moku-labs/web` is released tag-only) reports the latest semver tag + `-dev`
+ * (e.g. `v1.1.0-dev`, the same tag the publish workflow treats as the version source), or
+ * `"dev"` when git is unavailable. The pinned `@moku-labs/core` version comes from the
+ * same file's `dependencies`.
+ *
+ * @returns The resolved {@link BannerFacts}.
+ * @example
+ * resolveBanner(); // { version: "v1.1.0-dev", coreVersion: "0.1.0-alpha.6" }
+ */
+function resolveBanner(): BannerFacts {
+  if (cachedBanner) return cachedBanner;
+
+  let pkg: { version?: string; dependencies?: Record<string, string> } = {};
+  let pkgDir: string | undefined;
+  try {
+    const pkgUrl = new URL("../package.json", import.meta.url);
+    pkgDir = realpathSync(path.dirname(fileURLToPath(pkgUrl)));
+    pkg = JSON.parse(readFileSync(pkgUrl, "utf8")) as typeof pkg;
+  } catch {
+    // No package.json beside the module (source/test run) — fall through to the dev defaults.
+  }
+
+  const coreRange = pkg.dependencies?.["@moku-labs/core"] ?? "";
+  const coreVersion = coreRange.replace(/^\D*/, "") || "unknown";
+
+  // A published release reports its package.json version; a source/dev build derives it
+  // from the latest semver tag (the release source of truth), suffixed `-dev`.
+  const released = pkg.version;
+  let version = "dev";
+  if (released) {
+    version = `v${released}`;
+  } else {
+    const dev = devVersion(pkgDir ?? process.cwd());
+    if (dev) version = dev;
+  }
+
+  cachedBanner = { version, coreVersion };
+  return cachedBanner;
+}
+
 /**
  * Create the initial cli plugin state with the production seams wired. Every field is
  * an injectable seam (`render`, `confirm`, `clock`, `watch`, the server factories,
@@ -208,8 +315,9 @@ export function createState(_ctx: {
   readonly global: Readonly<Record<string, unknown>>;
   readonly config: Readonly<Config>;
 }): State {
+  const banner = resolveBanner();
   return {
-    render: createPanelRenderer(),
+    render: createPanelRenderer({ version: banner.version, coreVersion: banner.coreVersion }),
     confirm: defaultConfirm,
     select: defaultSelect,
     clock: Date.now,
