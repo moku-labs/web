@@ -1,6 +1,6 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildWranglerArgs } from "../../wrangler";
+import { buildProjectCreateArgs, buildWranglerArgs } from "../../wrangler";
 
 const ROOT = process.cwd();
 
@@ -63,5 +63,29 @@ describe("deploy/buildWranglerArgs", () => {
         root: ROOT
       })
     ).toThrowError(expect.objectContaining({ code: "ERR_DEPLOY_PATH_TRAVERSAL" }));
+  });
+});
+
+describe("deploy/buildProjectCreateArgs", () => {
+  it("assembles the correct `pages project create` argv array (no shell)", () => {
+    expect(buildProjectCreateArgs({ slug: "my-site", branch: "main" })).toEqual([
+      "bunx",
+      "wrangler",
+      "pages",
+      "project",
+      "create",
+      "my-site",
+      "--production-branch",
+      "main"
+    ]);
+  });
+
+  it("rejects a flag-injecting production branch with ERR_DEPLOY_INVALID_BRANCH", () => {
+    expect(() => buildProjectCreateArgs({ slug: "my-site", branch: "--config" })).toThrowError(
+      expect.objectContaining({ code: "ERR_DEPLOY_INVALID_BRANCH" })
+    );
+    expect(() => buildProjectCreateArgs({ slug: "my-site", branch: "has space" })).toThrowError(
+      expect.objectContaining({ code: "ERR_DEPLOY_INVALID_BRANCH" })
+    );
   });
 });

@@ -77,6 +77,8 @@ export type FakeDeployApi = {
   init: ReturnType<typeof vi.fn>;
   run: ReturnType<typeof vi.fn>;
   getLastDeployment: ReturnType<typeof vi.fn>;
+  projectName: ReturnType<typeof vi.fn>;
+  createProject: ReturnType<typeof vi.fn>;
 };
 
 /** Options for {@link makeCtx}. */
@@ -87,6 +89,8 @@ export type MakeCtxOptions = {
   render?: CliRenderer;
   /** State overrides (confirm/clock/watch/serveStatic/fileResponse/networkUrl). */
   state?: Partial<State>;
+  /** Resolved env table the wizard reads credentials from (defaults to mirroring `process.env`). */
+  env?: Record<string, string | undefined>;
   /** The build summary `build.run()` resolves with. */
   buildResult?: BuildSummary;
   /** The deploy result `deploy.run()` resolves with (sans the `deployed` flag). */
@@ -132,7 +136,9 @@ export function makeCtx(options: MakeCtxOptions = {}): {
   const deploy: FakeDeployApi = {
     init: vi.fn(async () => ({ written: [], skipped: [], drifted: [] })),
     run: vi.fn(async () => deployResult),
-    getLastDeployment: vi.fn(() => deployResult)
+    getLastDeployment: vi.fn(() => deployResult),
+    projectName: vi.fn(() => "geek-life"),
+    createProject: vi.fn(async () => ({ name: "geek-life", branch: "main" }))
   };
 
   const state: State = {
@@ -164,7 +170,10 @@ export function makeCtx(options: MakeCtxOptions = {}): {
     state,
     config: makeConfig(options.config),
     require: requireFn as unknown as CliPluginContext["require"],
-    emit: vi.fn() as unknown as CliPluginContext["emit"]
+    emit: vi.fn() as unknown as CliPluginContext["emit"],
+    // Mirror process.env by default so existing tests drive prereqs via process.env;
+    // pass `env: {}` to simulate an app whose env providers resolved nothing.
+    env: { get: (key: string) => (options.env ?? process.env)[key] }
   } satisfies CliPluginContext;
 
   return { ctx, render, build, deploy };
