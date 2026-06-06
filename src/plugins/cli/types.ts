@@ -465,8 +465,6 @@ export type ServeOptions = {
   sitemap?: boolean;
   /** Re-enable RSS/Atom/JSON feeds for this dev session (maps to `--feeds`). Defaults to `false`. */
   feeds?: boolean;
-  /** Re-enable i18n locale-redirect pages for this dev session (maps to `--locale-redirects`). Defaults to `false`. */
-  localeRedirects?: boolean;
 };
 
 /**
