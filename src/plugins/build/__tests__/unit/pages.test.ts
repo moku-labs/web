@@ -346,6 +346,143 @@ describe("build/phases/pages", () => {
     expect(html).toContain("<h1>X</h1>");
   });
 
+  it("reuse skips re-rendering a page whose data is unchanged (render cache hit)", async () => {
+    const render = vi.fn((rctx: { data: unknown }) =>
+      h("h1", {}, String((rctx.data as { n: number }).n))
+    );
+    const data = { n: 1 };
+    const route = makeRoute("/post/", { load: async () => data, render });
+    const ctx = makeCtx({
+      config: { outDir: tmp },
+      requireMap: {
+        router: {
+          mode: () => "ssg",
+          manifest: () => [route],
+          entries: makeEntries([{ name: "post", pattern: "/post/" }])
+        },
+        i18n: { locales: () => ["en"], defaultLocale: () => "en" },
+        head: { render: () => "" }
+      }
+    });
+
+    await renderPages(ctx); // full render — body computed once + cached
+    expect(render).toHaveBeenCalledTimes(1);
+
+    await renderPages(ctx, { reuse: true }); // data unchanged → cached body reused
+    expect(render).toHaveBeenCalledTimes(1);
+    expect(readFileSync(path.join(tmp, "post", "index.html"), "utf8")).toContain("<h1>1</h1>");
+  });
+
+  it("reuse re-renders a page whose data changed (render cache miss)", async () => {
+    let n = 1;
+    const render = vi.fn((rctx: { data: unknown }) =>
+      h("h1", {}, String((rctx.data as { n: number }).n))
+    );
+    const route = makeRoute("/post/", { load: async () => ({ n }), render });
+    const ctx = makeCtx({
+      config: { outDir: tmp },
+      requireMap: {
+        router: {
+          mode: () => "ssg",
+          manifest: () => [route],
+          entries: makeEntries([{ name: "post", pattern: "/post/" }])
+        },
+        i18n: { locales: () => ["en"], defaultLocale: () => "en" },
+        head: { render: () => "" }
+      }
+    });
+
+    await renderPages(ctx);
+    expect(render).toHaveBeenCalledTimes(1);
+
+    n = 2; // the page's data changes → its hash changes → it re-renders
+    await renderPages(ctx, { reuse: true });
+    expect(render).toHaveBeenCalledTimes(2);
+    expect(readFileSync(path.join(tmp, "post", "index.html"), "utf8")).toContain("<h1>2</h1>");
+  });
+
+  it("reuse re-renders only the changed-data route and reuses the other (per-key isolation)", async () => {
+    let na = 1;
+    const nb = 9;
+    const renderA = vi.fn((rctx: { data: unknown }) =>
+      h("h1", {}, String((rctx.data as { n: number }).n))
+    );
+    const renderB = vi.fn((rctx: { data: unknown }) =>
+      h("h2", {}, String((rctx.data as { n: number }).n))
+    );
+    const routeA = makeRoute("/a/", { load: async () => ({ n: na }), render: renderA });
+    const routeB = makeRoute("/b/", { load: async () => ({ n: nb }), render: renderB });
+    const ctx = makeCtx({
+      config: { outDir: tmp },
+      requireMap: {
+        router: {
+          mode: () => "ssg",
+          manifest: () => [routeA, routeB],
+          entries: makeEntries([
+            { name: "a", pattern: "/a/" },
+            { name: "b", pattern: "/b/" }
+          ])
+        },
+        i18n: { locales: () => ["en"], defaultLocale: () => "en" },
+        head: { render: () => "" }
+      }
+    });
+
+    await renderPages(ctx); // full render — both bodies cached
+    expect(renderA).toHaveBeenCalledTimes(1);
+    expect(renderB).toHaveBeenCalledTimes(1);
+
+    na = 2; // only route A's data changes
+    await renderPages(ctx, { reuse: true });
+    expect(renderA).toHaveBeenCalledTimes(2); // A re-rendered (cache miss, per its own key)
+    expect(renderB).toHaveBeenCalledTimes(1); // B reused (cache hit, isolated key)
+    expect(readFileSync(path.join(tmp, "a", "index.html"), "utf8")).toContain("<h1>2</h1>");
+    expect(readFileSync(path.join(tmp, "b", "index.html"), "utf8")).toContain("<h2>9</h2>");
+  });
+
+  it("never caches (always re-renders) a page whose data is not serializable", async () => {
+    // BigInt is not JSON-serializable → hashData returns null → the page is never cached.
+    const render = vi.fn(() => h("h1", {}, "x"));
+    const route = makeRoute("/post/", { load: async () => ({ big: 1n }), render });
+    const ctx = makeCtx({
+      config: { outDir: tmp },
+      requireMap: {
+        router: {
+          mode: () => "ssg",
+          manifest: () => [route],
+          entries: makeEntries([{ name: "post", pattern: "/post/" }])
+        },
+        i18n: { locales: () => ["en"], defaultLocale: () => "en" },
+        head: { render: () => "" }
+      }
+    });
+
+    await renderPages(ctx);
+    await renderPages(ctx, { reuse: true }); // still re-renders — non-serializable data is uncacheable
+    expect(render).toHaveBeenCalledTimes(2);
+  });
+
+  it("a full (non-reuse) render always re-renders even when the cache is warm", async () => {
+    const render = vi.fn(() => h("h1", {}, "x"));
+    const route = makeRoute("/post/", { load: async () => ({ n: 1 }), render });
+    const ctx = makeCtx({
+      config: { outDir: tmp },
+      requireMap: {
+        router: {
+          mode: () => "ssg",
+          manifest: () => [route],
+          entries: makeEntries([{ name: "post", pattern: "/post/" }])
+        },
+        i18n: { locales: () => ["en"], defaultLocale: () => "en" },
+        head: { render: () => "" }
+      }
+    });
+
+    await renderPages(ctx); // warms the cache
+    await renderPages(ctx); // full again → re-renders (cache cleared + rebuilt)
+    expect(render).toHaveBeenCalledTimes(2);
+  });
+
   it("ssg mode builds a data route", async () => {
     const route = makeRoute("/post/", {
       load: async () => ({ title: "X" }),

@@ -23,6 +23,39 @@ describe("build/phases/content", () => {
     );
   });
 
+  it("a full load (no options) reuse-loads false and never invalidates", async () => {
+    const loadAll = vi.fn(async () => new Map<string, Article[]>());
+    const invalidate = vi.fn();
+    const ctx = makeCtx({ requireMap: { content: { loadAll, invalidate } } });
+
+    await loadContent(ctx);
+
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(loadAll).toHaveBeenCalledWith({ reuse: false });
+  });
+
+  it("an incremental rebuild invalidates the changed Markdown, then reuse-loads", async () => {
+    const loadAll = vi.fn(async () => new Map<string, Article[]>());
+    const invalidate = vi.fn();
+    const ctx = makeCtx({ requireMap: { content: { loadAll, invalidate } } });
+
+    await loadContent(ctx, { reuse: true, changed: ["content/intro/en.md"] });
+
+    expect(invalidate).toHaveBeenCalledWith(["content/intro/en.md"]);
+    expect(loadAll).toHaveBeenCalledWith({ reuse: true });
+  });
+
+  it("a reuse rebuild with no changed Markdown (e.g. a CSS edit) reuses without invalidating", async () => {
+    const loadAll = vi.fn(async () => new Map<string, Article[]>());
+    const invalidate = vi.fn();
+    const ctx = makeCtx({ requireMap: { content: { loadAll, invalidate } } });
+
+    await loadContent(ctx, { reuse: true, changed: [] });
+
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(loadAll).toHaveBeenCalledWith({ reuse: true });
+  });
+
   it("readCachedContent returns an empty map before loadContent runs", () => {
     const ctx = makeCtx({});
     expect(readCachedContent(ctx).size).toBe(0);

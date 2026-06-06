@@ -37,10 +37,12 @@ export const defaultConfig: Config = {
 export function createApi(ctx: PhaseContext): Api {
   return {
     /**
-     * Run the full SSG pipeline and write the site to disk.
+     * Run the full SSG pipeline and write the site to disk. With no options a full
+     * production build runs; dev callers pass `skipClean`/`overrides`/`changed` for a
+     * fast incremental rebuild (all gated behind opt-in fields — the default path is
+     * unchanged).
      *
-     * @param options - Optional run overrides.
-     * @param options.outDir - Override the configured output directory for this run.
+     * @param options - Optional per-run overrides (outDir / skipClean / overrides / changed).
      * @returns The build result (outDir, pageCount, durationMs).
      * @example
      * ```ts

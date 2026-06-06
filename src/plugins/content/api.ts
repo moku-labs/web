@@ -18,6 +18,7 @@ import type {
   ContentApiContext,
   ContentEvents,
   ContentProvider,
+  LoadAllOptions,
   State
 } from "./types";
 
@@ -309,9 +310,15 @@ function isPublished(article: Article, isProduction: boolean): boolean {
  * locale collection: existing files only, drafts dropped in production, sorted
  * date-descending. The single load+filter+sort step behind {@link createContentApi.loadAll}.
  *
+ * When a `cached` map is supplied (incremental dev rebuild), a slug already present in it
+ * is reused as-is (skipping the re-read + Markdown/Shiki re-render); only slugs absent
+ * from it — the ones a preceding `invalidate()` dropped, plus any never-loaded — are
+ * resolved fresh. With no `cached` map every slug is resolved (the full load).
+ *
  * @param ctx - Kernel-free domain context (provider + i18n helpers + stage).
  * @param slugs - Every known article slug from the provider.
  * @param locale - The locale to resolve and collect.
+ * @param cached - Optional per-locale article cache to reuse for unchanged slugs.
  * @returns The published (date-descending) articles for this locale.
  * @example
  * ```ts
@@ -321,11 +328,14 @@ function isPublished(article: Article, isProduction: boolean): boolean {
 async function loadAndFilterArticles(
   ctx: ContentApiContext,
   slugs: readonly string[],
-  locale: string
+  locale: string,
+  cached?: ReadonlyMap<string, Article>
 ): Promise<Article[]> {
   const isProduction = ctx.global.stage === "production";
 
-  const resolved = await Promise.all(slugs.map(slug => resolveArticle(ctx, slug, locale)));
+  const resolved = await Promise.all(
+    slugs.map(slug => cached?.get(slug) ?? resolveArticle(ctx, slug, locale))
+  );
 
   return resolved
     .filter((article): article is Article => article !== null)
@@ -370,23 +380,32 @@ export function createContentApi(ctx: ContentApiContext): Api {
      * Load every article across every active locale (locale fallback, production
      * draft exclusion, date sort, `contentId` after sort), cache them, emit `content:ready`.
      *
+     * With `{ reuse: true }` (dev incremental rebuild) cached articles are reused for
+     * every slug a preceding `invalidate()` did not drop, so only the dirty articles
+     * re-read + re-run the Markdown/Shiki pipeline; the `contentId` ordinals are still
+     * recomputed across the FULL sorted set, so ids + order match a full load.
+     *
+     * @param options - Optional load behaviour (`reuse`); omit for a full load.
      * @returns A locale-keyed map of date-descending articles.
      * @example
      * ```ts
      * const byLocale = await api.loadAll();
      * ```
      */
-    async loadAll(): Promise<Map<string, Article[]>> {
+    async loadAll(options?: LoadAllOptions): Promise<Map<string, Article[]>> {
       // Gather the inputs: every known slug, expanded across every active locale.
+      const reuse = options?.reuse === true;
       const slugs = await ctx.provider.slugs();
       const locales = ctx.locales();
 
       // Build the per-locale collection, assigning each article its ordered contentId
-      // (post-sort, so the ordinal matches display order) and caching it by slug.
+      // (post-sort, so the ordinal matches display order) and caching it by slug. On a
+      // reuse rebuild, the prior per-locale cache feeds unchanged slugs (no re-render).
       const result = new Map<string, Article[]>();
       let total = 0;
       for (const locale of locales) {
-        const present = await loadAndFilterArticles(ctx, slugs, locale);
+        const previous = reuse ? ctx.state.articles.get(locale) : undefined;
+        const present = await loadAndFilterArticles(ctx, slugs, locale, previous);
         const cache = new Map<string, Article>();
         let index = 0;
         for (const article of present) {

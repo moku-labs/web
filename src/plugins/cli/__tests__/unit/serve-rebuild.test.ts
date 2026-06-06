@@ -8,6 +8,7 @@ import {
   createDevHandler,
   createRebuilder,
   createReloadHub,
+  devBuildOverrides,
   injectReloadClient,
   RELOAD_PATH
 } from "../../serve";
@@ -45,6 +46,29 @@ describe("cli/createRebuilder (debounced rebuild)", () => {
     expect(reloads).toHaveLength(1);
     // The last changed file in the window wins.
     expect(reloads[0]).toEqual({ file: "c.md", pageCount: 4, durationMs: 7 });
+  });
+
+  it("accumulates the changed paths in the window and hands them to runBuild", async () => {
+    const summary: BuildSummary = { outDir: "dist", pageCount: 1, durationMs: 1 };
+    const seen: string[][] = [];
+    const runBuild = vi.fn(async (changed: readonly string[]) => {
+      seen.push([...changed]);
+      return summary;
+    });
+    const rebuilder = createRebuilder({
+      debounceMs: 10,
+      runBuild,
+      onReloaded: () => undefined,
+      onError: () => undefined
+    });
+
+    rebuilder.schedule("a.md");
+    rebuilder.schedule("b.md");
+    rebuilder.schedule("a.md"); // a duplicate within the window collapses (Set)
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(runBuild).toHaveBeenCalledTimes(1);
+    expect(seen[0]?.toSorted()).toEqual(["a.md", "b.md"]);
   });
 
   it("coalesces a change arriving mid-rebuild into exactly one extra rerun", async () => {
@@ -315,6 +339,84 @@ describe("cli serve() wiring (injected seams)", () => {
     vi.useRealTimers();
   });
 
+  it("passes the changed file path to build.run on a rebuild (incremental hint)", async () => {
+    const handlers = new Map<string, (filename?: string) => void>();
+    const watch = vi.fn((dir: string, onChange: (filename?: string) => void): WatchHandle => {
+      handlers.set(dir, onChange);
+      return {
+        close() {
+          // no-op
+        }
+      };
+    });
+    const serveStatic = vi.fn(() => ({
+      stop() {
+        // no-op
+      }
+    }));
+    const { ctx, build } = makeCtx({
+      config: { watchDirs: ["content"], debounceMs: 0 },
+      state: { watch, serveStatic }
+    });
+
+    vi.useFakeTimers();
+    const servePromise = createApi(ctx).serve();
+    await vi.advanceTimersByTimeAsync(0);
+
+    handlers.get("content")?.("intro/en.md");
+    await vi.advanceTimersByTimeAsync(0);
+
+    // The rebuild forwards the resolved changed path so the build can re-do only what changed.
+    expect(build.run.mock.calls[1]?.[0]).toMatchObject({
+      changed: [path.join("content", "intro/en.md")]
+    });
+
+    process.emit("SIGINT");
+    await servePromise;
+    vi.useRealTimers();
+  });
+
+  it("drops a byte-identical re-save after a successful build (no extra build.run)", async () => {
+    const handlers = new Map<string, (filename?: string) => void>();
+    const watch = vi.fn((dir: string, onChange: (filename?: string) => void): WatchHandle => {
+      handlers.set(dir, onChange);
+      return {
+        close() {
+          // no-op
+        }
+      };
+    });
+    const serveStatic = vi.fn(() => ({
+      stop() {
+        // no-op
+      }
+    }));
+    const { ctx, build } = makeCtx({
+      config: { watchDirs: ["content"], debounceMs: 0 },
+      // mtime always "newer" so the mtime gate passes; identical hash so the HASH gate decides.
+      state: { watch, serveStatic, fileHash: () => "SAME", fileMtime: () => 9e9 }
+    });
+
+    vi.useFakeTimers();
+    const servePromise = createApi(ctx).serve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(build.run).toHaveBeenCalledTimes(1); // initial build
+
+    // First real edit → rebuild + commit the hash baseline.
+    handlers.get("content")?.("a.md");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(build.run).toHaveBeenCalledTimes(2);
+
+    // Byte-identical re-save (the double Ctrl-S habit) → dropped, no extra build.
+    handlers.get("content")?.("a.md");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(build.run).toHaveBeenCalledTimes(2);
+
+    process.emit("SIGINT");
+    await servePromise;
+    vi.useRealTimers();
+  });
+
   it("announces rebuildStart before reload on each rebuild", async () => {
     const handlers = new Map<string, (filename?: string) => void>();
     const watch = vi.fn((dir: string, onChange: (filename?: string) => void): WatchHandle => {
@@ -412,6 +514,188 @@ describe("cli/createChangeGate (watch-event filter)", () => {
     // eslint-disable-next-line unicorn/no-null -- fileMtime returns null for a missing file.
     const gate = createChangeGate({ outDir: "dist", fileMtime: () => null, now: () => 1000 });
     expect(gate.accept("content", "gone.md")).toBe(true);
+  });
+
+  it("drops a no-op save whose bytes match the last SUCCESSFUL build (double Ctrl-S)", () => {
+    // mtime always newer than build-start so the HASH guard is provably the decider.
+    const gate = createChangeGate({
+      outDir: "dist",
+      fileMtime: () => 2000,
+      now: () => 1000,
+      fileHash: () => "H"
+    });
+    expect(gate.accept("content", "a.md")).toBe(true); // first edit accepted
+    gate.commitBuilt(["content/a.md"]); // build succeeded → H is the committed baseline
+    expect(gate.accept("content", "a.md")).toBe(false); // identical bytes → no-op dropped
+  });
+
+  it("still rebuilds when the bytes actually changed", () => {
+    let hash = "H1";
+    const gate = createChangeGate({
+      outDir: "dist",
+      fileMtime: () => 2000,
+      now: () => 1000,
+      fileHash: () => hash
+    });
+    expect(gate.accept("content", "a.md")).toBe(true);
+    gate.commitBuilt(["content/a.md"]);
+    hash = "H2"; // genuine edit
+    expect(gate.accept("content", "a.md")).toBe(true);
+  });
+
+  it("does NOT drop an identical 'retry' save after a FAILED build (baseline written on success only)", () => {
+    const gate = createChangeGate({
+      outDir: "dist",
+      fileMtime: () => 2000,
+      now: () => 1000,
+      fileHash: () => "H"
+    });
+    expect(gate.accept("content", "a.md")).toBe(true); // first edit
+    // Build FAILED → commitBuilt is never called → nothing is baselined.
+    expect(gate.accept("content", "a.md")).toBe(true); // identical retry still rebuilds
+  });
+
+  it("commitBuilt baselines ONLY the built paths — a mid-build edit's retry is preserved", () => {
+    // A and B are both edited; only A's build succeeds. B (edited mid-build) must NOT be
+    // baselined by A's success, so B's later byte-identical retry still rebuilds.
+    const gate = createChangeGate({
+      outDir: "dist",
+      fileMtime: () => 2000,
+      now: () => 1000,
+      fileHash: (file: string) => (file.endsWith("b.md") ? "HB" : "HA")
+    });
+    expect(gate.accept("content", "a.md")).toBe(true); // edit A
+    expect(gate.accept("content", "b.md")).toBe(true); // edit B lands mid-build
+    gate.commitBuilt(["content/a.md"]); // only A's build succeeded
+    expect(gate.accept("content", "b.md")).toBe(true); // B never built → retry still rebuilds
+    expect(gate.accept("content", "a.md")).toBe(false); // A built → identical re-save is a no-op
+  });
+
+  it("a deletion (null hash) is a real change and clears the committed baseline", () => {
+    let hash: string | null = "H";
+    const gate = createChangeGate({
+      outDir: "dist",
+      fileMtime: () => 2000,
+      now: () => 1000,
+      fileHash: () => hash
+    });
+    expect(gate.accept("content", "a.md")).toBe(true);
+    gate.commitBuilt(["content/a.md"]); // committed H
+    // eslint-disable-next-line unicorn/no-null -- simulate the file being deleted.
+    hash = null;
+    expect(gate.accept("content", "a.md")).toBe(true); // deletion → real change (baseline cleared)
+    hash = "H"; // recreated with the same old bytes → must still rebuild (baseline was cleared)
+    expect(gate.accept("content", "a.md")).toBe(true);
+  });
+
+  it("without a fileHash seam, identical saves are not short-circuited (back-compat)", () => {
+    const gate = createChangeGate({ outDir: "dist", fileMtime: () => 2000, now: () => 1000 });
+    expect(gate.accept("content", "a.md")).toBe(true);
+    gate.commitBuilt(["content/a.md"]);
+    expect(gate.accept("content", "a.md")).toBe(true); // no hashing → still accepted
+  });
+});
+
+describe("cli/devBuildOverrides (dev build profile)", () => {
+  it("disables minify + every expensive output by default", () => {
+    expect(
+      devBuildOverrides({ og: false, sitemap: false, feeds: false, localeRedirects: false })
+    ).toEqual({
+      minify: false,
+      feeds: false,
+      sitemap: false,
+      ogImage: false,
+      localeRedirects: false
+    });
+  });
+
+  it("an opt-in omits that output's disable override (so it stays enabled per config)", () => {
+    expect(
+      devBuildOverrides({ og: true, sitemap: true, feeds: true, localeRedirects: true })
+    ).toEqual({ minify: false });
+  });
+});
+
+describe("cli serve() dev build profile wiring", () => {
+  it("builds clean with dev overrides initially, then skipClean on each rebuild", async () => {
+    const handlers = new Map<string, (filename?: string) => void>();
+    const watch = vi.fn((dir: string, onChange: (filename?: string) => void): WatchHandle => {
+      handlers.set(dir, onChange);
+      return {
+        close() {
+          // no-op
+        }
+      };
+    });
+    const serveStatic = vi.fn(() => ({
+      stop() {
+        // no-op
+      }
+    }));
+    const { ctx, build } = makeCtx({
+      config: { watchDirs: ["content"], debounceMs: 0 },
+      state: { watch, serveStatic }
+    });
+
+    vi.useFakeTimers();
+    const servePromise = createApi(ctx).serve();
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Initial build: dev overrides, NO skipClean (a fresh tree).
+    expect(build.run).toHaveBeenCalledTimes(1);
+    expect(build.run.mock.calls[0]?.[0]).toEqual({
+      overrides: {
+        minify: false,
+        feeds: false,
+        sitemap: false,
+        ogImage: false,
+        localeRedirects: false
+      }
+    });
+
+    // Rebuild: skipClean true + the same dev overrides.
+    handlers.get("content")?.("post/en.md");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(build.run).toHaveBeenCalledTimes(2);
+    expect(build.run.mock.calls[1]?.[0]).toMatchObject({
+      skipClean: true,
+      overrides: { minify: false, feeds: false, sitemap: false }
+    });
+
+    process.emit("SIGINT");
+    await servePromise;
+    vi.useRealTimers();
+  });
+
+  it("an --og/--sitemap opt-in leaves those outputs enabled in the dev build", async () => {
+    const watch = vi.fn(
+      (): WatchHandle => ({
+        close() {
+          // no-op
+        }
+      })
+    );
+    const serveStatic = vi.fn(() => ({
+      stop() {
+        // no-op
+      }
+    }));
+    const { ctx, build } = makeCtx({ state: { watch, serveStatic } });
+
+    vi.useFakeTimers();
+    const servePromise = createApi(ctx).serve({ og: true, sitemap: true });
+    await vi.advanceTimersByTimeAsync(0);
+
+    const overrides = (build.run.mock.calls[0]?.[0] as { overrides: Record<string, unknown> })
+      .overrides;
+    // Opted-in outputs are NOT disabled; the rest still are.
+    expect(overrides).not.toHaveProperty("ogImage");
+    expect(overrides).not.toHaveProperty("sitemap");
+    expect(overrides).toMatchObject({ minify: false, feeds: false, localeRedirects: false });
+
+    process.emit("SIGINT");
+    await servePromise;
+    vi.useRealTimers();
   });
 });
 

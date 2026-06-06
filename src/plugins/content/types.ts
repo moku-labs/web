@@ -280,6 +280,25 @@ export type ContentApiContext = {
 };
 
 /**
+ * Options for {@link Api.loadAll}.
+ *
+ * @example
+ * ```ts
+ * await app.content.loadAll({ reuse: true });
+ * ```
+ */
+export type LoadAllOptions = {
+  /**
+   * Reuse already-cached articles for slugs NOT dropped by a preceding `invalidate()`,
+   * re-reading + re-rendering (Shiki) ONLY the invalidated (dirty) articles. The
+   * post-sort `contentId` ordinals are always recomputed across the full set, so order +
+   * ids match a full load. Default `false` (a full load that re-reads every article).
+   * Used by dev incremental rebuilds; a fresh process / production build never reuses.
+   */
+  reuse?: boolean;
+};
+
+/**
  * Public API for the content plugin.
  *
  * @example
@@ -291,8 +310,10 @@ export type Api = {
   /**
    * Load every article across every active locale, returning a locale-keyed
    * map of date-descending Article arrays. Emits content:ready.
+   *
+   * @param options - Optional load behaviour ({@link LoadAllOptions}); omit for a full load.
    */
-  loadAll(): Promise<Map<string, Article[]>>;
+  loadAll(options?: LoadAllOptions): Promise<Map<string, Article[]>>;
   /**
    * Resolve and render a single article for one locale, with locale fallback.
    *

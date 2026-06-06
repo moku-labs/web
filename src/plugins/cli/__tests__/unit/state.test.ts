@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -35,6 +35,8 @@ describe("cli/createState", () => {
     expect(typeof state.serveStatic).toBe("function");
     expect(typeof state.fileResponse).toBe("function");
     expect(typeof state.networkUrl).toBe("function");
+    expect(typeof state.fileMtime).toBe("function");
+    expect(typeof state.fileHash).toBe("function");
   });
 
   it("networkUrl returns a string or null (reads real interfaces)", () => {
@@ -99,6 +101,28 @@ describe("cli default watch seam", () => {
       // The handle exposes close(); closing a real recursive watcher must not throw.
       expect(typeof handle.close).toBe("function");
       handle.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("cli default fileHash seam", () => {
+  it("hashes a file's bytes (stable per content) and returns null for a missing path", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "cli-hash-"));
+    try {
+      const file = path.join(dir, "a.md");
+      writeFileSync(file, "hello");
+      const state = createState(stateCtx());
+      const first = state.fileHash(file);
+      expect(typeof first).toBe("string");
+      // Identical bytes → identical hash; different bytes → different hash.
+      writeFileSync(file, "hello");
+      expect(state.fileHash(file)).toBe(first);
+      writeFileSync(file, "world");
+      expect(state.fileHash(file)).not.toBe(first);
+      // A missing path hashes to null (treated as a real change / deletion).
+      expect(state.fileHash(path.join(dir, "missing.md"))).toBeNull();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

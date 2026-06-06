@@ -388,6 +388,18 @@ export type State = {
    * const mtime = state.fileMtime("/abs/content/a.md");
    */
   fileMtime: (path: string) => number | null;
+  /**
+   * Resolve a file's content hash, or `null` when it does not exist. serve()'s change gate
+   * uses it to drop a no-op save whose bytes are identical to the last successful build (the
+   * double Ctrl-S habit). Default reads the file + hashes it (`node:fs` + `node:crypto`);
+   * tests inject deterministic values.
+   *
+   * @param path - The absolute path to hash.
+   * @returns The content hash, or `null` when the file is missing.
+   * @example
+   * const hash = state.fileHash("/abs/content/a.md");
+   */
+  fileHash: (path: string) => string | null;
 };
 
 /**
@@ -443,6 +455,18 @@ export type ServeOptions = {
   port?: number;
   /** Reserved for opening the browser on start (not yet implemented). Defaults to `false`. */
   open?: boolean;
+  /**
+   * Re-enable OG-image generation for this dev session. `serve()` disables expensive,
+   * preview-irrelevant outputs by default for a fast rebuild; a thin consumer script
+   * maps `--og` to this. Defaults to `false`.
+   */
+  og?: boolean;
+  /** Re-enable `sitemap.xml` + `robots.txt` for this dev session (maps to `--sitemap`). Defaults to `false`. */
+  sitemap?: boolean;
+  /** Re-enable RSS/Atom/JSON feeds for this dev session (maps to `--feeds`). Defaults to `false`. */
+  feeds?: boolean;
+  /** Re-enable i18n locale-redirect pages for this dev session (maps to `--locale-redirects`). Defaults to `false`. */
+  localeRedirects?: boolean;
 };
 
 /**

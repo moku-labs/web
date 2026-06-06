@@ -17,7 +17,65 @@ import { generateOgImages } from "./phases/og-images";
 import { renderPages } from "./phases/pages";
 import { copyPublic, DEFAULT_PUBLIC_DIR } from "./phases/public";
 import { generateSitemap } from "./phases/sitemap";
-import type { BuildResult, PhaseContext, PhaseName } from "./types";
+import type { BuildResult, PhaseContext, PhaseName, RunOptions } from "./types";
+
+/** Matches a Markdown source path (a content edit). */
+const MARKDOWN_PATH = /\.md$/;
+/** Matches a stylesheet path (a CSS edit — does not change rendered page bodies). */
+const STYLE_PATH = /\.css$/;
+/** Matches a code path (TS/JS/JSON — may change ANY page's render output). */
+const CODE_PATH = /\.(?:tsx?|jsx?|mjs|cjs|json)$/;
+
+/**
+ * What a dev rebuild may safely reuse, derived from the set of changed paths. A full
+ * build (no `changed`) reuses nothing. If every change is a classified content/style/code
+ * edit, content (unaffected by style/code edits) is reusable, and page renders are
+ * reusable when NO code changed (code can change any page's output). Any unclassifiable
+ * path (a bare directory, an unknown extension, a platform that reported no filename)
+ * conservatively forces a full rebuild — correctness over speed.
+ *
+ * @example
+ * ```ts
+ * planIncrementalRebuild(["/c/intro/en.md"]); // { contentChanged: [...], contentReuse: true, renderReuse: true }
+ * ```
+ */
+export type ChangePlan = {
+  /** Changed Markdown paths to invalidate before loading content (slug-derived). */
+  contentChanged: readonly string[];
+  /** Reuse cached content for slugs not invalidated (every change is classified). */
+  contentReuse: boolean;
+  /** Reuse cached page renders for pages whose data is unchanged (no code changed). */
+  renderReuse: boolean;
+};
+
+/**
+ * Derive the {@link ChangePlan} for a run from its changed-path set (see the type docs
+ * for the rules).
+ *
+ * @param changed - Absolute/relative changed paths, or `undefined` for a full build.
+ * @returns The reuse plan for this run.
+ * @example
+ * ```ts
+ * const plan = planIncrementalRebuild(options?.changed);
+ * ```
+ */
+export function planIncrementalRebuild(changed: readonly string[] | undefined): ChangePlan {
+  // No changed set (initial / production build) → re-read + re-render everything.
+  if (changed === undefined || changed.length === 0) {
+    return { contentChanged: [], contentReuse: false, renderReuse: false };
+  }
+  // Any path we cannot classify means we do not know what changed → full rebuild.
+  const allClassified = changed.every(
+    file => MARKDOWN_PATH.test(file) || STYLE_PATH.test(file) || CODE_PATH.test(file)
+  );
+  if (!allClassified) {
+    return { contentChanged: [], contentReuse: false, renderReuse: false };
+  }
+  // Content survives style/code edits; renders survive only style + content edits.
+  const contentChanged = changed.filter(file => MARKDOWN_PATH.test(file));
+  const codeChanged = changed.some(file => CODE_PATH.test(file));
+  return { contentChanged, contentReuse: true, renderReuse: !codeChanged };
+}
 
 /**
  * The static ordered list of pipeline phase names.
@@ -149,25 +207,34 @@ async function runOutputs(ctx: PhaseContext): Promise<void> {
  * `build:phase` boundary per phase and `build:complete` once at the end.
  *
  * @param ctx - Plugin context (provides `require`, `emit`, `state`, `config`, `log`).
- * @param options - Optional run overrides.
- * @param options.outDir - Override the configured output directory for this run.
+ * @param options - Optional per-run overrides ({@link RunOptions}).
  * @returns The build result (outDir, pageCount, durationMs).
  * @example
  * ```ts
  * const result = await runPipeline(ctx, { outDir: "./dist" });
  * ```
  */
-export async function runPipeline(
-  ctx: PhaseContext,
-  options?: { outDir?: string }
-): Promise<BuildResult> {
+export async function runPipeline(ctx: PhaseContext, options?: RunOptions): Promise<BuildResult> {
   const started = Date.now();
   resetRun(ctx);
   const outDir = options?.outDir ?? ctx.config.outDir;
-  const phaseContext: PhaseContext = { ...ctx, config: { ...ctx.config, outDir } };
 
-  // Phase 0 — clean (setup only, not a build:phase boundary).
-  await rm(outDir, { recursive: true, force: true });
+  // Merge any per-run config overrides (dev rebuilds disable feeds/sitemap/minify/etc.)
+  // over the snapshot for this run only — the persisted plugin config is never mutated.
+  const phaseContext: PhaseContext = {
+    ...ctx,
+    config: { ...ctx.config, outDir, ...options?.overrides }
+  };
+
+  // Plan what this run may safely reuse from the changed-path set (dev incremental).
+  const plan = planIncrementalRebuild(options?.changed);
+
+  // Phase 0 — clean (setup only, not a build:phase boundary). A dev rebuild passes
+  // `skipClean` so the prior assets + on-disk caches survive (and so an in-flight dev
+  // request never hits a momentarily-empty outDir); `mkdir` still ensures outDir exists.
+  if (!options?.skipClean) {
+    await rm(outDir, { recursive: true, force: true });
+  }
   await mkdir(outDir, { recursive: true });
 
   // Phase 1 — bundle.
@@ -176,12 +243,16 @@ export async function runPipeline(
   // Phase 2 — content + images + content-images (parallel; content delegates to the content plugin,
   // content-images copies each article's co-located images next to its locale pages by convention).
   await Promise.all([
-    withPhase(phaseContext, "content", () => loadContent(phaseContext)),
+    withPhase(phaseContext, "content", () =>
+      loadContent(phaseContext, { reuse: plan.contentReuse, changed: plan.contentChanged })
+    ),
     withPhase(phaseContext, "images", () => processImages(phaseContext))
   ]);
 
-  // Phase 3 — pages.
-  const pages = await withPhase(phaseContext, "pages", () => renderPages(phaseContext));
+  // Phase 3 — pages (reuse cached renders when only content/styles changed).
+  const pages = await withPhase(phaseContext, "pages", () =>
+    renderPages(phaseContext, { reuse: plan.renderReuse })
+  );
 
   // Phase 3.5 — content-images. Runs after `pages` so the article tree is fully written before
   // co-located images are copied into the shared `<outDir>/<slug>/images/` dirs.

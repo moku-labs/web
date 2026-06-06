@@ -233,6 +233,23 @@ export type Config = {
 export type BuildCacheEntry = Record<string, string>;
 
 /**
+ * One cached page render: the SSR body HTML keyed by a hash of the inputs that determine
+ * it (the route's loaded data). Lets a dev incremental rebuild skip the synchronous,
+ * dominant-cost `preact-render-to-string` for a page whose data is unchanged.
+ *
+ * @example
+ * ```ts
+ * const entry: RenderCacheEntry = { dataHash: "9f8e…", body: "<h1>Hi</h1>" };
+ * ```
+ */
+export type RenderCacheEntry = {
+  /** Hash of the page's render inputs (its loaded data). */
+  dataHash: string;
+  /** The SSR-rendered body HTML for those inputs. */
+  body: string;
+};
+
+/**
  * Per-run closure state for the `build` plugin. Holds caches and config only —
  * no domain data is duplicated here (pulled fresh via `ctx.require` each run).
  *
@@ -256,6 +273,13 @@ export interface State {
    * so unchanged articles are skipped on the next run.
    */
   ogImageHashCache: Map<string, string>;
+  /**
+   * Cross-run page-render cache: `name\0params\0locale` -> {@link RenderCacheEntry}.
+   * Persists across dev rebuilds (never reset by a run) so an incremental rebuild reuses
+   * the body of any page whose data is unchanged. Empty for a fresh process; cleared by a
+   * full (non-incremental) render so stale entries for removed routes never linger.
+   */
+  renderCache: Map<string, RenderCacheEntry>;
 }
 
 /**
@@ -298,6 +322,62 @@ export interface BuildResult {
 }
 
 /**
+ * Per-run {@link Config} field overrides for a single {@link Api.run} call. Lets a dev
+ * rebuild disable expensive, preview-irrelevant outputs (feeds / sitemap / og-images /
+ * locale-redirects) and minification WITHOUT mutating the persisted plugin config. Each
+ * key maps to the same-named {@link Config} flag and is merged over the config snapshot
+ * for that one run only.
+ *
+ * @example
+ * ```ts
+ * const dev: BuildRunOverrides = { minify: false, feeds: false, sitemap: false };
+ * ```
+ */
+export type BuildRunOverrides = Readonly<
+  Partial<
+    Pick<
+      Config,
+      "minify" | "feeds" | "sitemap" | "ogImage" | "images" | "localeRedirects" | "notFound"
+    >
+  >
+>;
+
+/**
+ * Options for a single {@link Api.run} call. All fields are optional; an absent/empty
+ * options object runs the full production build (clean + every configured phase). The
+ * dev server (`serve()`) passes `skipClean`/`overrides`/`changed` to make a rebuild
+ * fast without touching the production path.
+ *
+ * @example
+ * ```ts
+ * await app.build.run({ skipClean: true, overrides: { minify: false }, changed: ["/abs/content/intro/en.md"] });
+ * ```
+ */
+export type RunOptions = {
+  /** Override the configured output directory for this run. */
+  outDir?: string;
+  /**
+   * Skip the destructive clean (`rm -rf outDir`) so caches + unchanged assets survive a dev
+   * rebuild. TRADE-OFF: because nothing is pruned, output for a route DELETED or renamed
+   * since the last build lingers on disk (and is still served by the dev server) until the
+   * next full/clean build — restart `serve` or run a production `build` to clear it.
+   */
+  skipClean?: boolean;
+  /** Per-run {@link Config} field overrides merged over the snapshot (e.g. disable feeds/sitemap/minify in dev). */
+  overrides?: BuildRunOverrides;
+  /**
+   * Paths changed since the last build (dev incremental rebuild). When present, the pipeline
+   * re-reads only changed Markdown and re-renders only pages whose loaded data changed; omit
+   * it for a full build (initial build + every production build). CORRECTNESS NOTE: render
+   * reuse is sound only when a route's render/layout output is a pure function of its
+   * `.load()` data (+ params/locale/code) — a route whose `.render()` reads module-global or
+   * other out-of-band state can show a stale body on a content-only rebuild until the next
+   * code change or restart. Production builds omit `changed`, so they are never affected.
+   */
+  changed?: readonly string[];
+};
+
+/**
  * Public API surface mounted on `app.build`.
  *
  * @example
@@ -307,17 +387,18 @@ export interface BuildResult {
  */
 export type Api = {
   /**
-   * Run the full SSG pipeline and write the site to disk.
+   * Run the full SSG pipeline and write the site to disk. With no options a full
+   * production build runs (clean + every configured phase); dev callers pass
+   * {@link RunOptions} (`skipClean`/`overrides`/`changed`) for a fast incremental rebuild.
    *
-   * @param options - Optional run overrides.
-   * @param options.outDir - Override the configured output directory for this run.
+   * @param options - Optional per-run overrides ({@link RunOptions}).
    * @returns The build result (outDir, pageCount, durationMs).
    * @example
    * ```ts
    * const result = await app.build.run({ outDir: "./preview" });
    * ```
    */
-  run(options?: { outDir?: string }): Promise<BuildResult>;
+  run(options?: RunOptions): Promise<BuildResult>;
 
   /**
    * List the phases in execution order (introspection / tooling).
