@@ -46,7 +46,9 @@ export function makeRenderer(): CaptureRenderer {
     deployed: record("deployed"),
     info: record("info"),
     warn: record("warn"),
-    error: record("error")
+    error: record("error"),
+    heading: record("heading"),
+    check: record("check")
   };
 }
 
@@ -135,6 +137,7 @@ export function makeCtx(options: MakeCtxOptions = {}): {
   const state: State = {
     render,
     confirm: vi.fn(async () => false),
+    select: vi.fn(async () => 0),
     clock: () => 1000,
     watch: vi.fn(() => noopWatch()),
     serveStatic: vi.fn(() => ({

@@ -105,6 +105,33 @@ function defaultConfirm(question: string): Promise<boolean> {
 }
 
 /**
+ * Default stdin single-choice prompt. Prints the choices numbered from 1, reads a line
+ * via `node:readline`, and resolves the chosen zero-based index (empty / out-of-range
+ * falls back to 0). Tests inject a canned selection so no real TTY interaction occurs.
+ *
+ * @param question - The prompt to display.
+ * @param choices - The selectable option labels.
+ * @returns Resolves the chosen zero-based index.
+ * @example
+ * await defaultSelect("Trigger?", ["Auto on push", "Manual only"]);
+ */
+function defaultSelect(question: string, choices: readonly string[]): Promise<number> {
+  return new Promise<number>(resolve => {
+    const readline = createInterface({ input: process.stdin, output: process.stdout });
+    for (const [index, choice] of choices.entries()) {
+      // biome-ignore lint/suspicious/noConsole: interactive prompt writes the numbered choices to stdout.
+      console.log(`  ${index + 1}) ${choice}`);
+    }
+    readline.question(`${question} [1-${choices.length}] `, answer => {
+      readline.close();
+      const picked = Number.parseInt(answer.trim(), 10);
+      const valid = Number.isInteger(picked) && picked >= 1 && picked <= choices.length;
+      resolve(valid ? picked - 1 : 0);
+    });
+  });
+}
+
+/**
  * Default recursive directory watcher — wraps `node:fs.watch` with `{ recursive: true }`
  * and adapts its handle to {@link WatchHandle}. Tests inject a fake emitter so no real
  * FS watch is registered.
@@ -184,6 +211,7 @@ export function createState(_ctx: {
   return {
     render: createPanelRenderer(),
     confirm: defaultConfirm,
+    select: defaultSelect,
     clock: Date.now,
     watch: defaultWatch,
     serveStatic: defaultServeStatic,

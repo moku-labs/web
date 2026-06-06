@@ -397,7 +397,9 @@ export function createPanelRenderer(options: PanelOptions = {}): CliRenderer {
      * render.info("watching for changes…");
      */
     info(message) {
-      write(`  ${palette.cyan("›")} ${message}`);
+      const [first = "", ...rest] = message.split("\n");
+      write(`  ${palette.cyan("›")} ${first}`);
+      for (const line of rest) write(`    ${line}`);
     },
 
     /**
@@ -428,6 +430,35 @@ export function createPanelRenderer(options: PanelOptions = {}): CliRenderer {
       }
       writeError(`  ${palette.red("✗")} ${message}`);
       if (cause !== undefined) writeError(String(cause));
+    },
+
+    /**
+     * Render a section heading (a blank line + a bold cyan label) for a multi-step flow.
+     *
+     * @param text - The heading label.
+     * @example
+     * render.heading("Diagnostics");
+     */
+    heading(text) {
+      write("");
+      write(`  ${palette.bold(palette.cyan(text))}`);
+    },
+
+    /**
+     * Render a diagnostic line: green `✓` (pass) or red `✗` (fail) + label, with optional
+     * dim, indented detail beneath (e.g. a fix hint for a failing check).
+     *
+     * @param ok - Whether the check passed.
+     * @param label - The check label.
+     * @param detail - Optional multi-line guidance shown indented under the line.
+     * @example
+     * render.check(false, "CLOUDFLARE_API_TOKEN is set", "Create one at …");
+     */
+    check(ok, label, detail) {
+      write(`  ${ok ? palette.green("✓") : palette.red("✗")} ${label}`);
+      if (detail !== undefined) {
+        for (const line of detail.split("\n")) write(`      ${palette.dim(line)}`);
+      }
     }
   };
 }

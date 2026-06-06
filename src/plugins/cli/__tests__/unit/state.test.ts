@@ -123,3 +123,26 @@ describe("cli default confirm seam", () => {
     expect(close).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("cli default select seam", () => {
+  it("returns the chosen zero-based index, clamping empty/out-of-range to 0", async () => {
+    const close = vi.fn();
+    const answers = ["2", "", "9"]; // pick #2 → index 1; empty → 0; out-of-range → 0
+    let index = 0;
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    createInterfaceMock.mockReturnValue({
+      question(_question: string, callback: (answer: string) => void) {
+        callback(answers[index++] ?? "");
+      },
+      close
+    });
+
+    const state = createState(stateCtx());
+    const choices = ["Auto", "Manual", "Skip"];
+    expect(await state.select("Trigger?", choices)).toBe(1);
+    expect(await state.select("Trigger?", choices)).toBe(0);
+    expect(await state.select("Trigger?", choices)).toBe(0);
+    expect(close).toHaveBeenCalledTimes(3);
+    logSpy.mockRestore();
+  });
+});

@@ -10,6 +10,7 @@ import path from "node:path";
 import type { EmitFn } from "@moku-labs/core";
 import { buildPlugin } from "../build";
 import { deployPlugin } from "../deploy";
+import { runDeployWizard } from "./deploy-wizard";
 import { cliError, ERROR_PREFIX } from "./errors";
 import { runPreviewServer } from "./preview";
 import { runDevServer } from "./serve";
@@ -274,22 +275,26 @@ export function createApi(ctx: CliPluginContext): Api {
     },
 
     /**
-     * Scaffold, then deploy. A y/N confirm is shown only when a human is present (an
-     * interactive TTY, with `CI` unset). Non-interactive runs (CI, or any non-TTY)
-     * skip the prompt and deploy, so the consumer scripts never hang a pipeline.
-     * `options.yes` forces the skip anywhere. An interactive "no" returns
-     * `{ deployed: false, reason: "declined" }`.
+     * Deploy to Cloudflare Pages. Two modes: `{ guided: true }` runs the interactive
+     * setup wizard (diagnose prerequisites, guide fixes, gate, local test, deploy, offer
+     * a CI workflow); the default direct path scaffolds, gates on a y/N confirm (shown
+     * only to an interactive TTY with `CI` unset — non-interactive runs proceed so a
+     * pipeline never hangs), then deploys. `options.yes` forces the skip. A "no" returns
+     * `{ deployed: false, reason: "declined" }`; the wizard may return `"blocked"`.
      *
-     * @param options - Optional branch override and `yes` flag.
-     * @returns The deploy outcome (completed details, or `declined` if a TTY user says no).
+     * @param options - Optional branch override, `yes` flag, and `guided` toggle.
+     * @returns The deploy outcome (completed details, or a `declined`/`blocked` skip).
      * @example
-     * await api.deploy({ branch: "preview/x", yes: true });
+     * await api.deploy({ guided: true });
      */
     async deploy(options = {}) {
       const { branch, yes = false } = options;
 
-      // Render the command header, then scaffold the deploy (CI mode).
+      // Render the command header; the guided wizard takes over from here when requested.
       ctx.state.render.header("deploy");
+      if (options.guided === true) return runDeployWizard(ctx, options);
+
+      // Direct path — scaffold the deploy (CI mode).
       await ctx.require(deployPlugin).init({ ci: true });
 
       // Gate on confirmation; an interactive "no" returns without deploying.

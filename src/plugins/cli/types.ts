@@ -164,6 +164,27 @@ export type CliRenderer = {
    * render.error("build failed", err);
    */
   error(message: string, cause?: unknown): void;
+  /**
+   * Render a section heading for a multi-step flow (e.g. the guided deploy wizard).
+   *
+   * @param text - The heading label.
+   * @returns Nothing.
+   * @example
+   * render.heading("Diagnostics");
+   */
+  heading(text: string): void;
+  /**
+   * Render one diagnostic line — a green `✓` (pass) or red `✗` (fail) before the label,
+   * with optional dim, indented detail beneath it (e.g. how to fix a failing check).
+   *
+   * @param ok - Whether the check passed.
+   * @param label - The check label.
+   * @param detail - Optional multi-line guidance shown indented under the line.
+   * @returns Nothing.
+   * @example
+   * render.check(false, "CLOUDFLARE_API_TOKEN is set", "Create one at …");
+   */
+  check(ok: boolean, label: string, detail?: string): void;
 };
 
 /**
@@ -298,6 +319,18 @@ export type State = {
    */
   confirm: (question: string) => Promise<boolean>;
   /**
+   * Interactive single-choice prompt used by the guided deploy wizard. Presents the
+   * `choices` numbered from 1 and resolves the chosen zero-based index (clamped to a
+   * valid choice). Default reads stdin (TTY); tests inject a canned selection.
+   *
+   * @param question - The prompt to display.
+   * @param choices - The selectable option labels.
+   * @returns Resolves the chosen zero-based index.
+   * @example
+   * const i = await state.select("Workflow trigger?", ["Auto on push", "Manual only"]);
+   */
+  select: (question: string, choices: readonly string[]) => Promise<number>;
+  /**
    * Monotonic clock for durations. Default `Date.now`; tests inject for deterministic timing.
    *
    * @returns The current time in milliseconds.
@@ -363,16 +396,17 @@ export type BuildSummary = {
 
 /**
  * Outcome returned by `cli.deploy()` — either a completed deploy (with details) or a
- * skipped one. A skip happens only when an interactive TTY user answers "no" at the
- * confirm prompt (`reason: "declined"`). Non-interactive runs (CI / non-TTY) never
- * prompt and always proceed, so they never skip — the scripts are CI-safe.
+ * skipped one. A skip is `"declined"` when a user answers "no" at the confirm prompt,
+ * or `"blocked"` when the guided wizard found unmet prerequisites and stopped before
+ * deploying. Non-interactive direct runs (CI / non-TTY) never prompt and always proceed,
+ * so they never skip — the scripts are CI-safe.
  *
  * @example
  * const outcome: DeployOutcome = { deployed: false, reason: "declined" };
  */
 export type DeployOutcome =
   | { deployed: true; url: string; deploymentId: string; branch: string; durationMs: number }
-  | { deployed: false; reason: "declined" };
+  | { deployed: false; reason: "declined" | "blocked" };
 
 /**
  * Options for `cli.build()`.
@@ -420,6 +454,13 @@ export type DeployOptions = {
   branch?: string;
   /** Skip the y/N confirm and deploy immediately. Defaults to `false`. */
   yes?: boolean;
+  /**
+   * Run the guided, interactive setup wizard instead of the direct `--cli` deploy:
+   * diagnose prerequisites, guide the user to fix anything missing, gate the deploy on
+   * everything being green, then offer to scaffold a GitHub Actions workflow. Defaults
+   * to `false` (the direct, CI-safe path). Thin scripts pass `{ guided: !"--cli" }`.
+   */
+  guided?: boolean;
 };
 
 /**

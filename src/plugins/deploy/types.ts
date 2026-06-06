@@ -1,6 +1,9 @@
 /**
  * @file deploy plugin — type definitions.
  */
+import type { WorkflowTrigger } from "./generators/github-workflow";
+
+export type { WorkflowTrigger } from "./generators/github-workflow";
 
 /**
  * Options passed to the injected spawner — the subset of Bun.spawn's options the
@@ -151,6 +154,11 @@ export type DeployInitOptions = {
   ci?: boolean;
   /** Drift-only mode: report differences without writing any files. Defaults to `false`. */
   check?: boolean;
+  /**
+   * What triggers the generated workflow (see {@link WorkflowTrigger}): `"auto"` (push to
+   * main), `"versioned-tag"` (push a `v*` tag), or `"dispatch"` (manual only). Default `"auto"`.
+   */
+  workflowTrigger?: WorkflowTrigger;
 };
 
 /**

@@ -84,7 +84,10 @@ export async function writeScaffolding(input: {
 
   // Reconcile the CI workflow only when CI scaffolding was requested.
   if (ci) {
-    const workflowContents = generateGithubWorkflow({ slug });
+    const workflowContents = generateGithubWorkflow({
+      slug,
+      ...(options.workflowTrigger ? { trigger: options.workflowTrigger } : {})
+    });
     await reconcile({
       relativePath: WORKFLOW_PATH,
       expected: workflowContents,

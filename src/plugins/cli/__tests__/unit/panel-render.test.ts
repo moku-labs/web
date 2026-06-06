@@ -142,6 +142,18 @@ describe("cli panel renderer (plain mode)", () => {
     render.reload({ file: "content", pageCount: 4, durationMs: 50 });
     expect(out.join("\n")).toContain("rebuilt 4 pages");
   });
+
+  it("renders a heading + check lines (✓/✗ with optional fix detail)", () => {
+    const { render, out } = capture();
+    render.heading("Diagnostics");
+    render.check(true, "wrangler.jsonc");
+    render.check(false, "CLOUDFLARE_API_TOKEN is set", "Create one at https://dash…");
+    const joined = out.join("\n");
+    expect(joined).toContain("Diagnostics");
+    expect(joined).toContain("✓ wrangler.jsonc");
+    expect(joined).toContain("✗ CLOUDFLARE_API_TOKEN is set");
+    expect(joined).toContain("Create one at https://dash…");
+  });
 });
 
 /** A renderer with color on + injected raw/clock sinks, for in-place (TTY) assertions. */
