@@ -659,11 +659,16 @@ export function createDevHandler(
 
 /**
  * Per-session dev feature opt-ins resolved from `ServeOptions`. The dev build skips these
- * expensive, preview-irrelevant outputs by default for a fast rebuild; a `true` flag
+ * expensive, NON-navigational outputs by default for a fast rebuild; a `true` flag
  * re-enables that one output for the session (e.g. `--og` while testing social cards).
  *
+ * Note: locale-redirects are deliberately NOT in this set — they emit the bare-path
+ * redirect pages (e.g. `/` → `/en/`) that make the dev site navigable for a
+ * locale-prefixed app, so the dev build always follows the app's `localeRedirects` config
+ * (disabling them would 404 the bare `/`).
+ *
  * @example
- * const features: DevFeatures = { og: false, sitemap: false, feeds: false, localeRedirects: false };
+ * const features: DevFeatures = { og: false, sitemap: false, feeds: false };
  */
 export type DevFeatures = {
   /** Generate OG images this session. */
@@ -672,29 +677,27 @@ export type DevFeatures = {
   sitemap: boolean;
   /** Generate RSS/Atom/JSON feeds this session. */
   feeds: boolean;
-  /** Generate i18n locale-redirect pages this session. */
-  localeRedirects: boolean;
 };
 
 /**
  * Build the per-run {@link BuildRunOverrides} for a dev build from the session feature
- * opt-ins: minification is always off in dev (no benefit, slower), and each expensive
- * output stays off unless its flag re-enables it (`ogImage: false` disables OG generation
- * regardless of the persisted config). The persisted plugin config is never mutated — the
- * overrides apply to the dev run only.
+ * opt-ins: minification is always off in dev (no benefit, slower), and each expensive,
+ * NON-navigational output stays off unless its flag re-enables it (`ogImage: false`
+ * disables OG generation regardless of the persisted config). Locale-redirects are NOT
+ * overridden — they produce navigable pages (the bare `/` → `/{defaultLocale}/` redirect),
+ * so they follow the app's own config. The persisted plugin config is never mutated.
  *
  * @param features - The resolved per-session dev feature opt-ins.
  * @returns The config overrides merged into the dev build run.
  * @example
- * devBuildOverrides({ og: false, sitemap: false, feeds: false, localeRedirects: false });
+ * devBuildOverrides({ og: false, sitemap: false, feeds: false });
  */
 export function devBuildOverrides(features: DevFeatures): BuildRunOverrides {
   return {
     minify: false,
     ...(features.feeds ? {} : { feeds: false }),
     ...(features.sitemap ? {} : { sitemap: false }),
-    ...(features.og ? {} : { ogImage: false }),
-    ...(features.localeRedirects ? {} : { localeRedirects: false })
+    ...(features.og ? {} : { ogImage: false })
   };
 }
 

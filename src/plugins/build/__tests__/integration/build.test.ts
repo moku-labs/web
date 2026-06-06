@@ -313,6 +313,48 @@ describe("build integration", () => {
     );
   });
 
+  it("dev-profile overrides STILL emit the bare-root redirect for a locale-prefixed home (no dev 404)", async () => {
+    // Regression: serve()'s dev profile must NOT disable locale-redirects — for a
+    // locale-prefixed home the bare `/index.html` is the `/` → `/en/` redirect, and
+    // disabling it 404s the dev root. The home lives at `/{lang}/`, so the pages phase
+    // writes only `/en/` + `/uk/`; the bare `/` comes solely from locale-redirects.
+    const out = path.join(tmp, "dist");
+    const homeRoute = route("/{lang}/")
+      .generate(ctx => [{ lang: ctx.locale }])
+      .render(() => h("h1", {}, "Home"))
+      .head(() => ({ title: "Home" }));
+    const routes = defineRoutes({ home: homeRoute });
+
+    const coreConfig = createCoreConfig("web-test", {
+      config: { stage: "production", mode: "ssg" as const },
+      plugins: [logPlugin],
+      pluginConfigs: { log: { mode: "test" as const } }
+    });
+    const { createApp } = coreConfig.createCore(coreConfig, { plugins: [] });
+    const app = createApp({
+      plugins: [sitePlugin, i18nPlugin, routerPlugin, contentPlugin, headPlugin, buildPlugin],
+      pluginConfigs: {
+        site: SITE,
+        router: { routes },
+        i18n: { locales: ["en", "uk"], defaultLocale: "en" },
+        content: { providers: [fileSystemContent({ contentDir: FIXTURE_DIR })] },
+        build: { outDir: out, localeRedirects: true, images: false, ogImage: false }
+      }
+    });
+
+    // EXACTLY the overrides serve() passes for a dev build (locale-redirects NOT disabled).
+    await app.build.run({ overrides: { minify: false, feeds: false, sitemap: false } });
+
+    // The locale-prefixed pages exist…
+    expect(existsSync(path.join(out, "en", "index.html"))).toBe(true);
+    // …and the bare `/index.html` redirect (from locale-redirects) exists → `/` is not a 404.
+    const rootIndex = path.join(out, "index.html");
+    expect(existsSync(rootIndex)).toBe(true);
+    const html = readFileSync(rootIndex, "utf8");
+    expect(html).toContain('http-equiv="refresh"');
+    expect(html).toContain("/en/");
+  });
+
   it("overrides disable feeds + sitemap for one run without mutating config", async () => {
     const out = path.join(tmp, "dist");
     const app = buildApp(out, bySlug); // config has feeds + sitemap ON

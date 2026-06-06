@@ -597,22 +597,24 @@ describe("cli/createChangeGate (watch-event filter)", () => {
 });
 
 describe("cli/devBuildOverrides (dev build profile)", () => {
-  it("disables minify + every expensive output by default", () => {
-    expect(
-      devBuildOverrides({ og: false, sitemap: false, feeds: false, localeRedirects: false })
-    ).toEqual({
+  it("disables minify + every expensive NON-navigational output by default", () => {
+    expect(devBuildOverrides({ og: false, sitemap: false, feeds: false })).toEqual({
       minify: false,
       feeds: false,
       sitemap: false,
-      ogImage: false,
-      localeRedirects: false
+      ogImage: false
     });
   });
 
+  it("NEVER disables localeRedirects (they emit the navigable bare-path redirect)", () => {
+    // Regression: disabling localeRedirects 404s the bare `/` for a locale-prefixed app.
+    expect(devBuildOverrides({ og: false, sitemap: false, feeds: false })).not.toHaveProperty(
+      "localeRedirects"
+    );
+  });
+
   it("an opt-in omits that output's disable override (so it stays enabled per config)", () => {
-    expect(
-      devBuildOverrides({ og: true, sitemap: true, feeds: true, localeRedirects: true })
-    ).toEqual({ minify: false });
+    expect(devBuildOverrides({ og: true, sitemap: true, feeds: true })).toEqual({ minify: false });
   });
 });
 
@@ -648,10 +650,13 @@ describe("cli serve() dev build profile wiring", () => {
         minify: false,
         feeds: false,
         sitemap: false,
-        ogImage: false,
-        localeRedirects: false
+        ogImage: false
       }
     });
+    // locale-redirects is NEVER overridden — the bare `/` redirect must still be built.
+    expect(
+      (build.run.mock.calls[0]?.[0] as { overrides: Record<string, unknown> }).overrides
+    ).not.toHaveProperty("localeRedirects");
 
     // Rebuild: skipClean true + the same dev overrides.
     handlers.get("content")?.("post/en.md");
@@ -688,10 +693,11 @@ describe("cli serve() dev build profile wiring", () => {
 
     const overrides = (build.run.mock.calls[0]?.[0] as { overrides: Record<string, unknown> })
       .overrides;
-    // Opted-in outputs are NOT disabled; the rest still are.
+    // Opted-in outputs are NOT disabled; the rest still are. locale-redirects is never overridden.
     expect(overrides).not.toHaveProperty("ogImage");
     expect(overrides).not.toHaveProperty("sitemap");
-    expect(overrides).toMatchObject({ minify: false, feeds: false, localeRedirects: false });
+    expect(overrides).not.toHaveProperty("localeRedirects");
+    expect(overrides).toMatchObject({ minify: false, feeds: false });
 
     process.emit("SIGINT");
     await servePromise;

@@ -286,9 +286,10 @@ export function createApi(ctx: CliPluginContext): Api {
     /**
      * Dev loop: build once, serve `dist/` in-process (live-reload injected), watch
      * `watchDirs`, debounced + incremental rebuild + reload. For a fast rebuild the dev
-     * build disables minification + expensive, preview-irrelevant outputs (feeds /
-     * sitemap / og-images / locale-redirects); pass `og`/`sitemap`/`feeds`/
-     * `localeRedirects` to re-enable any of them for the session. Resolves on SIGINT/SIGTERM.
+     * build disables minification + expensive, NON-navigational outputs (feeds / sitemap /
+     * og-images); pass `og`/`sitemap`/`feeds` to re-enable any of them for the session.
+     * Locale-redirects are always built per the app config (they emit the navigable bare-path
+     * `/` → `/{defaultLocale}/` redirect). Resolves on SIGINT/SIGTERM.
      *
      * @param options - Optional port override + per-session dev feature opt-ins.
      * @returns Resolves once the server has been torn down.
@@ -301,8 +302,7 @@ export function createApi(ctx: CliPluginContext): Api {
       return runDevServer(ctx, port, {
         og: options.og ?? false,
         sitemap: options.sitemap ?? false,
-        feeds: options.feeds ?? false,
-        localeRedirects: options.localeRedirects ?? false
+        feeds: options.feeds ?? false
       });
     },
 
