@@ -1,8 +1,8 @@
 # cli
 
-> **Node-only** — the developer CLI for `@moku-labs/web`: `build` · `serve` · `preview` · `deploy`, each rendered through a boxed **Panel** UI with live build/deploy progress.
+> **Node-only** — the developer CLI for `@moku-labs/web`: `build` · `serve` · `preview` · `deploy`, each rendered through the animated **Velocity** Panel UI — a `▟▙ moku web` lockup + version/runtime banner, a live phase tree, boxed result panels, and a breathing live-reload pulse.
 
-`cli` mounts exactly four methods at `app.cli` (`build`/`serve`/`preview`/`deploy`). Each one renders a `MOKU WEB` Panel header, then does its work — running the SSG build, serving `dist/` in-process with live reload, previewing the built output with Cloudflare-Pages clean URLs, or scaffolding + deploying. There is **no argv parser, no `run()` dispatcher, and no framework bin**: the consumer drives the plugin from one thin per-command script (`scripts/{build,serve,preview,deploy}.ts`), each naming its command by *being* it.
+`cli` mounts exactly four methods at `app.cli` (`build`/`serve`/`preview`/`deploy`). Each one renders the `▟▙ moku web` lockup + a version/runtime banner, then does its work — running the SSG build, serving `dist/` in-process with live reload, previewing the built output with Cloudflare-Pages clean URLs, or scaffolding + deploying. There is **no argv parser, no `run()` dispatcher, and no framework bin**: the consumer drives the plugin from one thin per-command script (`scripts/{build,serve,preview,deploy}.ts`), each naming its command by *being* it.
 
 It `depends` on the node-only `build` and `deploy` plugins (which makes `cli` node-only too) and PULLs their APIs at call time via `ctx.require(buildPlugin)` / `ctx.require(deployPlugin)`. Live progress rides on **hooks** over those plugins' events, so the renderer updates as a build runs without polling. `cli` owns no long-lived resource at plugin scope, so it has **no `onStart`/`onStop`** — `onInit` does synchronous config validation only. The dev server, preview server, and file watcher are created *inside* `serve()`/`preview()` and torn down on SIGINT/SIGTERM within that same call, so app `stop()` has nothing to clean up.
 
@@ -74,7 +74,7 @@ await app.cli.deploy({ branch: "preview/landing", yes: true });  // forces the d
 
 | Method | Replaces | Behavior |
 |---|---|---|
-| `cli.build()` | `scripts/build.ts` | `build.run()` → assert `dist/404.html` → Panel BUILD block |
+| `cli.build()` | `scripts/build.ts` | `build.run()` → assert `dist/404.html` → boxed BUILD panel |
 | `cli.serve()` | `scripts/dev.ts` | build once → in-process static server (live-reload SSE) + watch → debounced rebuild |
 | `cli.preview()` | `scripts/serve.ts` | static server for `dist/`, CF-Pages clean URLs, no reload injection |
 | `cli.deploy()` | `scripts/deploy.ts` | TTY-only confirm → `deploy.init({ ci: true })` → `deploy.run()` (CI auto-proceeds) |
@@ -109,8 +109,8 @@ await app.cli.deploy({ branch: "preview/landing", yes: true });  // forces the d
 
 | Event | Source | Handler |
 |---|---|---|
-| `build:phase` | `build` | `state.render.phase` — live per-phase row |
-| `build:complete` | `build` | `state.render.built` — BUILD summary block |
+| `build:phase` | `build` | `state.render.phase` — live phase-tree row (spinner → ✓ + timing) |
+| `build:complete` | `build` | `state.render.built` — boxed BUILD summary panel |
 | `deploy:complete` | `deploy` | `state.render.deployed` — deploy result panel |
 
 > [!NOTE]
@@ -118,7 +118,8 @@ await app.cli.deploy({ branch: "preview/landing", yes: true });  // forces the d
 
 ## Design notes
 
-- **Panel renderer.** Every line of output flows through `CliRenderer` (`state.render`), an injectable seam. `createPanelRenderer` is TTY/`NO_COLOR`-aware: it draws Unicode box borders + ANSI color only when `process.stdout.isTTY` is true and `NO_COLOR` is unset, and falls back to plain ASCII lines otherwise (CI logs, pipes). Tests inject a line-capturing sink (`{ write, color: false }`) so render output is asserted without parsing ANSI.
+- **Velocity Panel renderer.** Every line of output flows through `CliRenderer` (`state.render`), an injectable seam. `createPanelRenderer` is TTY/truecolor/`NO_COLOR`-aware. On a TTY it draws the `▟▙ moku web` lockup + a version/runtime banner, a live in-place **phase tree** (braille spinner → `✓` + a right-aligned timing column) under an animated indeterminate build bar, full-width boxed **BUILD** + **server** panels (the BUILD box carries a real per-phase time-profile sparkline; the server box the `➜` Local/Network URLs), and a persistent breathing `◍ live` idle pulse during `serve`. Brand pink is the exact 24-bit `#FF1E6F` when `COLORTERM` advertises truecolor, the 16-color `magenta` approximation otherwise, and nothing in plain mode — which degrades to plain ASCII lines (CI logs, pipes), printing one line per completed phase with no animation. A single `unref`'d ticker drives every animation; `render.dispose()` (called by `serve()`'s SIGINT teardown) stops it so the idle pulse never outlives the dev server. Tests inject a line-capturing sink (`{ write, color: false }`) so render output is asserted without parsing ANSI.
+- **Version / runtime banner.** The banner reports the *real* version. A published install shows its `package.json` `version` (`v1.2.0`); a source/dev build shows the latest semver tag + `-dev` (`v1.1.0-dev`) — `@moku-labs/web` is released **tag-only**, so the working-tree `package.json` carries no `version`, and this mirrors the publish workflow's source of truth (the highest `v*` tag) rather than `git describe` (which would anchor to a stale ancestor tag on a diverged branch). Alongside it: the live `node` / `bun` / platform and the pinned `@moku-labs/core` version (kept last, least-prominent). Resolved once per process (memoized) in `state.ts`.
 - **No real I/O in tests.** All runtime effects live behind injectable `state` seams (mirroring deploy's injectable `spawn`): `render`, `confirm` (stdin y/N), `clock` (`Date.now`), `watch` (recursive `node:fs.watch`), `serveStatic` (`Bun.serve`), `fileResponse` (`Bun.file`), and `networkUrl` (`node:os` LAN IPv4). Every command runs under unit tests without sockets, FS watch, or a TTY.
 - **Lazy Bun resolution.** `serveStatic`/`fileResponse` resolve the `Bun` global *at call time*, so a non-Bun runtime fails with a coded error rather than a raw `TypeError`, and the dependency is only required when a long-running command actually starts a server.
 - **CI-safe deploy.** The confirm prompt is gated on `isTTY && CI === undefined`; non-interactive runs always proceed, so `DeployOutcome.deployed: false` happens *only* on an interactive "no" (`reason: "declined"`).
@@ -134,12 +135,12 @@ await app.cli.deploy({ branch: "preview/landing", yes: true });  // forces the d
 | `types.ts` | `Config`, `State`, `CliRenderer`, the option/outcome shapes, and the public `Api` (re-exported via `export type * from "./types"`). |
 | `defaults.ts` | `defaultConfig` — the resolved default `Config`. |
 | `errors.ts` | `cliError` + `ERROR_PREFIX` (`[web] cli`) — coded errors carrying a stable `code`. |
-| `state.ts` | `createState` — wires the production injectable seams (renderer, confirm, clock, watch, Bun server/file, networkUrl). |
+| `state.ts` | `createState` — wires the production injectable seams (renderer, confirm, clock, watch, Bun server/file, networkUrl); resolves the banner version (latest semver tag + `-dev`, or `package.json` `version`) + the pinned `@moku-labs/core` version. |
 | `serve.ts` | The dev loop: `runDevServer`, `createRebuilder`, `createReloadHub`, `createDevHandler`, `injectReloadClient`, `installSignalTeardown`. |
 | `preview.ts` | The static preview server: `runPreviewServer`, the pure `resolveCleanUrl`, `safePath`, `statIsFile`, `createPreviewHandler`. |
 | `network.ts` | LAN IPv4 derivation for the server-ready panel: `networkUrl`, `lanAddress`. |
-| `render/panel.ts` | `createPanelRenderer` — the boxed Panel `CliRenderer`. |
-| `render/ansi.ts` | TTY/`NO_COLOR` color + box-drawing helpers: `supportsColor`, `makePalette`, `box`, `boxGlyphs`, `visibleWidth`. |
+| `render/panel.ts` | `createPanelRenderer` — the animated Velocity `CliRenderer`: lockup + version banner, phase tree + build bar, boxed BUILD/server panels, sparkline, idle pulse, `dispose()`. |
+| `render/ansi.ts` | TTY/truecolor/`NO_COLOR` color + box helpers: `supportsColor`, `supportsTruecolor`, `makePalette` (incl. brand `pink`), `fg24`, `box`, `boxGlyphs`, `visibleWidth`, `spinnerFrameAt`. |
 
 ---
 

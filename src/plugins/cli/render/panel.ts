@@ -489,9 +489,8 @@ export function createPanelRenderer(options: PanelOptions = {}): CliRenderer {
         const rateLabel = palette.dim(`${rate} pages/s`);
         lines.push(railLine(spark, rateLabel, BOX_INNER));
       }
-      // Sits directly under the tree (no top margin), one blank line below to set off the panel.
+      // Sits flush under the tree; the next panel stacks directly below it (no margin).
       writeBlock(box(lines, color, BOX_INNER));
-      write("");
     },
 
     /**
@@ -511,11 +510,10 @@ export function createPanelRenderer(options: PanelOptions = {}): CliRenderer {
       if (info.watching && info.watching.length > 0) {
         lines.push(`${palette.dim("watching")}   ${palette.dim(info.watching.join(", "))}`);
       }
-      // Full-width box (matches the BUILD panel), one blank line below before the idle pulse.
+      // Full-width box (matches the BUILD panel); stacks flush below it, pulse directly under.
       writeBlock(box(lines, color, BOX_INNER));
-      write("");
 
-      // TTY: drop the persistent idle pulse on its own bottom line and animate it.
+      // TTY: drop the persistent idle pulse on the line directly below the box and animate it.
       if (color) {
         serveMode = true;
         idle = true;

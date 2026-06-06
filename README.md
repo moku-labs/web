@@ -211,7 +211,7 @@ Each plugin is small, single-purpose, and documented on its own. **Click a name 
 | [`content`](src/plugins/content/README.md) | node-only | Markdown → sanitized HTML pipeline, frontmatter, reading time, locale-keyed `Article` model |
 | [`build`](src/plugins/build/README.md) | node-only | SSG orchestrator: pages, feeds (RSS/Atom/JSON), sitemap, OG images → `dist/` |
 | [`deploy`](src/plugins/deploy/README.md) | node-only | Cloudflare Pages: `wrangler.jsonc` scaffolding, secret scrubbing, deploy |
-| [`cli`](src/plugins/cli/README.md) | node-only | Developer CLI — `build` / `serve` / `preview` / `deploy` with a boxed Panel UI + live progress |
+| [`cli`](src/plugins/cli/README.md) | node-only | Developer CLI — `build` / `serve` / `preview` / `deploy` with the animated Velocity Panel UI (lockup + version banner, live phase tree, boxed panels, live pulse) |
 | [`data`](src/plugins/data/README.md) | optional provider | Agnostic `page path → JSON` contract: `write()` on Node, `at()` in the browser, for DATA nav |
 | [`env`](src/plugins/env/README.md) | core | Multi-provider environment / secret injection, validated and frozen at `onInit` |
 | [`log`](src/plugins/log/README.md) | core | Structured logging + an in-memory trace with an `expect()` DSL for testable workflows |
