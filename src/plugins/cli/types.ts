@@ -185,6 +185,17 @@ export type CliRenderer = {
    * render.check(false, "CLOUDFLARE_API_TOKEN is set", "Create one at …");
    */
   check(ok: boolean, label: string, detail?: string): void;
+  /**
+   * Stop any running animation (the live `serve()` idle pulse, a phase/rebuild spinner)
+   * and release the renderer's interval timer. Called by `serve()`'s SIGINT/SIGTERM
+   * teardown so the persistent idle-pulse ticker never outlives the dev server. A no-op
+   * when nothing is animating; safe to call more than once.
+   *
+   * @returns Nothing.
+   * @example
+   * render.dispose();
+   */
+  dispose(): void;
 };
 
 /**

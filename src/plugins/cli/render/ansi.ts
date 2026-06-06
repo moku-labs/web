@@ -25,6 +25,26 @@ export const ANSI = {
 /** A single ANSI color code from {@link ANSI}. */
 export type AnsiCode = (typeof ANSI)[keyof typeof ANSI];
 
+/**
+ * The Moku brand pink (`#FF1E6F`) as an RGB triple, used for 24-bit truecolor output.
+ * Degrades to {@link ANSI.magenta} on a 16-color TTY and to plain text off a TTY.
+ */
+export const BRAND_PINK = { r: 255, g: 30, b: 111 } as const;
+
+/**
+ * Build a 24-bit (truecolor) SGR foreground escape for the given RGB triple.
+ *
+ * @param r - Red channel (0–255).
+ * @param g - Green channel (0–255).
+ * @param b - Blue channel (0–255).
+ * @returns The `ESC[38;2;r;g;bm` foreground sequence.
+ * @example
+ * fg24(255, 30, 111); // "\x1b[38;2;255;30;111m"
+ */
+export function fg24(r: number, g: number, b: number): string {
+  return `${ESC}[38;2;${r};${g};${b}m`;
+}
+
 /** ANSI: erase the entire current line, leaving the cursor where it is. */
 export const CLEAR_LINE = `${ESC}[2K`;
 /** ANSI: erase from the cursor to the end of the screen (drops stale trailing rows). */
@@ -128,6 +148,39 @@ export function supportsColor(
 }
 
 /**
+ * Whether the terminal advertises 24-bit (truecolor) support via `COLORTERM`, so the
+ * renderer may emit the exact brand pink ({@link BRAND_PINK}) instead of the 16-color
+ * `magenta` approximation. Always layered on top of {@link supportsColor} — truecolor
+ * is never used when color itself is disabled.
+ *
+ * @param colorTerm - The `COLORTERM` value (defaults to `process.env.COLORTERM`).
+ * @returns `true` when `COLORTERM` is `truecolor` or `24bit`.
+ * @example
+ * supportsTruecolor("truecolor"); // true
+ */
+export function supportsTruecolor(colorTerm: string | undefined = process.env.COLORTERM): boolean {
+  return colorTerm === "truecolor" || colorTerm === "24bit";
+}
+
+/**
+ * The braille spinner glyph for a given elapsed time, advancing one frame per
+ * `frameMs`. Deriving the frame from wall-clock elapsed (rather than a tick counter)
+ * keeps the spinner correct even when the animation ticker is briefly starved by a
+ * synchronous build phase and several ticks coalesce — the glyph still reflects real
+ * elapsed time instead of freezing on a stale frame.
+ *
+ * @param elapsedMs - Milliseconds since the live region opened.
+ * @param frameMs - Milliseconds per frame (defaults to `80`).
+ * @returns The active spinner glyph.
+ * @example
+ * spinnerFrameAt(240); // "⠹" (the 4th frame at 80ms/frame)
+ */
+export function spinnerFrameAt(elapsedMs: number, frameMs = 80): string {
+  const index = Math.floor(Math.max(0, elapsedMs) / frameMs) % SPINNER_FRAMES.length;
+  return SPINNER_FRAMES[index] ?? "⠋";
+}
+
+/**
  * Select the box glyph set for the given color mode (Unicode on a TTY, ASCII off it).
  *
  * @param color - Whether color/Unicode output is enabled.
@@ -226,6 +279,18 @@ export type Palette = {
    * palette.cyan("http://localhost:4173");
    */
   cyan(text: string): string;
+  /**
+   * Color the given text the Moku brand pink — exact `#FF1E6F` (24-bit) when truecolor
+   * is enabled, else the 16-color `magenta` approximation, else unchanged (plain mode).
+   * The brand accent for the cube mark, the lockup wordmark, the filled progress bar,
+   * and hero numbers.
+   *
+   * @param text - The text to colorize.
+   * @returns The pink (or unchanged) text.
+   * @example
+   * palette.pink("▟▙ moku web");
+   */
+  pink(text: string): string;
 };
 
 /**
@@ -234,12 +299,14 @@ export type Palette = {
  * output in CI/pipes.
  *
  * @param color - Whether color is enabled (typically `supportsColor()`).
+ * @param truecolor - Whether 24-bit output is enabled (typically `supportsTruecolor()`);
+ *   only consulted by {@link Palette.pink}. Defaults to `false` (16-color magenta).
  * @returns The bound color palette.
  * @example
- * const palette = makePalette(supportsColor());
+ * const palette = makePalette(supportsColor(), supportsTruecolor());
  * const line = palette.green("done");
  */
-export function makePalette(color: boolean): Palette {
+export function makePalette(color: boolean, truecolor = false): Palette {
   return {
     enabled: color,
     /**
@@ -319,24 +386,40 @@ export function makePalette(color: boolean): Palette {
      */
     cyan(text) {
       return this.paint(ANSI.cyan, text);
+    },
+    /**
+     * Color the given text the Moku brand pink: exact `#FF1E6F` (24-bit) when truecolor
+     * is enabled, the 16-color `magenta` approximation otherwise, unchanged in plain mode.
+     *
+     * @param text - The text to colorize.
+     * @returns The pink (or unchanged) text.
+     * @example
+     * palette.pink("▟▙ moku web");
+     */
+    pink(text) {
+      if (!color) return text;
+      if (truecolor) return `${fg24(BRAND_PINK.r, BRAND_PINK.g, BRAND_PINK.b)}${text}${ANSI.reset}`;
+      return this.paint(ANSI.magenta, text);
     }
   };
 }
 
 /**
  * Frame a list of already-rendered content lines in a box, padding each line to the
- * width of the widest visible line. Uses Unicode borders when `color` is enabled and
- * ASCII otherwise. Visible width ignores embedded ANSI so colored lines align.
+ * widest visible line (or `minInnerWidth`, whichever is larger — so several boxes can be
+ * forced to a shared width). Uses Unicode borders when `color` is enabled and ASCII
+ * otherwise. Visible width ignores embedded ANSI so colored lines align.
  *
  * @param lines - The content lines (may contain ANSI color codes).
  * @param color - Whether to use Unicode borders (and assume color-capable output).
+ * @param minInnerWidth - Minimum inner (content) width to pad every row to. Defaults to `0`.
  * @returns The boxed lines (top border, content rows, bottom border).
  * @example
- * box(["Local:   http://localhost:4173"], true);
+ * box(["Local:   http://localhost:4173"], true, 62);
  */
-export function box(lines: string[], color: boolean): string[] {
+export function box(lines: string[], color: boolean, minInnerWidth = 0): string[] {
   const glyphs = boxGlyphs(color);
-  const inner = Math.max(0, ...lines.map(line => visibleWidth(line)));
+  const inner = Math.max(0, minInnerWidth, ...lines.map(line => visibleWidth(line)));
   const horizontal = glyphs.horizontal.repeat(inner + 2);
   const top = `${glyphs.topLeft}${horizontal}${glyphs.topRight}`;
   const bottom = `${glyphs.bottomLeft}${horizontal}${glyphs.bottomRight}`;

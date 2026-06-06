@@ -16,15 +16,17 @@ function capture(color = false) {
 }
 
 describe("cli panel renderer (plain mode)", () => {
-  it("renders a boxed MOKU WEB header with the command label", () => {
+  it("renders the moku web lockup header: wordmark, label, version and runtime facts", () => {
     const { render, out } = capture();
     render.header("build");
     const joined = out.join("\n");
-    expect(joined).toContain("MOKU WEB");
+    expect(joined).toContain("moku web");
     expect(joined).toContain("build");
-    // ASCII box borders in plain mode.
-    expect(out[0]).toMatch(/^\+-+\+$/);
-    expect(out.at(-1)).toMatch(/^\+-+\+$/);
+    // Version (defaults to "dev" when none injected, printed as-is) + live runtime facts.
+    expect(joined).toContain("dev");
+    expect(joined).toContain(`node ${process.versions.node}`);
+    // A hairline rule (ASCII dashes in plain mode) separates the lockup from the facts.
+    expect(out[1]).toMatch(/^ -+$/);
   });
 
   it("renders live phase rows with a ✓ on done and the duration", () => {

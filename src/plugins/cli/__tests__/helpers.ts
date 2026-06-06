@@ -48,7 +48,8 @@ export function makeRenderer(): CaptureRenderer {
     warn: record("warn"),
     error: record("error"),
     heading: record("heading"),
-    check: record("check")
+    check: record("check"),
+    dispose: record("dispose")
   };
 }
 

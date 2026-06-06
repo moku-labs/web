@@ -95,7 +95,7 @@ describe("cli hooks (depends-merged build events render via the Panel)", () => {
 
     const output = lines.join("\n");
     // Header rendered (proves the API ran).
-    expect(output).toContain("MOKU WEB");
+    expect(output).toContain("moku web");
     // build:phase hook rendered live per-phase rows (e.g. the "pages" phase).
     expect(output).toContain("pages");
     // build:complete hook rendered the BUILD summary block.

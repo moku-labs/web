@@ -591,10 +591,56 @@ function findRootHtml(rendered: readonly RenderedPage[]): string | null {
 }
 
 /**
+ * Pages rendered concurrently per batch. Kept small so the macrotask yield between
+ * batches fires frequently — a large batch renders for seconds before yielding, which
+ * leaves a watching dev server's spinner repainting only every few seconds (sluggish).
+ * Smaller batches trade a little write-concurrency for a smooth, responsive spinner.
+ */
+const RENDER_BATCH_SIZE = 2;
+
+/**
+ * Render `items` through `worker` in bounded-size batches, yielding a macrotask
+ * (`setImmediate`) between batches. Beyond bounding peak concurrency/memory for large
+ * sites, the yield lets the single JS thread breathe: one un-yielded `Promise.all` over
+ * hundreds of synchronous `renderToString` calls starves the event loop, which freezes a
+ * watching dev server's progress spinner until the whole phase resolves. Output order is
+ * preserved (batch order + `Promise.all` order within a batch).
+ *
+ * @template Item - The input item type.
+ * @template Out - The rendered output type.
+ * @param items - The items to render.
+ * @param batchSize - Maximum items rendered concurrently per batch.
+ * @param worker - Renders one item to its output.
+ * @returns All rendered outputs in input order.
+ * @example
+ * ```ts
+ * const pages = await renderInBatches(instances, 32, i => renderInstance(ctx, i, shell));
+ * ```
+ */
+async function renderInBatches<Item, Out>(
+  items: readonly Item[],
+  batchSize: number,
+  worker: (item: Item) => Promise<Out>
+): Promise<Out[]> {
+  const out: Out[] = [];
+  for (let start = 0; start < items.length; start += batchSize) {
+    const batch = items.slice(start, start + batchSize);
+    out.push(...(await Promise.all(batch.map(item => worker(item)))));
+    const hasMore = start + batchSize < items.length;
+    if (hasMore) {
+      await new Promise<void>(resolve => {
+        setImmediate(resolve);
+      });
+    }
+  }
+  return out;
+}
+
+/**
  * Renders every route in the manifest to `outDir/<path>/index.html`. Reads as a
- * pipeline: resolve deps → prepare the shared shell → expand instances → render all
- * concurrently (`Promise.all`, legal intra-plugin concurrency) → write data sidecars
- * (hybrid/spa) → capture the root page's HTML for the root-index phase.
+ * pipeline: resolve deps → prepare the shared shell → expand instances → render in
+ * bounded batches ({@link renderInBatches}) → write data sidecars (hybrid/spa) →
+ * capture the root page's HTML for the root-index phase.
  *
  * @param ctx - Plugin context (provides `require`, `state`, `config`, `log`, `has`).
  * @returns The number of pages rendered and the captured default-page HTML.
@@ -613,11 +659,13 @@ export async function renderPages(
   const locales = ctx.require(i18nPlugin).locales();
   const byPattern = makeEntryMap(router);
 
-  // Expand → render every page instance (shell read + asset tags computed once).
+  // Expand → render every page instance (shell read + asset tags computed once). Rendered
+  // in bounded batches with a macrotask yield between them so a watching dev server's
+  // spinner keeps animating instead of freezing for the whole (large) phase.
   const shell = await prepareShell(ctx);
   const instances = await expandAllInstances(manifest, locales, byPattern, ctx);
-  const rendered = await Promise.all(
-    instances.map(instance => renderInstance(ctx, instance, shell))
+  const rendered = await renderInBatches(instances, RENDER_BATCH_SIZE, instance =>
+    renderInstance(ctx, instance, shell)
   );
 
   // Persist client-data sidecars (hybrid/spa) + capture the root page for root-index.
