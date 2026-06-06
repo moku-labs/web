@@ -42,6 +42,8 @@ const HEAD_PLACEHOLDER = "<!--moku:head-->";
 const BODY_PLACEHOLDER = "<!--moku:body-->";
 /** Template placeholder for the injected asset `<link>`/`<script>` tags. */
 const ASSETS_PLACEHOLDER = "<!--moku:assets-->";
+/** Template placeholder for the page's locale (`<html lang>`). */
+const LANG_PLACEHOLDER = "<!--moku:lang-->";
 
 /** Result of the pages phase: page count + the captured root/default-page HTML. */
 export type PagesResult = {
@@ -155,15 +157,22 @@ function buildAssetTags(ctx: Pick<PhaseContext, "state" | "config">): string {
  * ```
  */
 function renderDocument(parts: DocumentParts): string {
-  return `<!DOCTYPE html><html lang="${parts.locale}"><head>${parts.head}${parts.assets}</head><body>${parts.body}</body></html>`;
+  // `charset` first (must land in the document's first bytes) and `viewport` next — both are
+  // document-scaffold concerns the shell owns, NOT route SEO. Without `width=device-width`,
+  // mobile browsers assume a ~980px desktop canvas and paint the desktop layout.
+  const scaffold =
+    '<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">';
+  return `<!DOCTYPE html><html lang="${parts.locale}"><head>${scaffold}${parts.head}${parts.assets}</head><body>${parts.body}</body></html>`;
 }
 
 /**
- * Fill a shell template's `<!--moku:head-->` / `<!--moku:body-->` /
- * `<!--moku:assets-->` placeholders deterministically at build time.
+ * Fill a shell template's `<!--moku:lang-->` / `<!--moku:head-->` /
+ * `<!--moku:body-->` / `<!--moku:assets-->` placeholders deterministically at build
+ * time. `<!--moku:lang-->` carries the page locale (for `<html lang>`), so a single
+ * shared template stays locale-correct across every locale.
  *
  * @param template - The raw shell template HTML.
- * @param parts - The composed head/body/assets pieces.
+ * @param parts - The composed head/body/assets/locale pieces.
  * @returns The filled document string.
  * @example
  * ```ts
@@ -172,6 +181,7 @@ function renderDocument(parts: DocumentParts): string {
  */
 function fillTemplate(template: string, parts: DocumentParts): string {
   return template
+    .replaceAll(LANG_PLACEHOLDER, parts.locale)
     .replaceAll(HEAD_PLACEHOLDER, parts.head)
     .replaceAll(BODY_PLACEHOLDER, parts.body)
     .replaceAll(ASSETS_PLACEHOLDER, parts.assets);
