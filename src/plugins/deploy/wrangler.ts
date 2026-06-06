@@ -209,7 +209,9 @@ export function buildWranglerArgs(input: {
   const branch = guardBranch(input.branch);
   assertWithinRoot(input.outDir, input.root);
 
-  // Assemble the no-shell argv for `wrangler pages deploy`.
+  // Assemble the no-shell argv for `wrangler pages deploy`. `--commit-dirty=true`
+  // suppresses wrangler's "working directory has uncommitted changes" warning — a
+  // dist/ upload is intentionally decoupled from git state, so the warning is noise.
   return [
     "bunx",
     "wrangler",
@@ -219,7 +221,8 @@ export function buildWranglerArgs(input: {
     "--project-name",
     input.slug,
     "--branch",
-    branch
+    branch,
+    "--commit-dirty=true"
   ];
 }
 

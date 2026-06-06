@@ -582,21 +582,35 @@ export function createPanelRenderer(options: PanelOptions = {}): CliRenderer {
     },
 
     /**
-     * Render the deploy result from a `deploy:complete` event: a `✓ DEPLOYED → url` line
-     * with the URL the hero value, then a dim `branch · id · time` line beneath it.
+     * Render the deploy result from a `deploy:complete` event as a full-width box (matching
+     * the BUILD panel): a `✓ DEPLOYED · branch` header with the elapsed time right-aligned,
+     * then a `→ url · id` row. The url/id row is omitted entirely when wrangler returned no
+     * URL, so a first-deploy with nothing to parse never renders a dangling `→` or `· ·`.
      *
      * @param result - The `deploy:complete` payload.
      * @example
      * render.deployed({ url: "https://x.pages.dev", deploymentId: "id", branch: "main", durationMs: 1200 });
      */
     deployed(result) {
-      const meta = palette.dim(
-        `branch ${result.branch} · ${result.deploymentId} · ${result.durationMs}ms`
-      );
-      writeBlock([
-        `  ${palette.green("✓")} ${palette.bold("DEPLOYED")}   ${palette.dim("→")}  ${palette.cyan(result.url)}`,
-        `  ${meta}`
-      ]);
+      const dot = palette.dim("·");
+      const time =
+        result.durationMs >= 1000
+          ? `${(result.durationMs / 1000).toFixed(1)}s`
+          : `${result.durationMs}ms`;
+
+      // Header row: result + branch on the left, elapsed pushed to the right edge.
+      const left = `${palette.green("✓")} ${palette.bold("DEPLOYED")} ${dot} ${result.branch}`;
+      const lines = [railLine(left, palette.dim(time), BOX_INNER)];
+
+      // URL row — only when wrangler actually returned one (id rides along when present).
+      if (result.url) {
+        const id = result.deploymentId ? ` ${dot} ${palette.dim(result.deploymentId)}` : "";
+        lines.push(`${palette.dim("→")} ${palette.cyan(result.url)}${id}`);
+      } else if (result.deploymentId) {
+        lines.push(palette.dim(`id ${result.deploymentId}`));
+      }
+
+      writeBlock(box(lines, color, BOX_INNER));
     },
 
     /**

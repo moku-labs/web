@@ -21,7 +21,8 @@ describe("deploy/buildWranglerArgs", () => {
       "--project-name",
       "my-site",
       "--branch",
-      "main"
+      "main",
+      "--commit-dirty=true"
     ]);
   });
 

@@ -74,26 +74,22 @@ describe("deploy run integration", () => {
     expect(cmd).toContain("preview/landing");
   });
 
-  it("passes CLOUDFLARE_API_TOKEN to the subprocess env but never to a log call", async () => {
+  it("passes CLOUDFLARE_API_TOKEN to the subprocess env and never pipes wrangler output to the logger", async () => {
     // A high-entropy placeholder assembled at runtime so static secret scanners
     // (sonarjs/no-hardcoded-secrets) do not flag it as a real credential.
     const fakeToken = ["HZ8kQ2mWp9Lx4Tn", "6Rv3Bd7Yc1Fg5Js"].join("");
     const { spawn, calls } = makeSpawn({
       stdout: FIXTURE_STDOUT,
-      // stderr deliberately echoes the token to prove it is scrubbed before logging.
       stderr: `warning: token ${fakeToken} used`,
       exitCode: 0
     });
     const ctx = makeCtx({ spawn, token: fakeToken });
     await createApi(ctx).run();
 
-    // Token reaches the subprocess env.
+    // Token reaches the subprocess env...
     expect(calls[0]?.env.CLOUDFLARE_API_TOKEN).toBe(fakeToken);
-
-    // Token never reaches any log call (scrubbed to *** beforehand).
-    for (const call of ctx.log.info.mock.calls) {
-      expect(JSON.stringify(call)).not.toContain(fakeToken);
-    }
+    // ...and wrangler output is never piped to the structured logger (that was console noise).
+    expect(ctx.log.info).not.toHaveBeenCalled();
   });
 
   it("throws ERR_DEPLOY_PROJECT_NOT_FOUND and emits nothing on a project-not-found failure", async () => {

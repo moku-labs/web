@@ -12,6 +12,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { networkUrl } from "./network";
+import { makePalette, supportsColor, supportsTruecolor, visibleWidth } from "./render/ansi";
 import { createPanelRenderer } from "./render/panel";
 import type {
   Config,
@@ -23,6 +24,33 @@ import type {
 
 /** Matches an explicit affirmative answer (`y`/`yes`, case-insensitive). */
 const YES_PATTERN = /^y(es)?$/i;
+
+/** Prompt rail width — matches the renderer's `RAIL_WIDTH` so the hint aligns with other rows. */
+const PROMPT_WIDTH = 66;
+
+/** Whether the interactive prompts render with the MOKU marker styling (color/TTY only). */
+const PROMPT_COLOR = supportsColor();
+
+/** Shared palette for the interactive prompts (same brand colors as the Panel renderer). */
+const PROMPT_PALETTE = makePalette(PROMPT_COLOR, PROMPT_COLOR && supportsTruecolor());
+
+/**
+ * Build the styled y/N confirm prompt: a brand `◆` marker + the question on the left,
+ * a dim `y / N` hint + cyan `›` caret right-aligned to {@link PROMPT_WIDTH}. Falls back
+ * to the plain `question [y/N] ` form off a color TTY (CI/pipes), where prompts rarely run.
+ *
+ * @param question - The yes/no question to display.
+ * @returns The readline prompt string (the typed answer follows the caret).
+ * @example
+ * confirmPrompt("Deploy dist/ to Cloudflare Pages?");
+ */
+function confirmPrompt(question: string): string {
+  if (!PROMPT_COLOR) return `${question} [y/N] `;
+  const left = `  ${PROMPT_PALETTE.pink("◆")} ${question}`;
+  const right = `${PROMPT_PALETTE.dim("y / N")} ${PROMPT_PALETTE.cyan("›")} `;
+  const gap = Math.max(1, PROMPT_WIDTH - visibleWidth(left) - visibleWidth(right));
+  return `${left}${" ".repeat(gap)}${right}`;
+}
 
 /** The minimal `Bun` global surface the static-server seams use. */
 type BunRuntime = {
@@ -101,7 +129,7 @@ const defaultFileResponse: FileResponseFunction = (path, status) => {
 function defaultConfirm(question: string): Promise<boolean> {
   return new Promise<boolean>(resolve => {
     const readline = createInterface({ input: process.stdin, output: process.stdout });
-    readline.question(`${question} [y/N] `, answer => {
+    readline.question(confirmPrompt(question), answer => {
       readline.close();
       resolve(YES_PATTERN.test(answer.trim()));
     });
@@ -122,17 +150,55 @@ function defaultConfirm(question: string): Promise<boolean> {
 function defaultSelect(question: string, choices: readonly string[]): Promise<number> {
   return new Promise<number>(resolve => {
     const readline = createInterface({ input: process.stdin, output: process.stdout });
-    for (const [index, choice] of choices.entries()) {
-      // biome-ignore lint/suspicious/noConsole: interactive prompt writes the numbered choices to stdout.
-      console.log(`  ${index + 1}) ${choice}`);
-    }
-    readline.question(`${question} [1-${choices.length}] `, answer => {
+    // biome-ignore lint/suspicious/noConsole: interactive prompt writes the question + choices to stdout.
+    console.log(selectChoicesBlock(question, choices));
+    readline.question(selectPrompt(question, choices.length), answer => {
       readline.close();
       const picked = Number.parseInt(answer.trim(), 10);
       const valid = Number.isInteger(picked) && picked >= 1 && picked <= choices.length;
       resolve(valid ? picked - 1 : 0);
     });
   });
+}
+
+/**
+ * Render the select block: a brand `◆` marker + the question, then each choice as an
+ * indented dim number + label. Off a color TTY, falls back to the plain `  N) label`
+ * list (the question rides the prompt instead).
+ *
+ * @param question - The prompt shown above the choices (styled mode only).
+ * @param choices - The selectable option labels.
+ * @returns The multi-line choices block.
+ * @example
+ * selectChoicesBlock("Set up a workflow?", ["Auto", "Manual", "Skip"]);
+ */
+function selectChoicesBlock(question: string, choices: readonly string[]): string {
+  if (!PROMPT_COLOR) {
+    return choices.map((choice, index) => `  ${index + 1}) ${choice}`).join("\n");
+  }
+  const head = `  ${PROMPT_PALETTE.pink("◆")} ${question}`;
+  const rows = choices.map(
+    (choice, index) => `      ${PROMPT_PALETTE.dim(String(index + 1))}  ${choice}`
+  );
+  return [head, ...rows].join("\n");
+}
+
+/**
+ * Build the select input prompt: a dim `pick 1–N` hint + cyan `›` caret in styled mode,
+ * or the plain `question [1-N] ` form off a color TTY (where the question is not printed
+ * separately).
+ *
+ * @param question - The prompt (used only by the plain fallback).
+ * @param count - The number of choices.
+ * @returns The readline prompt string.
+ * @example
+ * selectPrompt("Set up a workflow?", 3);
+ */
+function selectPrompt(question: string, count: number): string {
+  if (!PROMPT_COLOR) return `${question} [1-${count}] `;
+  const hint = PROMPT_PALETTE.dim(`pick 1–${count}`);
+  const caret = PROMPT_PALETTE.cyan("›");
+  return `    ${hint} ${caret} `;
 }
 
 /**

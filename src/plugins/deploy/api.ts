@@ -155,22 +155,20 @@ export function validateConfig(ctx: DeployPluginContext): void {
 }
 
 /**
- * Run wrangler for the prepared argv and surface its scrubbed result, translating
- * a non-zero exit into the classified deploy error. The API token is read from env
- * here so it never crosses a logging boundary; only scrubbed output is returned.
- * Shared by `run()` (deploy) and `createProject()` (project create).
+ * Run wrangler for the prepared argv and return its stdout, translating a non-zero
+ * exit into the classified deploy error. The API token is read from env here so it
+ * never crosses a logging boundary; the scrubbed stderr is used only to classify a
+ * failure — it is never logged (that was console noise), so nothing leaks. Shared by
+ * `run()` (deploy) and `createProject()` (project create).
  *
  * @param ctx - Plugin context (provides `state.spawn`, `config`, `env`).
  * @param args - The fully-built, pre-validated wrangler argv.
- * @returns The wrangler `stdout` plus the scrubbed `stderr` to log on success.
+ * @returns The wrangler `stdout` (for URL/id parsing on a deploy).
  * @throws {Error} With a `code` from the deploy error taxonomy on a non-zero exit.
  * @example
- * const { stdout, scrubbedStderr } = await executeWrangler(ctx, args);
+ * const stdout = await executeWrangler(ctx, args);
  */
-async function executeWrangler(
-  ctx: DeployPluginContext,
-  args: string[]
-): Promise<{ stdout: string; scrubbedStderr: string }> {
+async function executeWrangler(ctx: DeployPluginContext, args: string[]): Promise<string> {
   const token = ctx.env.require("CLOUDFLARE_API_TOKEN"); // never logged
   const { stdout, scrubbedStderr, exitCode } = await runWrangler({
     spawn: ctx.state.spawn,
@@ -184,7 +182,7 @@ async function executeWrangler(
     throw deployError(code, message);
   }
 
-  return { stdout, scrubbedStderr };
+  return stdout;
 }
 
 /**
@@ -241,10 +239,11 @@ export function createApi(ctx: DeployPluginContext): Api {
       await runPreflight(ctx.config, root);
       const args = buildWranglerArgs({ outDir: ctx.config.outDir, slug, branch, root });
 
-      // Spawn wrangler and capture its scrubbed output (throws on a failed deploy).
+      // Spawn wrangler and capture its stdout (throws on a failed deploy). Subprocess
+      // output is NOT piped to ctx.log — that produced console noise; the result is
+      // surfaced via the deploy:complete event the cli renders instead.
       const start = Date.now();
-      const { stdout, scrubbedStderr } = await executeWrangler(ctx, args);
-      ctx.log.info(scrubbedStderr); // only scrubbed* values reach ctx.log
+      const stdout = await executeWrangler(ctx, args);
 
       // Record the result as lastDeployment and announce it, then return it.
       const result = buildDeployResult(stdout, branch, start);
@@ -309,10 +308,10 @@ export function createApi(ctx: DeployPluginContext): Api {
       const name = toSlug(ctx.require(sitePlugin).name());
       const branch = ctx.config.productionBranch ?? "main";
 
-      // Build the guarded argv, spawn wrangler (scrubbed; throws on a non-zero exit).
+      // Build the guarded argv, spawn wrangler (throws on a non-zero exit). Output is
+      // not logged (it was console noise); a non-zero exit throws a classified error.
       const args = buildProjectCreateArgs({ slug: name, branch });
-      const { scrubbedStderr } = await executeWrangler(ctx, args);
-      ctx.log.info(scrubbedStderr); // only scrubbed* values reach ctx.log
+      await executeWrangler(ctx, args);
 
       return { name, branch };
     }
