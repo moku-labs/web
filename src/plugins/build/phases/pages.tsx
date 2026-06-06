@@ -155,7 +155,12 @@ function buildAssetTags(ctx: Pick<PhaseContext, "state" | "config">): string {
  * ```
  */
 function renderDocument(parts: DocumentParts): string {
-  return `<!DOCTYPE html><html lang="${parts.locale}"><head>${parts.head}${parts.assets}</head><body>${parts.body}</body></html>`;
+  // `charset` first (must land in the document's first bytes) and `viewport` next — both are
+  // document-scaffold concerns the shell owns, NOT route SEO. Without `width=device-width`,
+  // mobile browsers assume a ~980px desktop canvas and paint the desktop layout.
+  const scaffold =
+    '<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">';
+  return `<!DOCTYPE html><html lang="${parts.locale}"><head>${scaffold}${parts.head}${parts.assets}</head><body>${parts.body}</body></html>`;
 }
 
 /**

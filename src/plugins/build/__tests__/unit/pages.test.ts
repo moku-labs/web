@@ -122,6 +122,32 @@ describe("build/phases/pages", () => {
     expect(html).toContain("<h1>Home</h1>");
   });
 
+  it("emits charset + viewport scaffold meta before the composed head", async () => {
+    const home = makeRoute("/", { render: () => h("h1", {}, "Home") });
+    const ctx = makeCtx({
+      config: { outDir: tmp },
+      requireMap: {
+        router: {
+          mode: () => "ssg",
+          manifest: () => [home],
+          entries: makeEntries([{ name: "home", pattern: "/" }])
+        },
+        i18n: { locales: () => ["en"], defaultLocale: () => "en" },
+        head: { render: () => "<title>Home</title>" }
+      }
+    });
+
+    await renderPages(ctx);
+
+    const html = readFileSync(path.join(tmp, "index.html"), "utf8");
+    // Without width=device-width, mobile browsers paint the desktop layout; charset must
+    // land in the document's first bytes, so both precede the composed <head> content.
+    expect(html).toContain('<meta charset="utf-8">');
+    expect(html).toContain('<meta name="viewport" content="width=device-width, initial-scale=1">');
+    expect(html.indexOf("charset")).toBeLessThan(html.indexOf("<title>Home</title>"));
+    expect(html.indexOf("viewport")).toBeLessThan(html.indexOf("<title>Home</title>"));
+  });
+
   it("writes correct output paths (root + nested + generated params)", async () => {
     const home = makeRoute("/", { render: () => h("div", {}, "root") });
     const article = makeRoute("/{slug}/", {

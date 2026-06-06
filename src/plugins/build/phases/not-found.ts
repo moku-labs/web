@@ -33,7 +33,7 @@ export type NotFoundResult = {
  * ```
  */
 function wrap(body: string): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>404 — Not Found</title></head><body>${body}</body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>404 — Not Found</title></head><body>${body}</body></html>`;
 }
 
 /**
