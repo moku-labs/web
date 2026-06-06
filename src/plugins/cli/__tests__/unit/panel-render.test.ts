@@ -94,6 +94,18 @@ describe("cli panel renderer (plain mode)", () => {
     expect(joined).toContain("abc123");
   });
 
+  it("renders the deploy panel without a dangling arrow when wrangler returned no URL", () => {
+    const { render, out } = capture();
+    render.deployed({ url: "", deploymentId: "", branch: "main", durationMs: 9229 });
+    const joined = out.join("\n");
+    // Still announces the deploy + branch + elapsed…
+    expect(joined).toContain("DEPLOYED");
+    expect(joined).toContain("main");
+    expect(joined).toContain("9.2s");
+    // …but no empty `→` URL row (the bug: a dangling arrow with nothing after it).
+    expect(joined).not.toContain("→");
+  });
+
   it("routes info to stdout and warn/error to stderr", () => {
     const { render, out, err } = capture();
     render.info("hello");

@@ -33,7 +33,7 @@ describe("deploy createProject / projectName", () => {
     expect(ctx.emit).not.toHaveBeenCalled();
   });
 
-  it("passes CLOUDFLARE_API_TOKEN to the subprocess env but never to a log call", async () => {
+  it("passes CLOUDFLARE_API_TOKEN to the subprocess env and never pipes output to the logger", async () => {
     const fakeToken = ["HZ8kQ2mWp9Lx4Tn", "6Rv3Bd7Yc1Fg5Js"].join("");
     const { spawn, calls } = makeSpawn({
       stderr: `warning: token ${fakeToken} used`,
@@ -44,9 +44,7 @@ describe("deploy createProject / projectName", () => {
     await createApi(ctx).createProject();
 
     expect(calls[0]?.env.CLOUDFLARE_API_TOKEN).toBe(fakeToken);
-    for (const call of ctx.log.info.mock.calls) {
-      expect(JSON.stringify(call)).not.toContain(fakeToken);
-    }
+    expect(ctx.log.info).not.toHaveBeenCalled();
   });
 
   it("throws a classified deploy error on a non-zero wrangler exit", async () => {
