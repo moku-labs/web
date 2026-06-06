@@ -6,6 +6,7 @@
  * server/watch/clock are all behind injectable state seams so nothing real runs in
  * tests; SIGINT/SIGTERM tear everything down and resolve the returned promise.
  */
+import path from "node:path";
 import { buildPlugin } from "../build";
 import type { CliPluginContext } from "./api";
 import { resolveCleanUrl } from "./preview";
@@ -67,11 +68,12 @@ export type Rebuilder = {
 };
 
 /**
- * Run one rebuild and report the result. Skips re-entrancy via the shared `building`
- * flag and routes success to `onReloaded`, failure to `onError`.
+ * Run one rebuild and report the result. Announces the start (`onRebuildStart`), then
+ * routes success to `onReloaded` and failure to `onError`.
  *
  * @param input - The rebuild dependencies + the changed file.
  * @param input.runBuild - Runs one build and resolves with its summary.
+ * @param input.onRebuildStart - Called with the changed file just before the build runs.
  * @param input.onReloaded - Called with the changed file + summary after a rebuild.
  * @param input.onError - Called when a rebuild throws.
  * @param input.file - The changed file to report alongside the summary.
@@ -81,10 +83,13 @@ export type Rebuilder = {
  */
 async function runOneRebuild(input: {
   runBuild: () => Promise<BuildSummary>;
+  onRebuildStart?: (file: string) => void;
   onReloaded: (info: ReloadInfo) => void;
   onError: (error: unknown) => void;
   file: string;
 }): Promise<void> {
+  // Announce the rebuild so the renderer can show its compact in-place "rebuilding" line.
+  input.onRebuildStart?.(input.file);
   try {
     // Run the build, then report the changed file alongside its fresh summary.
     const summary = await input.runBuild();
@@ -109,6 +114,7 @@ async function runOneRebuild(input: {
  * @param input - The rebuild dependencies.
  * @param input.debounceMs - Debounce window in milliseconds.
  * @param input.runBuild - Runs one build and resolves with its summary.
+ * @param input.onRebuildStart - Called with the changed file just before each build runs.
  * @param input.onReloaded - Called with the changed file + summary after a rebuild.
  * @param input.onError - Called when a rebuild throws.
  * @returns The debounced rebuild driver.
@@ -118,6 +124,7 @@ async function runOneRebuild(input: {
 export function createRebuilder(input: {
   debounceMs: number;
   runBuild: () => Promise<BuildSummary>;
+  onRebuildStart?: (file: string) => void;
   onReloaded: (info: ReloadInfo) => void;
   onError: (error: unknown) => void;
 }): Rebuilder {
@@ -141,6 +148,7 @@ export function createRebuilder(input: {
       dirty = false;
       await runOneRebuild({
         runBuild: input.runBuild,
+        ...(input.onRebuildStart ? { onRebuildStart: input.onRebuildStart } : {}),
         onReloaded: input.onReloaded,
         onError: input.onError,
         file: pendingFile
@@ -197,6 +205,123 @@ export function createRebuilder(input: {
     cancel() {
       if (timer) clearTimeout(timer);
       timer = undefined;
+    }
+  };
+}
+
+/**
+ * Whether a changed path (relative to a watched dir) is editor/OS noise that is never a
+ * page source: any hidden segment (`.DS_Store`, anything under `.git/` or `.cache/`,
+ * vim `.*.swp`) or a `~` backup file. Checks every segment, not just the basename.
+ *
+ * @param filename - The changed path relative to its watched directory.
+ * @returns `true` when the change should be ignored as noise.
+ * @example
+ * isNoisePath(".git/HEAD"); // true
+ */
+function isNoisePath(filename: string): boolean {
+  const segments = filename.split(/[/\\]/);
+  return segments.some(segment => segment.startsWith(".")) || filename.endsWith("~");
+}
+
+/**
+ * A guard deciding whether one `fs.watch` notification should trigger a rebuild. It
+ * exists because macOS `fs.watch({ recursive: true })` is noisy: per single save it
+ * re-fires the same file many times AND reports the parent directory separately, and a
+ * multi-second build starves the event loop so those echoes are delivered LATE (mid- or
+ * post-build). Untamed, that made the dev loop rebuild 4+ times per keystroke.
+ *
+ * @example
+ * const gate = createChangeGate({ outDir: "dist", fileMtime, now: Date.now });
+ * if (gate.accept("content", "a/en.md")) rebuild();
+ */
+export type ChangeGate = {
+  /**
+   * Decide whether a change beneath `dir` warrants a rebuild.
+   *
+   * @param dir - The watched directory the event fired on.
+   * @param filename - The changed path relative to `dir`, or `undefined` when the
+   *   platform did not report one (then we conservatively accept).
+   * @returns `true` to schedule a rebuild, `false` to ignore (noise / output / stale echo).
+   * @example
+   * gate.accept("content", "post/en.md");
+   */
+  accept(dir: string, filename: string | undefined): boolean;
+  /**
+   * Record that a build is starting now — the gate's high-water mark. Subsequent events
+   * for files last modified at or before this instant are stale echoes and are ignored.
+   *
+   * @returns Nothing.
+   * @example
+   * gate.markBuildStart();
+   */
+  markBuildStart(): void;
+};
+
+/**
+ * Create a {@link ChangeGate} that drops three kinds of spurious change events before
+ * they reach the debounced rebuilder: editor/OS noise (dotfiles, backups), writes under
+ * `outDir` (the build's own output — a loop guard), and the stale duplicate/parent-dir
+ * echoes macOS fires for one save. Staleness is judged by a build-start high-water mark:
+ * a change whose file mtime is at or before the last build we started was already
+ * captured (or is a late echo), so it is ignored — while a genuinely newer edit (even
+ * one made mid-build) and a deletion (missing file) always pass. The single timestamp
+ * also means no per-path map grows over a long session.
+ *
+ * @param input - The gate dependencies.
+ * @param input.outDir - The build output directory whose writes must never re-trigger a build.
+ * @param input.fileMtime - Resolves a path's mtime in ms (or `null` when missing).
+ * @param input.now - Monotonic wall clock (ms) used for the build-start high-water mark.
+ * @returns The change gate.
+ * @example
+ * const gate = createChangeGate({ outDir: "dist", fileMtime: state.fileMtime, now: state.clock });
+ */
+export function createChangeGate(input: {
+  outDir: string;
+  fileMtime: (filePath: string) => number | null;
+  now: () => number;
+}): ChangeGate {
+  const outDirAbs = path.resolve(input.outDir);
+  // High-water mark: when the most recent build STARTED. Initialized to serve-start so
+  // files that existed before serve() (mtime in the past) never trigger a spurious build.
+  let lastBuildStartedAt = input.now();
+  return {
+    /**
+     * Decide whether a change beneath `dir` warrants a rebuild (see {@link ChangeGate.accept}).
+     *
+     * @param dir - The watched directory the event fired on.
+     * @param filename - The changed path relative to `dir` (or `undefined`).
+     * @returns `true` to schedule a rebuild, `false` to ignore.
+     * @example
+     * gate.accept("content", "post/en.md");
+     */
+    accept(dir, filename) {
+      // No path reported (some platforms): we cannot filter — rebuild to be safe.
+      if (filename === undefined) return true;
+
+      // Editor/OS noise (dotfiles, swap, backups) is never a page source.
+      if (isNoisePath(filename)) return false;
+
+      // The build writing under outDir must never re-trigger a build (loop guard).
+      const changed = path.resolve(dir, filename);
+      if (changed === outDirAbs || changed.startsWith(`${outDirAbs}${path.sep}`)) return false;
+
+      // Stale echo: a file (or the parent dir) last modified strictly before the last
+      // build we started was already captured (the save's mtime predates build start by
+      // the debounce window). Strict `<` never drops a genuine edit that lands in the same
+      // millisecond a build begins. A missing file (deletion, null) is a real change.
+      const mtime = input.fileMtime(changed);
+      if (mtime !== null && mtime < lastBuildStartedAt) return false;
+      return true;
+    },
+    /**
+     * Advance the high-water mark to now (see {@link ChangeGate.markBuildStart}).
+     *
+     * @example
+     * gate.markBuildStart();
+     */
+    markBuildStart() {
+      lastBuildStartedAt = input.now();
     }
   };
 }
@@ -264,25 +389,68 @@ export type ReloadHub = {
    * hub.size();
    */
   size(): number;
+  /**
+   * Stop the heartbeat and close every connected SSE stream (teardown on SIGINT).
+   *
+   * @returns Nothing.
+   * @example
+   * hub.close();
+   */
+  close(): void;
 };
 
 /** The SSE comment line sent on connect to open the stream. */
 const SSE_OPEN = ": connected\n\n";
 /** The SSE frame pushed to reload a connected browser. */
 const SSE_RELOAD = "event: reload\ndata: 1\n\n";
+/** The SSE comment frame sent on the heartbeat to keep an idle stream warm. */
+const SSE_PING = ": ping\n\n";
+/** Default heartbeat interval (ms): one ping well under any 30s+ proxy idle window. */
+const DEFAULT_HEARTBEAT_MS = 15_000;
 
 /**
  * Create a {@link ReloadHub} backed by `ReadableStream` controllers. Each `connect()`
  * enqueues into a new stream; `reloadAll()` writes the reload frame to every live
- * controller (dropping any that have closed).
+ * controller (dropping any that have closed). A periodic heartbeat comment keeps idle
+ * streams warm — belt-and-suspenders alongside the dev server's `idleTimeout: 0`, so a
+ * quiet connection is never severed (which the browser surfaces as
+ * `ERR_INCOMPLETE_CHUNKED_ENCODING` and then reconnects in a storm).
  *
+ * @param options - Optional heartbeat tuning.
+ * @param options.heartbeatMs - Heartbeat interval in ms (`0` disables). Default `15000`.
  * @returns The reload hub.
  * @example
  * const hub = createReloadHub();
  */
-export function createReloadHub(): ReloadHub {
+export function createReloadHub(options: { heartbeatMs?: number } = {}): ReloadHub {
   const encoder = new TextEncoder();
   const clients = new Set<ReadableStreamDefaultController<Uint8Array>>();
+
+  /**
+   * Enqueue one frame to every live controller, dropping any that have closed.
+   *
+   * @param frame - The SSE wire text to broadcast.
+   * @example
+   * broadcast(SSE_RELOAD);
+   */
+  const broadcast = (frame: string): void => {
+    const bytes = encoder.encode(frame);
+    for (const controller of clients) {
+      try {
+        controller.enqueue(bytes);
+      } catch {
+        clients.delete(controller);
+      }
+    }
+  };
+
+  // Heartbeat: ping live clients on an interval so a quiet stream is never dropped.
+  // `unref` so the timer never keeps the process alive (tests + clean SIGINT exit).
+  const heartbeatMs = options.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
+  const heartbeat =
+    heartbeatMs > 0 ? setInterval(() => broadcast(SSE_PING), heartbeatMs) : undefined;
+  (heartbeat as { unref?: () => void } | undefined)?.unref?.();
+
   return {
     /**
      * Open one SSE connection, register its controller, and return the streaming
@@ -332,13 +500,7 @@ export function createReloadHub(): ReloadHub {
      * hub.reloadAll();
      */
     reloadAll() {
-      for (const controller of clients) {
-        try {
-          controller.enqueue(encoder.encode(SSE_RELOAD));
-        } catch {
-          clients.delete(controller);
-        }
-      }
+      broadcast(SSE_RELOAD);
     },
     /**
      * The number of currently-connected clients.
@@ -349,6 +511,23 @@ export function createReloadHub(): ReloadHub {
      */
     size() {
       return clients.size;
+    },
+    /**
+     * Stop the heartbeat and close every live SSE stream (SIGINT/SIGTERM teardown).
+     *
+     * @example
+     * hub.close();
+     */
+    close() {
+      if (heartbeat !== undefined) clearInterval(heartbeat);
+      for (const controller of clients) {
+        try {
+          controller.close();
+        } catch {
+          // Already closed by the client — nothing to do.
+        }
+      }
+      clients.clear();
     }
   };
 }
@@ -424,7 +603,19 @@ export async function runDevServer(ctx: CliPluginContext, port: number): Promise
   await ctx.require(buildPlugin).run();
 
   const hub = createReloadHub();
-  const server = ctx.state.serveStatic({ port, fetch: createDevHandler(ctx, hub) });
+  // idleTimeout 0: never sever the long-lived live-reload SSE stream. Bun's 10s default
+  // closes it, which the browser surfaces as ERR_INCOMPLETE_CHUNKED_ENCODING and then
+  // reconnects forever (the __moku_reload request storm).
+  const server = ctx.state.serveStatic({ port, idleTimeout: 0, fetch: createDevHandler(ctx, hub) });
+
+  // Filter watch noise before scheduling: ignore build output + dotfiles/backups, and
+  // drop the stale duplicate/parent-dir echoes macOS fires per save (via a build-start
+  // high-water mark) so one save triggers exactly one rebuild.
+  const gate = createChangeGate({
+    outDir: ctx.config.outDir,
+    fileMtime: ctx.state.fileMtime,
+    now: ctx.state.clock
+  });
 
   const rebuilder = createRebuilder({
     debounceMs: ctx.config.debounceMs,
@@ -437,6 +628,19 @@ export async function runDevServer(ctx: CliPluginContext, port: number): Promise
      */
     runBuild() {
       return ctx.require(buildPlugin).run();
+    },
+    /**
+     * Show the compact in-place "rebuilding {label}" line before the build runs.
+     *
+     * @param file - The changed watch target shown in the line.
+     * @example
+     * onRebuildStart("content");
+     */
+    onRebuildStart(file) {
+      // Advance the gate's high-water mark so this build's own duplicate/late watch
+      // echoes are recognized as stale and never queue another rebuild.
+      gate.markBuildStart();
+      ctx.state.render.rebuildStart(file);
     },
     /**
      * Render the reload line and push a browser reload after a rebuild.
@@ -462,7 +666,9 @@ export async function runDevServer(ctx: CliPluginContext, port: number): Promise
   });
 
   const watchers = ctx.config.watchDirs.map(dir =>
-    ctx.state.watch(dir, () => rebuilder.schedule(dir))
+    ctx.state.watch(dir, filename => {
+      if (gate.accept(dir, filename)) rebuilder.schedule(dir);
+    })
   );
 
   ctx.state.render.serverReady({
@@ -474,6 +680,7 @@ export async function runDevServer(ctx: CliPluginContext, port: number): Promise
   return installSignalTeardown(() => {
     rebuilder.cancel();
     for (const watcher of watchers) watcher.close();
+    hub.close();
     server.stop();
   });
 }

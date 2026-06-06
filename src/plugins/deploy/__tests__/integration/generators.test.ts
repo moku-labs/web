@@ -26,4 +26,21 @@ describe("deploy generators integration", () => {
     const out = generateGithubWorkflow({ slug: "my-site" });
     expect(out).toContain(`wranglerVersion: "${MOKU_WRANGLER_VERSION}"`);
   });
+
+  it("varies the on: trigger by WorkflowTrigger (default auto = push to main)", () => {
+    const auto = generateGithubWorkflow({ slug: "my-site", trigger: "auto" });
+    expect(auto).toContain("push:\n    branches: [main]");
+    expect(auto).toContain("workflow_dispatch:");
+    // Default is auto.
+    expect(generateGithubWorkflow({ slug: "my-site" })).toBe(auto);
+
+    const tagged = generateGithubWorkflow({ slug: "my-site", trigger: "versioned-tag" });
+    expect(tagged).toContain('push:\n    tags: ["v*"]');
+    expect(tagged).toContain("workflow_dispatch:");
+    expect(tagged).not.toContain("branches: [main]");
+
+    const dispatch = generateGithubWorkflow({ slug: "my-site", trigger: "dispatch" });
+    expect(dispatch).toContain("on:\n  workflow_dispatch:");
+    expect(dispatch).not.toContain("push:");
+  });
 });

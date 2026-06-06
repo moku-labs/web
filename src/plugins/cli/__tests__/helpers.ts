@@ -41,11 +41,14 @@ export function makeRenderer(): CaptureRenderer {
     phase: record("phase"),
     built: record("built"),
     serverReady: record("serverReady"),
+    rebuildStart: record("rebuildStart"),
     reload: record("reload"),
     deployed: record("deployed"),
     info: record("info"),
     warn: record("warn"),
-    error: record("error")
+    error: record("error"),
+    heading: record("heading"),
+    check: record("check")
   };
 }
 
@@ -134,6 +137,7 @@ export function makeCtx(options: MakeCtxOptions = {}): {
   const state: State = {
     render,
     confirm: vi.fn(async () => false),
+    select: vi.fn(async () => 0),
     clock: () => 1000,
     watch: vi.fn(() => noopWatch()),
     serveStatic: vi.fn(() => ({
@@ -144,6 +148,8 @@ export function makeCtx(options: MakeCtxOptions = {}): {
     fileResponse: vi.fn((filePath: string) => new Response(`file:${filePath}`)),
     // eslint-disable-next-line unicorn/no-null -- State.networkUrl returns `string | null`; tests default to offline.
     networkUrl: () => null,
+    // eslint-disable-next-line unicorn/no-null -- State.fileMtime returns `number | null`; tests default to "missing" (every event is a change).
+    fileMtime: () => null,
     ...options.state
   };
 
