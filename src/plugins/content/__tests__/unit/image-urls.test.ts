@@ -9,7 +9,8 @@ import type { ContentApiContext } from "../../types";
 /** Build a content API over `contentDir` (via the node filesystem provider). */
 function makeApi(contentDir: string) {
   const ctx: ContentApiContext = {
-    state: { articles: new Map() },
+    // eslint-disable-next-line unicorn/no-null -- State.loadedAll is `Map | null`; null = "not loaded"
+    state: { articles: new Map(), loadedAll: null },
     global: { stage: "development" },
     emit: vi.fn(),
     locales: () => ["en", "ru"],

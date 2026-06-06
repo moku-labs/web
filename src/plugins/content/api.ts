@@ -380,12 +380,15 @@ export function createContentApi(ctx: ContentApiContext): Api {
      * Load every article across every active locale (locale fallback, production
      * draft exclusion, date sort, `contentId` after sort), cache them, emit `content:ready`.
      *
-     * With `{ reuse: true }` (dev incremental rebuild) cached articles are reused for
-     * every slug a preceding `invalidate()` did not drop, so only the dirty articles
-     * re-read + re-run the Markdown/Shiki pipeline; the `contentId` ordinals are still
-     * recomputed across the FULL sorted set, so ids + order match a full load.
+     * Cache-first by default: repeated calls return the per-build memo (list-route loaders
+     * call this once PER PAGE — without the memo every page would re-read + re-render every
+     * article, the dev-loop killer), and a rebuild after `invalidate()` re-resolves only the
+     * dropped slugs while reusing the cached articles for the rest (`contentId` ordinals are
+     * still recomputed across the FULL sorted set, so ids + order match a full load). Pass
+     * `{ reuse: false }` to force a FRESH full reload (cold build / an unclassifiable change
+     * where the caller cannot pinpoint what changed) — this bypasses the memo + per-slug cache.
      *
-     * @param options - Optional load behaviour (`reuse`); omit for a full load.
+     * @param options - Optional load behaviour (`reuse`, default `true`).
      * @returns A locale-keyed map of date-descending articles.
      * @example
      * ```ts
@@ -393,8 +396,15 @@ export function createContentApi(ctx: ContentApiContext): Api {
      * ```
      */
     async loadAll(options?: LoadAllOptions): Promise<Map<string, Article[]>> {
+      // Cache-first by default; `{ reuse: false }` forces a fresh full reload (bypass memo + cache).
+      const reuse = options?.reuse !== false;
+
+      // Memo fast-path: repeated loadAll() within a build returns the same result with no work.
+      // `invalidate()` clears the memo, so a dev rebuild rebuilds (re-resolving only dirty slugs).
+      const memo = ctx.state.loadedAll;
+      if (reuse && memo !== null) return memo;
+
       // Gather the inputs: every known slug, expanded across every active locale.
-      const reuse = options?.reuse === true;
       const slugs = await ctx.provider.slugs();
       const locales = ctx.locales();
 
@@ -417,6 +427,9 @@ export function createContentApi(ctx: ContentApiContext): Api {
         result.set(locale, present);
         total += present.length;
       }
+
+      // Memoize so the next loadAll() (e.g. the next page's loader) returns this without work.
+      ctx.state.loadedAll = result;
 
       // Announce the loaded set so dependents can react, then hand back the map.
       ctx.emit("content:ready", { locales, articleCount: total });
@@ -493,6 +506,14 @@ export function createContentApi(ctx: ContentApiContext): Api {
         for (const cache of ctx.state.articles.values()) {
           cache.delete(slug);
         }
+      }
+
+      // Drop the loadAll memo so the next loadAll() rebuilds (re-resolving the evicted slugs
+      // while the per-slug cache above still serves the unchanged ones). Only when something
+      // was actually invalidated — an all-empty call must not throw away a valid memo.
+      if (accepted.length > 0) {
+        // eslint-disable-next-line unicorn/no-null -- `null` = "not loaded"; the memo contract
+        ctx.state.loadedAll = null;
       }
 
       // Announce the invalidation so dependents (e.g. dev rebuilds) can react.

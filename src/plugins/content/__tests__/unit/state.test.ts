@@ -5,10 +5,11 @@ import type { Config } from "../../types";
 const config: Config = { providers: [] };
 
 describe("content/state", () => {
-  it("starts with an empty article cache", () => {
+  it("starts with an empty article cache + an empty loadAll memo", () => {
     const state = createContentState({ global: {}, config });
     expect(state.articles).toBeInstanceOf(Map);
     expect(state.articles.size).toBe(0);
+    expect(state.loadedAll).toBeNull();
   });
 
   it("returns a fresh state object on each call (no shared containers)", () => {
