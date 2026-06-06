@@ -41,6 +41,7 @@ export function makeRenderer(): CaptureRenderer {
     phase: record("phase"),
     built: record("built"),
     serverReady: record("serverReady"),
+    rebuildStart: record("rebuildStart"),
     reload: record("reload"),
     deployed: record("deployed"),
     info: record("info"),
@@ -144,6 +145,8 @@ export function makeCtx(options: MakeCtxOptions = {}): {
     fileResponse: vi.fn((filePath: string) => new Response(`file:${filePath}`)),
     // eslint-disable-next-line unicorn/no-null -- State.networkUrl returns `string | null`; tests default to offline.
     networkUrl: () => null,
+    // eslint-disable-next-line unicorn/no-null -- State.fileMtime returns `number | null`; tests default to "missing" (every event is a change).
+    fileMtime: () => null,
     ...options.state
   };
 

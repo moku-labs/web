@@ -103,8 +103,23 @@ export type CliRenderer = {
    */
   serverReady(info: ServerInfo): void;
   /**
-   * Render the post-rebuild line ("~ dir" + "✓ rebuilt N pages · Xms · reloaded"),
-   * where the label is the watched directory whose subtree changed (see {@link ReloadInfo.file}).
+   * Begin a serve() rebuild: show ONE compact, in-place "rebuilding {label}…" line
+   * (a live spinner on a TTY) and suppress the verbose per-phase rows + BUILD summary
+   * box until the matching {@link reload} (or {@link error}) settles it. The initial
+   * build is NOT a rebuild — it still renders the full live phase list. Without this
+   * gate, every keystroke reprinted the entire build log.
+   *
+   * @param label - The changed watch target shown in the line (e.g. "content").
+   * @returns Nothing.
+   * @example
+   * render.rebuildStart("content");
+   */
+  rebuildStart(label: string): void;
+  /**
+   * Settle a serve() rebuild started by {@link rebuildStart}: replace the in-place
+   * "rebuilding…" line with a compact "✓ rebuilt N pages · Xs · reloaded" result and
+   * re-enable verbose build output. The label is the watched directory whose subtree
+   * changed (see {@link ReloadInfo.file}).
    *
    * @param info - The changed watched directory plus the rebuild's page count and duration.
    * @returns Nothing.
@@ -209,6 +224,14 @@ export type ServeStaticOptions = {
    * fetch(req) { return new Response("ok"); }
    */
   fetch(request: Request): Response | Promise<Response>;
+  /**
+   * Idle timeout in SECONDS before the server severs a connection with no traffic
+   * (Bun semantics; `0` disables it, max `255`). The dev server passes `0` so the
+   * long-lived live-reload SSE stream is never cut — Bun's 10s default closes it,
+   * which the browser surfaces as `ERR_INCOMPLETE_CHUNKED_ENCODING` and then
+   * reconnects in an endless storm. Omitted by `preview()` (short static requests).
+   */
+  idleTimeout?: number;
 };
 
 /**
@@ -287,12 +310,14 @@ export type State = {
    * tests inject a fake emitter.
    *
    * @param dir - The directory to watch recursively.
-   * @param onChange - Invoked on any change beneath `dir`.
+   * @param onChange - Invoked on any change beneath `dir`, with the changed path
+   *   relative to `dir` when the platform reports it (`undefined` otherwise). serve()
+   *   uses it to ignore `outDir`/noise writes and to drop duplicate events by mtime.
    * @returns A handle whose `close()` detaches the watcher.
    * @example
-   * const handle = state.watch("content", () => rebuild());
+   * const handle = state.watch("content", file => rebuild(file));
    */
-  watch: (dir: string, onChange: () => void) => WatchHandle;
+  watch: (dir: string, onChange: (filename?: string) => void) => WatchHandle;
   /** Static-server factory used by serve()/preview(). Default `Bun.serve`; tests inject a fake. */
   serveStatic: ServeStaticFunction;
   /** File-response factory mapping a resolved path + status to a `Response`. Default `Bun.file`. */
@@ -307,6 +332,18 @@ export type State = {
    * const url = state.networkUrl(4173);
    */
   networkUrl: (port: number) => string | null;
+  /**
+   * Resolve a file's modification time in epoch milliseconds, or `null` when it does
+   * not exist. serve() uses it to collapse the burst of duplicate `fs.watch` events
+   * macOS emits per save (same mtime ⇒ already-built ⇒ ignored) into one rebuild.
+   * Default wraps `node:fs.statSync`; tests inject deterministic values.
+   *
+   * @param path - The absolute path to stat.
+   * @returns The mtime in milliseconds, or `null` when the file is missing.
+   * @example
+   * const mtime = state.fileMtime("/abs/content/a.md");
+   */
+  fileMtime: (path: string) => number | null;
 };
 
 /**

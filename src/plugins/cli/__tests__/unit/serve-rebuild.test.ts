@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApi } from "../../api";
 import {
+  createChangeGate,
   createDevHandler,
   createRebuilder,
   createReloadHub,
@@ -11,7 +12,7 @@ import {
   RELOAD_PATH
 } from "../../serve";
 import type { BuildSummary, ReloadInfo, WatchHandle } from "../../types";
-import { makeCtx } from "../helpers";
+import { type CaptureRenderer, makeCtx } from "../helpers";
 
 describe("cli/createRebuilder (debounced rebuild)", () => {
   beforeEach(() => {
@@ -252,6 +253,202 @@ describe("cli serve() wiring (injected seams)", () => {
     await servePromise;
     expect(stop).toHaveBeenCalledTimes(1);
     expect(closes).toEqual(["content", "src"]);
+    vi.useRealTimers();
+  });
+
+  it("starts the dev server with idleTimeout 0 (keeps the live-reload SSE stream open)", async () => {
+    const serveStatic = vi.fn(() => ({
+      stop() {
+        // no-op
+      }
+    }));
+    const watch = vi.fn(
+      (): WatchHandle => ({
+        close() {
+          // no-op
+        }
+      })
+    );
+    const { ctx } = makeCtx({ state: { serveStatic, watch } });
+
+    vi.useFakeTimers();
+    const servePromise = createApi(ctx).serve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(serveStatic).toHaveBeenCalledWith(expect.objectContaining({ idleTimeout: 0 }));
+
+    process.emit("SIGINT");
+    await servePromise;
+    vi.useRealTimers();
+  });
+
+  it("does not rebuild for an ignored (noise) watch event — the gate is wired", async () => {
+    const handlers = new Map<string, (filename?: string) => void>();
+    const watch = vi.fn((dir: string, onChange: (filename?: string) => void): WatchHandle => {
+      handlers.set(dir, onChange);
+      return {
+        close() {
+          // no-op
+        }
+      };
+    });
+    const serveStatic = vi.fn(() => ({
+      stop() {
+        // no-op
+      }
+    }));
+    const { ctx, build } = makeCtx({
+      config: { watchDirs: ["content"], debounceMs: 0, outDir: "dist" },
+      state: { watch, serveStatic }
+    });
+
+    vi.useFakeTimers();
+    const servePromise = createApi(ctx).serve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(build.run).toHaveBeenCalledTimes(1); // initial build only
+
+    handlers.get("content")?.(".DS_Store"); // noise ⇒ the gate rejects ⇒ no rebuild
+    await vi.advanceTimersByTimeAsync(0);
+    expect(build.run).toHaveBeenCalledTimes(1); // still no rebuild
+
+    process.emit("SIGINT");
+    await servePromise;
+    vi.useRealTimers();
+  });
+
+  it("announces rebuildStart before reload on each rebuild", async () => {
+    const handlers = new Map<string, (filename?: string) => void>();
+    const watch = vi.fn((dir: string, onChange: (filename?: string) => void): WatchHandle => {
+      handlers.set(dir, onChange);
+      return {
+        close() {
+          // no-op
+        }
+      };
+    });
+    const serveStatic = vi.fn(() => ({
+      stop() {
+        // no-op
+      }
+    }));
+    const { ctx, render } = makeCtx({
+      config: { watchDirs: ["content"], debounceMs: 0 },
+      state: { watch, serveStatic }
+    });
+
+    vi.useFakeTimers();
+    const servePromise = createApi(ctx).serve();
+    await vi.advanceTimersByTimeAsync(0);
+
+    handlers.get("content")?.(); // no filename ⇒ accepted ⇒ one rebuild
+    await vi.advanceTimersByTimeAsync(0);
+
+    const names = (render as CaptureRenderer).calls.map(call => call[0]);
+    const startIndex = names.indexOf("rebuildStart");
+    const reloadIndex = names.indexOf("reload");
+    expect(startIndex).toBeGreaterThanOrEqual(0);
+    expect(reloadIndex).toBeGreaterThan(startIndex);
+
+    process.emit("SIGINT");
+    await servePromise;
+    vi.useRealTimers();
+  });
+});
+
+describe("cli/createChangeGate (watch-event filter)", () => {
+  it("accepts when the platform reports no filename (cannot filter — rebuild)", () => {
+    const gate = createChangeGate({ outDir: "dist", fileMtime: () => 9e9, now: () => 0 });
+    expect(gate.accept("content", undefined)).toBe(true);
+  });
+
+  it("ignores dotfiles, dot-segments, and backup~ files (editor/OS noise)", () => {
+    const gate = createChangeGate({ outDir: "dist", fileMtime: () => 9e9, now: () => 0 });
+    expect(gate.accept("content", ".DS_Store")).toBe(false);
+    expect(gate.accept("content", "post/.git/HEAD")).toBe(false);
+    expect(gate.accept("content", "post/en.md~")).toBe(false);
+  });
+
+  it("ignores writes under outDir (the build's own output — loop guard)", () => {
+    const gate = createChangeGate({ outDir: "dist", fileMtime: () => 9e9, now: () => 0 });
+    expect(gate.accept(".", "dist/index.html")).toBe(false);
+  });
+
+  it("ignores files last modified at/before serve start (pre-existing / stale echo)", () => {
+    // High-water starts at now()=1000; a file with mtime 500 predates it ⇒ already built.
+    const gate = createChangeGate({ outDir: "dist", fileMtime: () => 500, now: () => 1000 });
+    expect(gate.accept("content", "old.md")).toBe(false);
+  });
+
+  it("accepts a file modified after the last build started (a real edit)", () => {
+    const gate = createChangeGate({ outDir: "dist", fileMtime: () => 1500, now: () => 1000 });
+    expect(gate.accept("content", "new.md")).toBe(true);
+  });
+
+  it("drops a save's duplicate + parent-dir echoes once its build has started", () => {
+    let clock = 1000;
+    const gate = createChangeGate({ outDir: "dist", fileMtime: () => 1500, now: () => clock });
+    // The triggering event (file newer than serve start) is accepted.
+    expect(gate.accept("content", "a.md")).toBe(true);
+    // The build starts → the high-water mark advances past the save's mtime.
+    clock = 3000;
+    gate.markBuildStart();
+    // The duplicate file echo + the separate parent-dir echo are now stale (mtime ≤ HWM).
+    expect(gate.accept("content", "a.md")).toBe(false);
+    expect(gate.accept("content", "a")).toBe(false);
+  });
+
+  it("still accepts a genuinely newer edit made mid-build", () => {
+    let clock = 1000;
+    let mtime = 1500;
+    const gate = createChangeGate({ outDir: "dist", fileMtime: () => mtime, now: () => clock });
+    expect(gate.accept("content", "a.md")).toBe(true);
+    clock = 3000;
+    gate.markBuildStart();
+    // A real edit during the build advances the file's mtime past the build-start mark.
+    mtime = 4000;
+    expect(gate.accept("content", "a.md")).toBe(true);
+  });
+
+  it("treats a missing file (deletion) as a real change", () => {
+    // eslint-disable-next-line unicorn/no-null -- fileMtime returns null for a missing file.
+    const gate = createChangeGate({ outDir: "dist", fileMtime: () => null, now: () => 1000 });
+    expect(gate.accept("content", "gone.md")).toBe(true);
+  });
+});
+
+describe("cli/createReloadHub heartbeat + close", () => {
+  it("pings connected clients on the heartbeat interval and stops on close()", async () => {
+    vi.useFakeTimers();
+    const hub = createReloadHub({ heartbeatMs: 1000 });
+    const response = hub.connect();
+    const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+    await reader.read(); // the open comment
+
+    await vi.advanceTimersByTimeAsync(1000);
+    const { value } = await reader.read();
+    expect(new TextDecoder().decode(value)).toContain(": ping");
+
+    hub.close();
+    expect(hub.size()).toBe(0);
+    await reader.cancel();
+    vi.useRealTimers();
+  });
+
+  it("does not start a heartbeat when heartbeatMs is 0", async () => {
+    vi.useFakeTimers();
+    const hub = createReloadHub({ heartbeatMs: 0 });
+    const response = hub.connect();
+    const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+    await reader.read(); // the open comment
+
+    // Advance well past any interval — no ping should ever arrive.
+    let pinged = false;
+    const pending = reader.read().then(({ value }) => {
+      if (value && new TextDecoder().decode(value).includes("ping")) pinged = true;
+    });
+    await vi.advanceTimersByTimeAsync(60_000);
+    hub.close(); // closes the stream so the pending read settles
+    await pending;
+    expect(pinged).toBe(false);
     vi.useRealTimers();
   });
 });

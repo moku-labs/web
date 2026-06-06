@@ -118,6 +118,97 @@ describe("cli panel renderer (plain mode)", () => {
     render.header("deploy");
     expect(out.join("\n")).toMatch(new RegExp(String.fromCodePoint(0x1b)));
   });
+
+  it("prints ONE line per completed phase off a TTY (no start/done duplication)", () => {
+    const { render, out } = capture();
+    render.phase({ phase: "bundle", status: "start" });
+    expect(out).toHaveLength(0); // the "start" boundary draws nothing in plain mode
+    render.phase({ phase: "bundle", status: "done", durationMs: 5 });
+    expect(out).toHaveLength(1);
+    expect(out[0]).toContain("✓");
+    expect(out[0]).toContain("bundle");
+    expect(out[0]).toContain("5ms");
+  });
+
+  it("suppresses phase rows + the BUILD box while a rebuild is in flight", () => {
+    const { render, out } = capture();
+    render.rebuildStart("content");
+    render.phase({ phase: "pages", status: "start" });
+    render.phase({ phase: "pages", status: "done", durationMs: 9 });
+    render.built({ outDir: "dist", pageCount: 4, durationMs: 50 });
+    // Nothing from the suppressed phase/built calls leaked (no phase duration, no BUILD box).
+    expect(out.join("\n")).not.toContain("9ms");
+    expect(out.join("\n")).not.toContain("BUILD");
+    render.reload({ file: "content", pageCount: 4, durationMs: 50 });
+    expect(out.join("\n")).toContain("rebuilt 4 pages");
+  });
+});
+
+/** A renderer with color on + injected raw/clock sinks, for in-place (TTY) assertions. */
+function captureColor() {
+  const out: string[] = [];
+  const err: string[] = [];
+  const raw: string[] = [];
+  let clock = 1000;
+  const render = createPanelRenderer({
+    write: line => out.push(line),
+    writeError: line => err.push(line),
+    writeRaw: chunk => raw.push(chunk),
+    color: true,
+    now: () => clock
+  });
+  return {
+    render,
+    out,
+    err,
+    raw,
+    advance: (ms: number) => {
+      clock += ms;
+    }
+  };
+}
+
+describe("cli panel renderer (live TTY rendering)", () => {
+  it("draws an in-place rebuilding spinner and overwrites it with the result on reload", () => {
+    const { render, raw, out } = captureColor();
+    render.rebuildStart("content");
+    expect(raw.join("")).toContain("rebuilding content");
+    // The spinner line is drawn in place (carriage return + clear line), not appended.
+    expect(raw.join("")).toContain("\r");
+    render.reload({ file: "content", pageCount: 7, durationMs: 80 });
+    // The result line replaces the spinner in place (count is ANSI-bolded, so assert parts).
+    const joined = raw.join("");
+    expect(joined).toContain("rebuilt");
+    expect(joined).toContain("7");
+    expect(joined).toContain("reloaded");
+    // Everything stayed in the raw (in-place) sink — nothing scrolled via the line sink.
+    expect(out).toHaveLength(0);
+  });
+
+  it("keeps a single live phase row per phase, keyed by name (interleaved events)", () => {
+    const { render, raw } = captureColor();
+    render.phase({ phase: "content", status: "start" });
+    render.phase({ phase: "images", status: "start" });
+    render.phase({ phase: "images", status: "done", durationMs: 3 });
+    render.phase({ phase: "content", status: "done", durationMs: 9 });
+    // The final in-place repaint shows BOTH phases as done rows — no duplicated lines.
+    const last = raw.at(-1) ?? "";
+    expect(last).toContain("content");
+    expect(last).toContain("images");
+    expect(last).toContain("9ms");
+    expect(last).toContain("3ms");
+  });
+
+  it("clears the in-place spinner line before printing a rebuild error", () => {
+    const { render, raw, err } = captureColor();
+    render.rebuildStart("content");
+    render.error("rebuild failed", new Error("boom"));
+    expect(err.join("\n")).toContain("rebuild failed");
+    expect(err.join("\n")).toContain("boom");
+    // The last raw write clears the spinner line (carriage return + ANSI clear) first.
+    expect(raw.at(-1)).toContain("\r");
+    expect(raw.at(-1)).toContain(String.fromCodePoint(0x1b));
+  });
 });
 
 describe("cli ansi helpers", () => {

@@ -25,6 +25,31 @@ export const ANSI = {
 /** A single ANSI color code from {@link ANSI}. */
 export type AnsiCode = (typeof ANSI)[keyof typeof ANSI];
 
+/** ANSI: erase the entire current line, leaving the cursor where it is. */
+export const CLEAR_LINE = `${ESC}[2K`;
+/** ANSI: erase from the cursor to the end of the screen (drops stale trailing rows). */
+export const CLEAR_BELOW = `${ESC}[0J`;
+
+/**
+ * Braille spinner frames for live "working…" indicators on a TTY (advance one per tick).
+ * Off a TTY the Panel never animates, so this is unused in plain/CI output.
+ */
+export const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
+
+/**
+ * The ANSI sequence to move the cursor up `n` lines (empty string for `n <= 0`). The
+ * Panel uses it to repaint a live block in place — move up over the previous draw, then
+ * rewrite each row — so progress updates a fixed region instead of scrolling new lines.
+ *
+ * @param n - Number of lines to move the cursor up.
+ * @returns The cursor-up escape sequence, or `""` when `n <= 0`.
+ * @example
+ * cursorUp(3); // "\x1b[3A"
+ */
+export function cursorUp(n: number): string {
+  return n > 0 ? `${ESC}[${n}A` : "";
+}
+
 /**
  * Box-drawing glyphs used to frame panels (Unicode on a TTY, ASCII fallback off it).
  *

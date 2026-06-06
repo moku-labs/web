@@ -5,7 +5,16 @@
  * are written through an injectable sink so tests can capture them.
  */
 import type { CliRenderer, Command } from "../types";
-import { box, makePalette, type Palette, supportsColor } from "./ansi";
+import {
+  box,
+  CLEAR_BELOW,
+  CLEAR_LINE,
+  cursorUp,
+  makePalette,
+  type Palette,
+  SPINNER_FRAMES,
+  supportsColor
+} from "./ansi";
 
 /**
  * Options for {@link createPanelRenderer}. All optional: the defaults wire the
@@ -23,6 +32,14 @@ export type PanelOptions = {
   writeError?: (line: string) => void;
   /** Force color on/off. Defaults to `supportsColor()` (TTY + `NO_COLOR` unset). */
   color?: boolean;
+  /**
+   * Raw stdout sink that writes a chunk WITHOUT an implicit newline — used for the
+   * in-place, cursor-controlled live rendering (phase block + rebuild spinner) that runs
+   * only when `color` is on. Defaults to `process.stdout.write`; tests inject a capture.
+   */
+  writeRaw?: (chunk: string) => void;
+  /** Monotonic clock (ms) for the rebuild spinner's elapsed counter. Defaults to `Date.now`. */
+  now?: () => number;
 };
 
 /** Per-command label shown in the header badge beside the logo. */
@@ -64,8 +81,116 @@ export function createPanelRenderer(options: PanelOptions = {}): CliRenderer {
   // biome-ignore lint/suspicious/noConsole: the Panel renderer writes to stdout (default sink); tests inject a capturing sink.
   const write = options.write ?? ((line: string) => console.log(line));
   const writeError = options.writeError ?? ((line: string) => console.error(line));
+  const writeRaw =
+    options.writeRaw ??
+    ((chunk: string): void => {
+      process.stdout.write(chunk);
+    });
+  const now = options.now ?? Date.now;
   const color = options.color ?? supportsColor();
   const palette = makePalette(color);
+
+  /**
+   * One row of the live in-place phase block: a phase name, whether it has finished, and
+   * its duration once known.
+   */
+  type PhaseRow = { name: string; done: boolean; durationMs: number | undefined };
+
+  // Live-render state (only exercised when `color` is on — a TTY). The phase block is the
+  // initial build's in-place phase list; the rebuild line is serve()'s compact spinner.
+  let phaseRows: PhaseRow[] = [];
+  let phaseDrawn = 0;
+  let phaseOpen = false;
+  let rebuilding = false;
+  let rebuildLabel = "";
+  let rebuildStartedAt = 0;
+  let spinnerFrame = 0;
+  let ticker: ReturnType<typeof setInterval> | undefined;
+
+  /**
+   * The current spinner glyph (with a static fallback under `noUncheckedIndexedAccess`).
+   *
+   * @returns The active braille spinner frame.
+   * @example
+   * frameGlyph(); // "⠙"
+   */
+  const frameGlyph = (): string => SPINNER_FRAMES[spinnerFrame % SPINNER_FRAMES.length] ?? "⠋";
+
+  /**
+   * Render one phase row: a green `✓ name · time` when done, else a spinning cyan glyph
+   * before the dim name.
+   *
+   * @param row - The phase row to render.
+   * @returns The rendered row line (no trailing newline).
+   * @example
+   * renderPhaseRow({ name: "pages", done: true, durationMs: 12 });
+   */
+  const renderPhaseRow = (row: PhaseRow): string => {
+    if (row.done)
+      return `  ${palette.green("✓")} ${row.name}${durationSuffix(palette, row.durationMs)}`;
+    return `  ${palette.cyan(frameGlyph())} ${palette.dim(row.name)}`;
+  };
+
+  /**
+   * Repaint the live phase block in place: move up over the prior draw, then rewrite each
+   * row (clearing any stale trailing lines).
+   *
+   * @example
+   * paintPhaseBlock();
+   */
+  const paintPhaseBlock = (): void => {
+    let frame = cursorUp(phaseDrawn);
+    for (const row of phaseRows) frame += `${CLEAR_LINE}${renderPhaseRow(row)}\n`;
+    writeRaw(frame + CLEAR_BELOW);
+    phaseDrawn = phaseRows.length;
+  };
+
+  /**
+   * Repaint the single in-place rebuild line (spinner + label + live elapsed seconds).
+   *
+   * @example
+   * paintRebuildLine();
+   */
+  const paintRebuildLine = (): void => {
+    const elapsed = ((now() - rebuildStartedAt) / 1000).toFixed(1);
+    const meta = palette.dim(`· ${elapsed}s`);
+    writeRaw(`\r${CLEAR_LINE}  ${palette.cyan(frameGlyph())} rebuilding ${rebuildLabel} ${meta}`);
+  };
+
+  /**
+   * Advance the spinner one frame and repaint whichever live region is active.
+   *
+   * @example
+   * onTick();
+   */
+  const onTick = (): void => {
+    spinnerFrame += 1;
+    if (rebuilding) paintRebuildLine();
+    else if (phaseOpen) paintPhaseBlock();
+  };
+
+  /**
+   * Start the animation ticker (TTY only; idempotent; `unref`'d so it never blocks exit).
+   *
+   * @example
+   * startTicker();
+   */
+  const startTicker = (): void => {
+    if (!color || ticker) return;
+    ticker = setInterval(onTick, 80);
+    (ticker as { unref?: () => void }).unref?.();
+  };
+
+  /**
+   * Stop the animation ticker if running.
+   *
+   * @example
+   * stopTicker();
+   */
+  const stopTicker = (): void => {
+    if (ticker) clearInterval(ticker);
+    ticker = undefined;
+  };
 
   /**
    * Write each line of a multi-line block through the stdout sink.
@@ -93,17 +218,45 @@ export function createPanelRenderer(options: PanelOptions = {}): CliRenderer {
     },
 
     /**
-     * Render a live per-phase row from a `build:phase` event.
+     * Render a per-phase row from a `build:phase` event. On a TTY each phase is ONE row
+     * that updates in place (spinning glyph while running → green ✓ + duration when done);
+     * off a TTY one line is printed per completed phase (no start/done duplication). A
+     * no-op while a serve() rebuild is in flight — those show the compact rebuild line.
      *
      * @param phase - The `build:phase` payload.
      * @example
      * render.phase({ phase: "pages", status: "done", durationMs: 12 });
      */
     phase(phase) {
+      // Suppressed during a rebuild: the compact rebuild line stands in for the phase list.
+      if (rebuilding) return;
+
+      // Plain/CI: emit one line per completed phase (skip the "start" row — no duplication).
+      if (!color) {
+        if (phase.status === "done") {
+          write(
+            `  ${palette.green("✓")} ${phase.phase}${durationSuffix(palette, phase.durationMs)}`
+          );
+        }
+        return;
+      }
+
+      // TTY: update the live in-place phase block, opening a fresh one for a new build.
+      if (!phaseOpen) {
+        phaseRows = [];
+        phaseDrawn = 0;
+        phaseOpen = true;
+      }
       const done = phase.status === "done";
-      const mark = done ? palette.green("✓") : palette.dim("•");
-      const name = done ? phase.phase : palette.dim(phase.phase);
-      write(`  ${mark} ${name}${durationSuffix(palette, phase.durationMs)}`);
+      const existing = phaseRows.find(row => row.name === phase.phase);
+      if (existing) {
+        existing.done = done;
+        existing.durationMs = phase.durationMs;
+      } else {
+        phaseRows.push({ name: phase.phase, done, durationMs: phase.durationMs });
+      }
+      paintPhaseBlock();
+      startTicker();
     },
 
     /**
@@ -114,6 +267,15 @@ export function createPanelRenderer(options: PanelOptions = {}): CliRenderer {
      * render.built({ outDir: "dist", pageCount: 12, durationMs: 840 });
      */
     built(summary) {
+      // Suppressed during a rebuild: a rebuild settles with the compact reload line, not
+      // the full BUILD box (which otherwise reprinted the whole build log every keystroke).
+      if (rebuilding) return;
+
+      // Finalize the live phase block (all rows are done by now) before the summary box.
+      phaseOpen = false;
+      phaseDrawn = 0;
+      stopTicker();
+
       const pages = palette.bold(String(summary.pageCount));
       writeBlock(
         box(
@@ -149,18 +311,60 @@ export function createPanelRenderer(options: PanelOptions = {}): CliRenderer {
     },
 
     /**
-     * Render the post-rebuild line ("~ file" + "✓ rebuilt N pages · Xms · reloaded").
+     * Begin a serve() rebuild: show ONE compact "rebuilding {label}" line (an animated
+     * spinner with live elapsed on a TTY; a plain "~ {label}" line otherwise) and mute
+     * the verbose phase rows + BUILD box until {@link reload}/{@link error} settles it.
+     *
+     * @param label - The changed watch target shown in the line.
+     * @example
+     * render.rebuildStart("content");
+     */
+    rebuildStart(label) {
+      rebuilding = true;
+      rebuildLabel = label;
+      rebuildStartedAt = now();
+      spinnerFrame = 0;
+
+      // Plain/CI: a single "~ label" line; the result line follows from reload().
+      if (!color) {
+        write(`  ${palette.yellow("~")} ${label}`);
+        return;
+      }
+
+      // TTY: draw the spinner line in place and animate it until the rebuild settles.
+      paintRebuildLine();
+      startTicker();
+    },
+
+    /**
+     * Settle the current rebuild: replace the in-place "rebuilding…" line with a compact
+     * "✓ rebuilt N pages · Xms · reloaded" (on a TTY) and re-enable verbose build output.
+     * Called standalone (no preceding {@link rebuildStart}) it also prints the "~ file"
+     * line so the changed target stays visible.
      *
      * @param info - The changed file plus the rebuild's page count and duration.
      * @example
      * render.reload({ file: "content/a.md", pageCount: 12, durationMs: 84 });
      */
     reload(info) {
-      write(`  ${palette.yellow("~")} ${info.file}`);
+      const settledRebuild = rebuilding;
+      rebuilding = false;
+      stopTicker();
+
       const mark = palette.green("✓");
       const count = palette.bold(String(info.pageCount));
-      const meta = palette.dim(`· ${info.durationMs}ms · browser reloaded`);
-      write(`  ${mark} rebuilt ${count} pages ${meta}`);
+      const meta = palette.dim(`· ${info.durationMs}ms · reloaded`);
+      const line = `  ${mark} rebuilt ${count} pages ${meta}`;
+
+      // TTY: overwrite the animated spinner line in place with the result.
+      if (settledRebuild && color) {
+        writeRaw(`\r${CLEAR_LINE}${line}\n`);
+        return;
+      }
+      // Standalone reload(): surface the changed target (rebuildStart already did so in
+      // the plain serve flow, so only add it when no rebuildStart preceded this call).
+      if (!settledRebuild) write(`  ${palette.yellow("~")} ${info.file}`);
+      write(line);
     },
 
     /**
@@ -216,6 +420,12 @@ export function createPanelRenderer(options: PanelOptions = {}): CliRenderer {
      * render.error("build failed", err);
      */
     error(message, cause) {
+      // A failing rebuild settles its in-place spinner line first, then prints the error.
+      if (rebuilding) {
+        rebuilding = false;
+        stopTicker();
+        if (color) writeRaw(`\r${CLEAR_LINE}`);
+      }
       writeError(`  ${palette.red("✗")} ${message}`);
       if (cause !== undefined) writeError(String(cause));
     }

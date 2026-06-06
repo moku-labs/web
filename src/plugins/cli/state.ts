@@ -5,7 +5,7 @@
  * deploy's `defaultSpawn`, so a non-Bun runtime fails coded rather than as a raw
  * `TypeError` and tests can inject fakes). Unit tests swap any of these.
  */
-import { watch } from "node:fs";
+import { statSync, watch } from "node:fs";
 import { createInterface } from "node:readline";
 import { networkUrl } from "./network";
 import { createPanelRenderer } from "./render/panel";
@@ -22,7 +22,11 @@ const YES_PATTERN = /^y(es)?$/i;
 
 /** The minimal `Bun` global surface the static-server seams use. */
 type BunRuntime = {
-  serve(options: { port: number; fetch(request: Request): Response | Promise<Response> }): {
+  serve(options: {
+    port: number;
+    fetch(request: Request): Response | Promise<Response>;
+    idleTimeout?: number;
+  }): {
     stop(): void;
   };
   file(path: string): BodyInit;
@@ -106,13 +110,16 @@ function defaultConfirm(question: string): Promise<boolean> {
  * FS watch is registered.
  *
  * @param dir - The directory to watch recursively.
- * @param onChange - Invoked on any change beneath `dir`.
+ * @param onChange - Invoked on any change beneath `dir`, forwarding the changed path
+ *   relative to `dir` when `node:fs.watch` reports it (`undefined` otherwise).
  * @returns A handle whose `close()` detaches the watcher.
  * @example
- * const handle = defaultWatch("content", () => rebuild());
+ * const handle = defaultWatch("content", file => rebuild(file));
  */
-function defaultWatch(dir: string, onChange: () => void): WatchHandle {
-  const watcher = watch(dir, { recursive: true }, () => onChange());
+function defaultWatch(dir: string, onChange: (filename?: string) => void): WatchHandle {
+  const watcher = watch(dir, { recursive: true }, (_event, filename) =>
+    onChange(typeof filename === "string" ? filename : undefined)
+  );
   return {
     /**
      * Detach the underlying `node:fs.watch` listener.
@@ -124,6 +131,25 @@ function defaultWatch(dir: string, onChange: () => void): WatchHandle {
       watcher.close();
     }
   };
+}
+
+/**
+ * Default file-mtime probe — `node:fs.statSync(path).mtimeMs`, returning `null` for a
+ * missing path (so a deleted file still reads as a change). serve() compares this
+ * across `fs.watch` events to drop the duplicate notifications macOS fires per save.
+ *
+ * @param filePath - The absolute path to stat.
+ * @returns The modification time in epoch milliseconds, or `null` when absent.
+ * @example
+ * const mtime = defaultFileMtime("/abs/content/a.md");
+ */
+function defaultFileMtime(filePath: string): number | null {
+  try {
+    return statSync(filePath).mtimeMs;
+  } catch {
+    // eslint-disable-next-line unicorn/no-null -- contract: null signals a missing file (treated as a change).
+    return null;
+  }
 }
 
 /**
@@ -162,6 +188,7 @@ export function createState(_ctx: {
     watch: defaultWatch,
     serveStatic: defaultServeStatic,
     fileResponse: defaultFileResponse,
-    networkUrl: defaultNetworkUrl
+    networkUrl: defaultNetworkUrl,
+    fileMtime: defaultFileMtime
   };
 }
