@@ -110,6 +110,7 @@
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
+    "test:cli-e2e": "bun test src/plugins/cli/__tests__/e2e/",
     "test:coverage": "vitest run --project unit --project integration --coverage"
   }
 }
