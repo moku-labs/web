@@ -2,7 +2,7 @@
  * @file build phase — not-found. Emits `outDir/404.html` from configured route
  * content or a built-in default. Gated by `config.notFound` (false/unset disables).
  */
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { PhaseContext } from "../types";
 
@@ -37,10 +37,40 @@ function wrap(body: string): string {
 }
 
 /**
+ * Resolve the 404 page HTML from `config.notFound`. Precedence: `path` (a
+ * complete page file, read verbatim) > `body` (a fragment, wrapped in the
+ * minimal shell) > the built-in default.
+ *
+ * @param notFound - The `config.notFound` value (already known to be truthy).
+ * @returns The complete HTML document to write.
+ * @example
+ * ```ts
+ * const html = await resolveHtml({ path: "src/404.html" });
+ * ```
+ */
+async function resolveHtml(notFound: true | { body?: string; path?: string }): Promise<string> {
+  // `{ path }` — the app owns a complete document; emit it byte-for-byte.
+  if (typeof notFound === "object" && notFound.path) {
+    try {
+      return await readFile(notFound.path, "utf8");
+    } catch (error) {
+      throw new Error(`build:not-found — could not read notFound.path "${notFound.path}"`, {
+        cause: error
+      });
+    }
+  }
+
+  // `{ body }` fragment, or the built-in default — wrapped in the minimal shell.
+  const body = typeof notFound === "object" && notFound.body ? notFound.body : DEFAULT_BODY;
+  return wrap(body);
+}
+
+/**
  * Emits `outDir/404.html`. When `config.notFound` is `true`, writes the built-in
- * default page; when it is `{ body }`, writes the supplied HTML body content
- * verbatim inside the document shell. No-op (returns `null`) when `notFound` is
- * false/unset.
+ * default page; `{ body }` writes the supplied HTML body content inside the
+ * minimal document shell; `{ path }` writes the referenced HTML page file
+ * verbatim (the app owns the whole document). No-op (returns `null`) when
+ * `notFound` is false/unset.
  *
  * @param ctx - Plugin context (provides `config`, `log`).
  * @returns The written file path, or `null` when disabled.
@@ -58,10 +88,10 @@ export async function generateNotFound(
     // eslint-disable-next-line unicorn/no-null -- `null` signals a disabled phase
     return null;
   }
-  const body = typeof notFound === "object" && notFound.body ? notFound.body : DEFAULT_BODY;
+  const html = await resolveHtml(notFound);
   await mkdir(outDir, { recursive: true });
   const file = path.join(outDir, "404.html");
-  await writeFile(file, wrap(body), "utf8");
+  await writeFile(file, html, "utf8");
   ctx.log.debug("build:not-found", { path: file });
   return { path: file };
 }
