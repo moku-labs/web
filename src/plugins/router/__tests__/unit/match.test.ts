@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { compileRoutes } from "../../builders/compile";
 import { createMatchFunction, extractParams, matchRoute } from "../../builders/match";
 import { route } from "../../builders/route-builder";
+import { createPathMatcher } from "../../iso-match";
 import type { CompileInput } from "../../types";
 
 /** Standard compile input used across the match scenarios. */
@@ -44,8 +45,8 @@ describe("createMatchFunction()", () => {
   it("returns null on no match", () => {
     const m = createMatchFunction(
       {
-        withLang: new URLPattern({ pathname: "/:lang(en|uk)/:slug" }),
-        bare: new URLPattern({ pathname: "/:slug" })
+        withLang: createPathMatcher("/:lang(en|uk)/:slug"),
+        bare: createPathMatcher("/:slug")
       },
       "en"
     );

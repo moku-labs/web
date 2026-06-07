@@ -4,8 +4,10 @@
  * The single source of the specificity ordering + matcher compilation shared by
  * the server route table (`builders/match.ts` / `builders/compile.ts`) and the
  * browser SPA JSON nav. Pattern strings are JSON-serializable; matchers are
- * reconstructed lazily on the client from those strings. `URLPattern` is read as
- * a global (engines.node>=24), so this module imports nothing.
+ * reconstructed lazily on the client from those strings. Matchers compile to a
+ * native `RegExp` ({@link createPathMatcher}) rather than the `URLPattern` global,
+ * so route resolution runs in every engine — Safari < 18.4 and Firefox < ~142 ship
+ * no `URLPattern` and would otherwise throw on boot. This module imports nothing.
  */
 
 /** A parsed `{name}` / `{name:?}` placeholder within one path segment. */
@@ -136,9 +138,132 @@ export function extractGroups(groups: Record<string, string | undefined>): Recor
 }
 
 /**
+ * A compiled, engine-agnostic path matcher: the same `.exec({ pathname })` shape the
+ * router consumed from `URLPattern`, but backed by a native `RegExp` with named
+ * groups. Dropping `URLPattern` keeps route matching alive in every browser engine —
+ * Safari < 18.4 and Firefox < ~142 have no `URLPattern` global and would otherwise
+ * throw `ReferenceError` the instant the router compiles its table on boot.
+ */
+export interface PathMatcher {
+  /**
+   * Match a pathname, mirroring `URLPattern.exec`: the named-group bag (under
+   * `pathname.groups`) on a hit, or `null` on a miss.
+   *
+   * @param input - The match input carrying the `pathname` to test.
+   * @param input.pathname - The URL pathname to match, e.g. `/en/hello/`.
+   * @returns A `{ pathname: { groups } }` result on a match, or `null` on no match.
+   */
+  exec(input: {
+    readonly pathname: string;
+  }): { readonly pathname: { readonly groups: Record<string, string | undefined> } } | null;
+}
+
+/** Regex metacharacters escaped when a static path segment is inlined into a compiled pattern. */
+const REGEX_METACHARS = /[.*+?^${}()|[\]\\]/g;
+
+/** Matches a `:name` or `:name(regex)` URLPattern group occupying one whole segment. */
+const NAMED_GROUP = /^:([A-Za-z_]\w*)(?:\((.+)\))?$/;
+
+/**
+ * Escape a static path segment so its literal text matches verbatim inside the
+ * compiled `RegExp` (a segment like `c++` must not be read as regex syntax).
+ *
+ * @param text - The static segment text.
+ * @returns The regex-escaped segment.
+ * @example
+ * ```ts
+ * escapeStaticSegment("about"); // "about"
+ * ```
+ */
+function escapeStaticSegment(text: string): string {
+  return text.replaceAll(REGEX_METACHARS, String.raw`\$&`);
+}
+
+/**
+ * Compile one URLPattern source segment (no surrounding slash) into a regex fragment
+ * that captures a single path segment: `:name` → a named `[^/]+` group, `:name(re)` →
+ * a named group constrained by `re`, and static text → its escaped literal.
+ *
+ * @param segment - One source segment, e.g. `:slug`, `:lang(en|uk)`, or `archive`.
+ * @returns The regex fragment for that segment.
+ * @example
+ * ```ts
+ * segmentToRegex(":lang(en|uk)"); // "(?<lang>en|uk)"
+ * ```
+ */
+function segmentToRegex(segment: string): string {
+  const named = NAMED_GROUP.exec(segment);
+  if (named) {
+    const [, name, constraint] = named;
+    return `(?<${name}>${constraint ?? "[^/]+"})`;
+  }
+  return escapeStaticSegment(segment);
+}
+
+/**
+ * Compile a URLPattern pathname source string into a {@link PathMatcher} backed by a
+ * native `RegExp` — a drop-in replacement for `new URLPattern({ pathname })` over the
+ * subset the router emits: `:name`, `:name(regex)`, the optional `:name?` segment
+ * (whose leading `/` is absorbed, so `/:lang?` matches `/en` or nothing), static
+ * segments, and a required trailing slash. Anchored full-match, like `URLPattern`.
+ *
+ * @param source - The URLPattern pathname source, e.g. `/:lang?/:slug/`.
+ * @returns A matcher whose `.exec({ pathname })` yields named groups or `null`.
+ * @example
+ * ```ts
+ * const m = createPathMatcher("/:lang?/:slug/");
+ * m.exec({ pathname: "/en/hello/" }); // { pathname: { groups: { lang: "en", slug: "hello" } } }
+ * ```
+ */
+export function createPathMatcher(source: string): PathMatcher {
+  const segments = source.split("/");
+
+  // Rebuild the source as an anchored regex, segment by segment. segments[0] is the
+  // empty string before the leading slash; each later segment carries its own `/`.
+  let pattern = "^";
+  for (let index = 1; index < segments.length; index += 1) {
+    const segment = segments[index] ?? "";
+
+    // Empty final segment ⇒ the pattern ended with `/` ⇒ require a literal trailing slash.
+    if (segment === "") {
+      pattern += "/";
+      continue;
+    }
+
+    // A `?` modifier makes the segment AND its leading slash optional (path-to-regexp
+    // prefix semantics) — this is how `{lang:?}` matches both `/en/x/` and `/x/`.
+    const optional = segment.endsWith("?");
+    const fragment = segmentToRegex(optional ? segment.slice(0, -1) : segment);
+    pattern += optional ? `(?:/${fragment})?` : `/${fragment}`;
+  }
+  pattern += "$";
+
+  const regexp = new RegExp(pattern);
+  return {
+    /**
+     * Run the compiled regex over a pathname (the {@link PathMatcher.exec} contract).
+     *
+     * @param input - The match input carrying the `pathname` to test.
+     * @param input.pathname - The URL pathname to match, e.g. `/en/hello/`.
+     * @returns A `{ pathname: { groups } }` result on a match, or `null` on no match.
+     * @example
+     * ```ts
+     * matcher.exec({ pathname: "/en/hello/" });
+     * ```
+     */
+    exec(input: { readonly pathname: string }) {
+      const result = regexp.exec(input.pathname);
+      // eslint-disable-next-line unicorn/no-null -- matcher contract returns `null` on miss
+      if (!result) return null;
+      return { pathname: { groups: result.groups ?? {} } };
+    }
+  };
+}
+
+/**
  * Compiles a pattern string into a pure matcher: given a pathname it returns the
- * extracted params, or `null` on no match. Uses the global `URLPattern`; the
- * client recompiles matchers lazily (module-cached) from the strings shipped by
+ * extracted params, or `null` on no match. Uses a native-RegExp {@link PathMatcher};
+ * the client recompiles matchers lazily (module-cached) from the strings shipped by
  * `clientManifest()`.
  *
  * @param pattern - The route pattern string.
@@ -152,7 +277,7 @@ export function extractGroups(groups: Record<string, string | undefined>): Recor
 export function compileClientMatcher(
   pattern: string
 ): (pathname: string) => Record<string, string> | null {
-  const matcher = new URLPattern({ pathname: toUrlPatternSource(pattern) });
+  const matcher = createPathMatcher(toUrlPatternSource(pattern));
   return (pathname: string): Record<string, string> | null => {
     const result = matcher.exec({ pathname });
     // eslint-disable-next-line unicorn/no-null -- matcher contract returns `null` on miss

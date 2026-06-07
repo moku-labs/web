@@ -7,7 +7,13 @@
  * only (`CompileInput`) — never the plugin ctx.
  */
 
-import { bySpecificity, dynamicSegmentCount, parsePlaceholder } from "../iso-match";
+import type { PathMatcher } from "../iso-match";
+import {
+  bySpecificity,
+  createPathMatcher,
+  dynamicSegmentCount,
+  parsePlaceholder
+} from "../iso-match";
 import type {
   CompiledRoute,
   CompileInput,
@@ -239,11 +245,11 @@ export function buildFilePath(pattern: string, params: Record<string, string>): 
 function buildMatchers(
   pattern: string,
   locales: readonly string[]
-): { readonly withLang: URLPattern; readonly bare: URLPattern } {
+): { readonly withLang: PathMatcher; readonly bare: PathMatcher } {
   const langRegex = `(${locales.join("|")})`;
   return {
-    withLang: new URLPattern({ pathname: patternToUrlPattern(pattern, "withLang", langRegex) }),
-    bare: new URLPattern({ pathname: patternToUrlPattern(pattern, "bare", langRegex) })
+    withLang: createPathMatcher(patternToUrlPattern(pattern, "withLang", langRegex)),
+    bare: createPathMatcher(patternToUrlPattern(pattern, "bare", langRegex))
   } as const;
 }
 
