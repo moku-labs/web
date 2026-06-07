@@ -4,9 +4,15 @@
  * bare path that points at the default-locale-prefixed URL. Deliberately does NOT
  * emit a Cloudflare `_redirects` catch-all (an SSG infinite-loop trap). Gated by
  * `config.localeRedirects` (false/unset disables).
+ *
+ * When `head.defaultOgImage` is configured, each redirect page ALSO carries the
+ * site-level Open Graph / Twitter block (`head.siteHead`) so a social crawler that
+ * fetches the apex domain (or any locale-less alias) — and does not follow the
+ * meta-refresh — still gets a branded preview card. No image configured ⇒ bare redirect.
  */
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { headPlugin } from "../../head";
 import { i18nPlugin } from "../../i18n";
 import { routerPlugin } from "../../router";
 import type { GenerateContext, RouteDefinition, TypedRoute } from "../../router/types";
@@ -27,20 +33,22 @@ type RouterSlice = {
 };
 
 /**
- * Render a redirect HTML page: a `0;url` refresh meta + a canonical link to `target`.
+ * Render a redirect HTML page: a `0;url` refresh meta + a canonical link to `target`,
+ * with an optional site-level OG/Twitter block injected at the end of `<head>`.
  *
  * @param target - The default-locale-prefixed URL to redirect to.
+ * @param headExtra - Extra `<head>` inner HTML (the site-level OG block), or `""` for none.
  * @returns The complete redirect HTML document string.
  * @example
  * ```ts
- * redirectHtml("/en/about/");
+ * redirectHtml("/en/about/", '<meta property="og:image" content="…">');
  * ```
  */
-function redirectHtml(target: string): string {
+function redirectHtml(target: string, headExtra = ""): string {
   return (
     `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
     `<meta http-equiv="refresh" content="0;url=${target}">` +
-    `<link rel="canonical" href="${target}"></head>` +
+    `<link rel="canonical" href="${target}">${headExtra}</head>` +
     `<body><a href="${target}">Redirecting…</a></body></html>`
   );
 }
@@ -159,19 +167,21 @@ async function expandRedirects(
  * @param job.file - The redirect page's output path, relative to `outDir`.
  * @param job.target - The absolute default-locale URL the page redirects to.
  * @param outDir - The build output directory the file is resolved against.
+ * @param headExtra - The site-level OG block to inject into `<head>`, or `""` for none.
  * @returns Resolves once the redirect HTML page is written.
  * @example
  * ```ts
- * await writeRedirectFile({ file: "about/index.html", target: "/en/about/" }, "dist");
+ * await writeRedirectFile({ file: "about/index.html", target: "/en/about/" }, "dist", "");
  * ```
  */
 async function writeRedirectFile(
   job: { file: string; target: string },
-  outDir: string
+  outDir: string,
+  headExtra = ""
 ): Promise<void> {
   const filePath = path.join(outDir, job.file);
   await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, redirectHtml(job.target), "utf8");
+  await writeFile(filePath, redirectHtml(job.target, headExtra), "utf8");
 }
 
 /**
@@ -209,8 +219,18 @@ export async function generateLocaleRedirects(
   );
   const jobs = jobLists.flat();
 
-  // Persist one redirect HTML page per job into outDir.
-  await Promise.all(jobs.map(job => writeRedirectFile(job, ctx.config.outDir)));
+  // Resolve the head API once (a hard build dependency; guarded so phase-unit mocks that
+  // omit it still produce bare redirects). `siteHead` returns "" unless a default OG image
+  // is configured, so apps that opt out keep the exact bare redirect (no behavior change).
+  const head = ctx.has("head") ? ctx.require(headPlugin) : undefined;
+
+  // Persist one redirect HTML page per job into outDir, each carrying the site-level OG block.
+  await Promise.all(
+    jobs.map(job => {
+      const headExtra = head ? head.siteHead({ url: job.target, locale: defaultLocale }) : "";
+      return writeRedirectFile(job, ctx.config.outDir, headExtra);
+    })
+  );
 
   ctx.log.debug("build:locale-redirects", { written: jobs.length });
   return { written: jobs.length };

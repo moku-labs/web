@@ -176,4 +176,20 @@ export type Api = {
    * ```
    */
   render(route: ResolvedRoute, data: unknown): string;
+  /**
+   * Compose the SITE-LEVEL `<head>` Open Graph / Twitter block for a bare-path redirect or
+   * landing page that has no route identity (e.g. the apex-domain `/` redirect a
+   * `localeRedirects` build emits). Returns `""` UNLESS `defaultOgImage` is configured, so
+   * apps that opt out keep a bare redirect. Pulled synchronously by `build`.
+   *
+   * @param input - The landing URL (resolved to an absolute canonical) plus an optional locale.
+   * @param input.url - The page's URL or path (absolutized via `site.canonical`) → `og:url`.
+   * @param input.locale - Optional locale whose `og:locale` is emitted (e.g. the default locale).
+   * @returns The serialized inner HTML of the site-level head block, or `""` when disabled.
+   * @example
+   * ```ts
+   * api.siteHead({ url: "/en/", locale: "en" });
+   * ```
+   */
+  siteHead(input: { url: string; locale?: string }): string;
 };

@@ -112,4 +112,41 @@ describe("build/phases/locale-redirects", () => {
     await generateLocaleRedirects(ctx);
     expect(existsSync(path.join(tmp, "_redirects"))).toBe(false);
   });
+
+  it("injects the head plugin's site-level OG block into each bare redirect", async () => {
+    const ctx = makeCtx({
+      config: { outDir: tmp, localeRedirects: true },
+      requireMap: {
+        router: {
+          manifest: () => [makeRoute("/{lang:?}/")],
+          entries: makeEntries([{ name: "home", pattern: "/{lang:?}/" }])
+        },
+        i18n: { locales: () => ["en", "uk"], defaultLocale: () => "en" },
+        head: {
+          // Mirrors head.siteHead's contract: og:url echoes the redirect target.
+          siteHead: ({ url }: { url: string; locale?: string }) =>
+            `<meta property="og:image" content="https://blog.dev/og-default.png">` +
+            `<meta property="og:url" content="${url}">`
+        }
+      }
+    });
+    const result = await generateLocaleRedirects(ctx);
+    expect(result?.written).toBeGreaterThan(0);
+    const html = readFileSync(path.join(tmp, "index.html"), "utf8");
+
+    // The OG block is present, carries the target as og:url, and sits inside <head>.
+    expect(html).toContain('<meta property="og:image" content="https://blog.dev/og-default.png">');
+    expect(html).toContain('<meta property="og:url" content="/en/">');
+    expect(html.indexOf("og:image")).toBeLessThan(html.indexOf("</head>"));
+    // Still a redirect.
+    expect(html).toContain('http-equiv="refresh"');
+  });
+
+  it("emits a bare redirect (no OG) when the head plugin is absent", async () => {
+    const ctx = ctxWith([{ name: "home", pattern: "/{lang:?}/" }]);
+    await generateLocaleRedirects(ctx);
+    const html = readFileSync(path.join(tmp, "index.html"), "utf8");
+    expect(html).not.toContain("og:image");
+    expect(html).toContain('http-equiv="refresh"');
+  });
 });

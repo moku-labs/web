@@ -58,6 +58,27 @@ export type ComposeInput = {
   router: RouterSlice;
 };
 
+/**
+ * Inputs for {@link composeSiteHead} — the SITE-LEVEL head block emitted on a bare-path
+ * redirect/landing page that has no route identity of its own (e.g. the apex-domain `/`
+ * redirect a `localeRedirects` build writes).
+ *
+ * @example
+ * ```ts
+ * const input: SiteHeadInput = { site, defaults, url: "https://blog.dev/en/" };
+ * ```
+ */
+export type SiteHeadInput = {
+  /** The resolved `site` plugin API slice. */
+  site: SiteSlice;
+  /** The normalized head defaults (provides `defaultOgImage` / `twitterCard` / `twitterHandle`). */
+  defaults: HeadDefaults;
+  /** Absolute canonical URL this landing page represents (typically the default-locale target). */
+  url: string;
+  /** Optional `og:locale` value (e.g. the default locale's `ogLocale`). */
+  ogLocale?: string;
+};
+
 /** The `x-default` hreflang sentinel locale. */
 const X_DEFAULT = "x-default";
 
@@ -208,6 +229,51 @@ export function composeHead(input: ComposeInput): HeadElement[] {
     head.canonical ?? site.canonical(router.toUrl(route.name, { ...route.params }));
   const base = buildBaseElements(input, { title, description, canonicalUrl });
   return dedupeByKey([...base, ...(head.elements ?? [])]);
+}
+
+/**
+ * Compose the SITE-LEVEL Open Graph / Twitter block for a bare-path redirect or landing
+ * page that has no per-route head of its own. Returns `[]` UNLESS a `defaultOgImage` is
+ * configured — so apps that opt out keep a bare redirect (no behavior change). The site
+ * name + description become the card's title/description (`og:type=website`); `url` is the
+ * canonical the page points at. A bare article/tag alias gets this site card as a fallback;
+ * crawlers that honor the page's `rel=canonical` still resolve the per-route card.
+ *
+ * @param input - The site slice, head defaults, landing URL, and optional `og:locale`.
+ * @returns The ordered site-level head element set, or `[]` when no default image is set.
+ * @example composeSiteHead({ site, defaults, url: "https://blog.dev/en/", ogLocale: "en_US" })
+ */
+export function composeSiteHead(input: SiteHeadInput): HeadElement[] {
+  const { site, defaults, url, ogLocale } = input;
+
+  // Gated: a site-level card is only emitted when the app configured a default OG image.
+  const image = defaults.defaultOgImage;
+  if (image === undefined) return [];
+
+  const absoluteImage = resolveImage(image, site);
+  const name = site.name();
+  const description = site.description();
+
+  // og:type=website (a landing page, not an article), with the site name as the headline.
+  const elements: HeadElement[] = [
+    meta("description", description),
+    og("og:type", "website"),
+    og("og:site_name", name),
+    og("og:title", name),
+    og("og:description", description),
+    og("og:url", url),
+    og("og:image", absoluteImage),
+    twitter("twitter:card", defaults.twitterCard),
+    twitter("twitter:title", name),
+    twitter("twitter:description", description),
+    twitter("twitter:image", absoluteImage)
+  ];
+
+  // Optional social attribution: Twitter site handle and Open Graph locale.
+  if (defaults.twitterHandle) elements.push(twitter("twitter:site", defaults.twitterHandle));
+  if (ogLocale) elements.push(og("og:locale", ogLocale));
+
+  return elements;
 }
 
 /**
