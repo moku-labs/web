@@ -218,11 +218,16 @@ export type Config = {
   /** Directory copied verbatim into `outDir` (skipped silently if absent). Default `"public"`. */
   publicDir?: string;
   /**
-   * Emit `outDir/404.html`. `true` for the built-in default page, or
-   * `{ body }` to supply the page's literal HTML body content (written into the
-   * 404 page verbatim). Default `false`.
+   * Emit `outDir/404.html`. One of:
+   * - `true` — the built-in default page.
+   * - `{ body }` — literal HTML body content, wrapped in a minimal document shell.
+   * - `{ path }` — path to a complete HTML page file (resolved from the project
+   *   root), written out VERBATIM so the app owns the whole document (its own
+   *   `<head>`, asset links, and body).
+   *
+   * `path` takes precedence over `body` when both are set. Default `false`.
    */
-  notFound?: boolean | { body?: string };
+  notFound?: boolean | { body?: string; path?: string };
   /** Emit per-path i18n bare-path redirect HTML pages. Default `false`. */
   localeRedirects?: boolean;
   /** Authoritative client bundle entry path (overrides the conventional scan). */

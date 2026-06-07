@@ -53,7 +53,7 @@ The surface mounted on `app.build` (and reachable via `ctx.require(buildPlugin)`
 | `ogImage` | `OgImageConfig \| false` | `false` | OG-image generation. An object enables + configures it (and requires a `fontDir`); `false` disables it. |
 | `injectAssets` | `boolean?` | `true` | Auto-inject bundled `main.{css,js}` into rendered pages. |
 | `publicDir` | `string?` | `"public"` | Directory copied verbatim into `outDir` (skipped silently if absent). |
-| `notFound` | `boolean \| { body?: string }?` | `false` | Emit `outDir/404.html`. `true` = built-in default page; `{ body }` = literal HTML body content. |
+| `notFound` | `boolean \| { body?: string; path?: string }?` | `false` | Emit `outDir/404.html`. `true` = built-in default; `{ body }` = HTML body fragment wrapped in a minimal shell; `{ path }` = complete HTML page file, written verbatim (`path` wins over `body`). |
 | `localeRedirects` | `boolean?` | `false` | Emit per-path i18n bare-path redirect HTML pages. |
 | `clientEntry` | `string?` | — | Authoritative client bundle entry path (overrides the conventional scan). |
 | `template` | `string?` | — | HTML shell template with `<!--moku:head-->` / `<!--moku:body-->` / `<!--moku:assets-->` placeholders. |
