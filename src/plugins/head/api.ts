@@ -8,7 +8,7 @@
 import { i18nPlugin } from "../i18n";
 import { routerPlugin } from "../router";
 import { sitePlugin } from "../site";
-import { composeHead, serializeHead } from "./compose";
+import { composeHead, composeSiteHead, serializeHead } from "./compose";
 import type { Api, HeadDefaults, State } from "./types";
 
 /** Error prefix for head API invariant failures. */
@@ -114,6 +114,34 @@ export function createApi(ctx: ApiContext): Api {
         site: ctx.require(sitePlugin),
         i18n: ctx.require(i18nPlugin),
         router: ctx.require(routerPlugin)
+      });
+      return serializeHead(elements);
+    },
+
+    /**
+     * Compose the site-level OG/Twitter block for a bare-path redirect/landing page. Resolves
+     * `site`/`i18n` via `ctx.require`, absolutizes `url` against the site base, and emits an
+     * `og:locale` for `locale` when supplied. Returns `""` when no `defaultOgImage` is configured.
+     *
+     * @param input - The landing URL/path plus an optional locale (for `og:locale`).
+     * @param input.url - The page's URL or path (absolutized via `site.canonical`) → `og:url`.
+     * @param input.locale - Optional locale whose `og:locale` is emitted.
+     * @returns The serialized inner HTML of the site-level head block, or `""` when disabled.
+     * @example
+     * ```ts
+     * api.siteHead({ url: "/en/", locale: "en" });
+     * ```
+     */
+    siteHead(input) {
+      const site = ctx.require(sitePlugin);
+      const ogLocale =
+        input.locale === undefined ? undefined : ctx.require(i18nPlugin).ogLocale(input.locale);
+      const elements = composeSiteHead({
+        site,
+        defaults: readDefaults(ctx.state),
+        url: site.canonical(input.url),
+        // exactOptionalPropertyTypes: omit `ogLocale` entirely when the locale has none.
+        ...(ogLocale === undefined ? {} : { ogLocale })
       });
       return serializeHead(elements);
     }

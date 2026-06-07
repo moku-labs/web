@@ -46,6 +46,24 @@ function makeCtx(): ApiContext {
   };
 }
 
+/** Build a ctx whose head defaults carry a default OG image (for siteHead tests). */
+function makeCtxWithImage(defaults: Partial<HeadDefaults> = {}): ApiContext {
+  const byName: Record<string, unknown> = {
+    site: makeSite(),
+    i18n: makeI18n(),
+    router: makeRouter()
+  };
+  const withImage: HeadDefaults = {
+    twitterCard: "summary_large_image",
+    defaultOgImage: "/og-default.png",
+    ...defaults
+  };
+  return {
+    state: { defaults: withImage },
+    require: ((plugin: { name: string }) => byName[plugin.name]) as ApiContext["require"]
+  };
+}
+
 describe("head api", () => {
   describe("validateHeadConfig()", () => {
     it("accepts a titleTemplate containing %s", () => {
@@ -121,6 +139,35 @@ describe("head api", () => {
       const api = createApi(makeCtx());
       const route: ResolvedRoute = { path: "/", params: {}, name: "home", head: {} };
       expect(() => api.render(route, {})).not.toThrow();
+    });
+  });
+
+  describe("createApi().siteHead()", () => {
+    it("returns '' when no defaultOgImage is configured", () => {
+      const api = createApi(makeCtx()); // DEFAULTS has no defaultOgImage
+      expect(api.siteHead({ url: "/en/", locale: "en" })).toBe("");
+    });
+
+    it("absolutizes the url (og:url) against the site base and emits the default image", () => {
+      const api = createApi(makeCtxWithImage());
+      const html = api.siteHead({ url: "/en/", locale: "en" });
+      expect(html).toContain('<meta property="og:url" content="https://blog.dev/en/">');
+      expect(html).toContain(
+        '<meta property="og:image" content="https://blog.dev/og-default.png">'
+      );
+      expect(html).toContain('<meta property="og:type" content="website">');
+    });
+
+    it("emits og:locale from i18n when a locale is supplied", () => {
+      const api = createApi(makeCtxWithImage());
+      expect(api.siteHead({ url: "/en/", locale: "en" })).toContain(
+        '<meta property="og:locale" content="en_US">'
+      );
+    });
+
+    it("omits og:locale when no locale is supplied", () => {
+      const api = createApi(makeCtxWithImage());
+      expect(api.siteHead({ url: "/en/" })).not.toContain("og:locale");
     });
   });
 });

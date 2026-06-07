@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ComposeInput } from "../../compose";
-import { composeHead, serializeHead } from "../../compose";
+import type { ComposeInput, SiteHeadInput } from "../../compose";
+import { composeHead, composeSiteHead, serializeHead } from "../../compose";
 import { meta } from "../../primitives";
 import type { HeadDefaults, ResolvedRoute } from "../../types";
 
@@ -60,6 +60,17 @@ function input(overrides: Partial<ComposeInput> = {}): ComposeInput {
     site: makeSite(),
     i18n: makeI18n(),
     router: makeRouter(),
+    ...overrides
+  };
+}
+
+/** Build a SiteHeadInput with sensible defaults + overrides (for composeSiteHead tests). */
+function siteInput(overrides: Partial<SiteHeadInput> = {}): SiteHeadInput {
+  return {
+    site: makeSite(),
+    defaults: DEFAULTS,
+    url: "https://blog.dev/en/",
+    ogLocale: "en_US",
     ...overrides
   };
 }
@@ -224,6 +235,60 @@ describe("head compose", () => {
       ]);
       expect(html).toContain("<title>Hi</title>");
       expect(html).toContain('<meta name="robots" content="index">');
+    });
+  });
+
+  describe("composeSiteHead()", () => {
+    it("returns [] when no defaultOgImage is configured (opt-out keeps a bare redirect)", () => {
+      const elements = composeSiteHead(
+        siteInput({ defaults: { twitterCard: "summary_large_image" } })
+      );
+      expect(elements).toEqual([]);
+    });
+
+    it("emits og:type=website with the site name + description as the card", () => {
+      const html = serializeHead(composeSiteHead(siteInput()));
+      expect(html).toContain('<meta property="og:type" content="website">');
+      expect(html).toContain('<meta property="og:site_name" content="My Site">');
+      expect(html).toContain('<meta property="og:title" content="My Site">');
+      expect(html).toContain('<meta property="og:description" content="Site description">');
+      expect(html).toContain('<meta property="og:url" content="https://blog.dev/en/">');
+    });
+
+    it("absolutizes a relative defaultOgImage against the site base for og + twitter", () => {
+      const html = serializeHead(composeSiteHead(siteInput()));
+      expect(html).toContain(
+        '<meta property="og:image" content="https://blog.dev/default-og.png">'
+      );
+      expect(html).toContain(
+        '<meta name="twitter:image" content="https://blog.dev/default-og.png">'
+      );
+    });
+
+    it("passes an absolute defaultOgImage through unchanged", () => {
+      const html = serializeHead(
+        composeSiteHead(
+          siteInput({
+            defaults: { twitterCard: "summary", defaultOgImage: "https://cdn.example/og.png" }
+          })
+        )
+      );
+      expect(html).toContain('<meta property="og:image" content="https://cdn.example/og.png">');
+    });
+
+    it("emits twitter:card + twitter:site (handle) and og:locale when provided", () => {
+      const html = serializeHead(composeSiteHead(siteInput()));
+      expect(html).toContain('<meta name="twitter:card" content="summary_large_image">');
+      expect(html).toContain('<meta name="twitter:site" content="@moku_labs">');
+      expect(html).toContain('<meta property="og:locale" content="en_US">');
+    });
+
+    it("omits og:locale when no ogLocale is supplied", () => {
+      // Built directly (not via siteInput) so the optional `ogLocale` is truly absent.
+      const html = serializeHead(
+        composeSiteHead({ site: makeSite(), defaults: DEFAULTS, url: "https://blog.dev/en/" })
+      );
+      expect(html).not.toContain("og:locale");
     });
   });
 });
