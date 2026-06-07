@@ -1,6 +1,7 @@
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { h } from "preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Article } from "../../../content/types";
 import { validateConfig } from "../../api";
@@ -274,5 +275,25 @@ describe("build/phases/og-images", () => {
     expect(existsSync(path.join(tmp, "og-default.png"))).toBe(false);
     // Only the article rendered — no site card.
     expect(renderPng).toHaveBeenCalledTimes(1);
+  });
+
+  it("enables the site card when ogImage.defaultCard is a render function", async () => {
+    const ctx = makeCtx({
+      config: {
+        outDir: tmp,
+        ogImage: { fontDir: "./fonts", defaultCard: () => h("div", {}, "custom site card") }
+      },
+      requireMap: {
+        i18n: { defaultLocale: () => "en", locales: () => ["en"] },
+        site: { name: () => "My Blog", description: () => "A dev blog" }
+      }
+    });
+    ctx.state.buildCache.set(CONTENT_CACHE_KEY, new Map([["en", [makeArticle()]]]));
+    const renderPng = vi.fn(async () => new Uint8Array([7]));
+
+    const result = await generateOgImages(ctx, { renderPng });
+
+    expect(result?.defaultCard).toBe(true);
+    expect(existsSync(path.join(tmp, "og-default.png"))).toBe(true);
   });
 });
