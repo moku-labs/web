@@ -178,6 +178,13 @@ export interface OgImageConfig {
   render?(input: RichOgInput): import("preact").VNode;
   /** Explicit named fonts loaded once per build (overrides the first-file scan). */
   fonts?: OgFont[];
+  /**
+   * When `true`, also render a single SITE-LEVEL default card to `<outDir>/og-default.png`
+   * — a generic site name + description on a dark background, using the same loaded fonts (the
+   * per-article `render` hook is NOT applied). Point `head.defaultOgImage` at `"/og-default.png"`
+   * to use it as the og:image fallback for non-article pages. Default `false`.
+   */
+  defaultCard?: boolean;
 }
 
 /**

@@ -28,7 +28,7 @@ const FONT_EXTENSIONS = [".ttf", ".otf", ".woff"] as const;
  *
  * @example
  * ```ts
- * const result: OgImagesResult = { rendered: 2, skipped: 1, peakConcurrency: 2 };
+ * const result: OgImagesResult = { rendered: 2, skipped: 1, peakConcurrency: 2, defaultCard: true };
  * ```
  */
 export type OgImagesResult = {
@@ -38,6 +38,8 @@ export type OgImagesResult = {
   skipped: number;
   /** Peak observed concurrent renders (never exceeds {@link OG_CONCURRENCY}). */
   peakConcurrency: number;
+  /** Whether the site-level default card (`og-default.png`) was written this run. */
+  defaultCard: boolean;
 };
 
 /**
@@ -246,6 +248,64 @@ function defaultCard(input: RichOgInput): VNode {
 }
 
 /**
+ * The built-in SITE-LEVEL default card — the site name over its description on a dark
+ * background, centered. Rendered once (when `ogImage.defaultCard` is true) to `og-default.png`
+ * and used as the `head.defaultOgImage` fallback. Reads `siteName` + `description` from the
+ * {@link RichOgInput}; the per-article `render` hook is deliberately NOT applied here.
+ *
+ * @param input - The rich OG input (only `siteName` + `description` are used).
+ * @returns The Preact `VNode` for the site default card.
+ * @example
+ * ```ts
+ * defaultSiteCard({ ...input, siteName: "My Blog", description: "A dev blog" });
+ * ```
+ */
+function defaultSiteCard(input: RichOgInput): VNode {
+  // Site name headline, with the description as a muted, wrapping subtitle when present.
+  const children: VNode[] = [
+    h(
+      "div",
+      { style: { display: "flex", fontSize: 72, fontWeight: 700, color: "#ffffff" } },
+      input.siteName
+    ) as VNode
+  ];
+  if (input.description) {
+    children.push(
+      h(
+        "div",
+        {
+          style: {
+            display: "flex",
+            marginTop: 28,
+            maxWidth: 900,
+            fontSize: 32,
+            color: "#a1a1aa",
+            textAlign: "center"
+          }
+        },
+        input.description
+      ) as VNode
+    );
+  }
+  return h(
+    "div",
+    {
+      style: {
+        display: "flex",
+        flexDirection: "column",
+        width: "100%",
+        height: "100%",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 80,
+        background: "#0b0b0c"
+      }
+    },
+    ...children
+  ) as VNode;
+}
+
+/**
  * The default PNG renderer: a Preact `VNode` (custom `render` hook or the built-in
  * card) is rendered to SVG by Satori, then rasterized to PNG by resvg. Both native
  * deps are imported LAZILY (browser-safe goal); the VNode→Satori-input cast happens
@@ -348,6 +408,25 @@ function buildInput(
 function resolveSiteName(ctx: Pick<PhaseContext, "require">): string {
   try {
     return ctx.require(sitePlugin).name();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Resolve the site description via `ctx.require(sitePlugin)`, falling back to `""` when the
+ * site API is unavailable (e.g. unit mocks that omit it). Used by the site default card.
+ *
+ * @param ctx - Plugin context (provides `require`).
+ * @returns The site description, or `""` when the site plugin is not wired.
+ * @example
+ * ```ts
+ * resolveSiteDescription(ctx);
+ * ```
+ */
+function resolveSiteDescription(ctx: Pick<PhaseContext, "require">): string {
+  try {
+    return ctx.require(sitePlugin).description();
   } catch {
     return "";
   }
@@ -468,6 +547,10 @@ export async function generateOgImages(
   const fonts = options.renderPng ? [] : await loadFonts(config);
   const renderHook = config.render ? { render: config.render } : {};
   const renderPng = options.renderPng ?? makeDefaultRenderer({ fonts, ...renderHook });
+  // Site card uses the built-in {@link defaultSiteCard} (never the per-article `render` hook); falls
+  // back to the injected `renderPng` under test so unit runs avoid real Satori rasterization.
+  const renderSitePng =
+    options.renderPng ?? makeDefaultRenderer({ fonts, render: defaultSiteCard });
 
   // Gather the inputs: site name, published default-locale articles, and the warmed hash cache.
   const siteName = resolveSiteName(ctx);
@@ -491,13 +574,36 @@ export async function generateOgImages(
     )
   );
 
+  // Optionally render the single site-level default card to `<outDir>/og-default.png`
+  // (a generic siteName + description card; the per-article `render` hook is not applied).
+  const defaultCard = config.defaultCard === true;
+  if (defaultCard) {
+    const siteInput: RichOgInput = {
+      title: siteName,
+      description: resolveSiteDescription(ctx),
+      date: "",
+      tags: [],
+      locale: defaultLocale,
+      siteName,
+      size
+    };
+    const png = await renderSitePng(siteInput);
+    await mkdir(ctx.config.outDir, { recursive: true });
+    await writeFile(path.join(ctx.config.outDir, "og-default.png"), png);
+  }
+
   // Persist the updated hash cache so the next build can skip unchanged articles.
   await persistDiskCache(ctx.config.outDir, cache);
-  ctx.log.debug("build:og-images", { rendered: tally.rendered, skipped: tally.skipped });
+  ctx.log.debug("build:og-images", {
+    rendered: tally.rendered,
+    skipped: tally.skipped,
+    defaultCard
+  });
   return {
     rendered: tally.rendered,
     skipped: tally.skipped,
-    peakConcurrency: tally.peakConcurrency
+    peakConcurrency: tally.peakConcurrency,
+    defaultCard
   };
 }
 
