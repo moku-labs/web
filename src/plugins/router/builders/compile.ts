@@ -188,15 +188,26 @@ export function patternToUrlPattern(
  * param is absent has its segment skipped entirely (no empty segment), so a missing
  * `{lang:?}` collapses cleanly instead of leaving a double slash.
  *
+ * The default locale is served at BARE paths: when `defaultLocale` is given, the
+ * optional `{lang:?}` segment is also skipped for it (so `{ lang: defaultLocale }`
+ * resolves to `/…` while every other locale keeps its `/{locale}/…` prefix).
+ *
  * @param pattern - The route pattern.
  * @param params - Param values to substitute.
+ * @param defaultLocale - The locale served bare (its `{lang:?}` segment is omitted).
  * @returns The resolved relative URL string.
  * @example
  * ```ts
  * buildUrl("/{slug}/", { slug: "hello" }); // "/hello/"
+ * buildUrl("/{lang:?}/", { lang: "en" }, "en"); // "/"
+ * buildUrl("/{lang:?}/", { lang: "ru" }, "en"); // "/ru/"
  * ```
  */
-export function buildUrl(pattern: string, params: Record<string, string>): string {
+export function buildUrl(
+  pattern: string,
+  params: Record<string, string>,
+  defaultLocale?: string
+): string {
   const out: string[] = [];
   for (const segment of pattern.split("/")) {
     const placeholder = parsePlaceholder(segment);
@@ -205,8 +216,13 @@ export function buildUrl(pattern: string, params: Record<string, string>): strin
       continue;
     }
     const value = params[placeholder.name] ?? "";
+
     // Skip an absent optional segment so it collapses (no double slash).
     if (placeholder.optional && value === "") continue;
+
+    // Skip the optional {lang:?} segment for the default locale — it is served bare.
+    if (placeholder.name === "lang" && placeholder.optional && value === defaultLocale) continue;
+
     out.push(value);
   }
   return out.join("/");
@@ -217,14 +233,19 @@ export function buildUrl(pattern: string, params: Record<string, string>): strin
  *
  * @param pattern - The route pattern.
  * @param params - Param values to substitute.
+ * @param defaultLocale - The locale served bare (forwarded to {@link buildUrl}).
  * @returns The output file path, e.g. `hello/index.html`.
  * @example
  * ```ts
  * buildFilePath("/{slug}/", { slug: "hello" });
  * ```
  */
-export function buildFilePath(pattern: string, params: Record<string, string>): string {
-  const url = buildUrl(pattern, params);
+export function buildFilePath(
+  pattern: string,
+  params: Record<string, string>,
+  defaultLocale?: string
+): string {
+  const url = buildUrl(pattern, params, defaultLocale);
   const cleanPath = url.replace(/^\//, "").replace(/\/$/, "");
   return cleanPath === "" ? "index.html" : `${cleanPath}/index.html`;
 }
@@ -259,15 +280,19 @@ function buildMatchers(
  * pattern.
  *
  * @param pattern - The route pattern bound into the closure.
+ * @param defaultLocale - The locale served bare (bound into the closure).
  * @returns A function mapping params to the resolved relative URL.
  * @example
  * ```ts
- * const toUrl = createToUrlFn("/{slug}/");
+ * const toUrl = createToUrlFn("/{slug}/", "en");
  * toUrl({ slug: "x" }); // "/x/"
  * ```
  */
-function createToUrlFunction(pattern: string): (params: Record<string, string>) => string {
-  return (params: Record<string, string>): string => buildUrl(pattern, params);
+function createToUrlFunction(
+  pattern: string,
+  defaultLocale: string
+): (params: Record<string, string>) => string {
+  return (params: Record<string, string>): string => buildUrl(pattern, params, defaultLocale);
 }
 
 /**
@@ -277,19 +302,21 @@ function createToUrlFunction(pattern: string): (params: Record<string, string>) 
  *
  * @param pattern - The route pattern bound into the closure.
  * @param definition - The route definition carrying any `toFile` override.
+ * @param defaultLocale - The locale served bare (bound into the closure).
  * @returns A function mapping params to the output file path.
  * @example
  * ```ts
- * const toFile = createToFileFn("/{slug}/", definition);
+ * const toFile = createToFileFn("/{slug}/", definition, "en");
  * toFile({ slug: "x" }); // "x/index.html"
  * ```
  */
 function createToFileFunction(
   pattern: string,
-  definition: RouteDefinition
+  definition: RouteDefinition,
+  defaultLocale: string
 ): (params: Record<string, string>) => string {
   return (params: Record<string, string>): string =>
-    definition._handlers.toFile?.(params) ?? buildFilePath(pattern, params);
+    definition._handlers.toFile?.(params) ?? buildFilePath(pattern, params, defaultLocale);
 }
 
 /**
@@ -313,9 +340,10 @@ function compileRoute(
   const { pattern } = definition;
   const matchers = buildMatchers(pattern, input.locales);
 
-  // Capture the per-route URL/file builders that close over the pattern.
-  const toUrl = createToUrlFunction(pattern);
-  const toFile = createToFileFunction(pattern, definition);
+  // Capture the per-route URL/file builders, binding the default locale so it is
+  // served bare (its `{lang:?}` prefix is omitted; other locales stay prefixed).
+  const toUrl = createToUrlFunction(pattern, input.defaultLocale);
+  const toFile = createToFileFunction(pattern, definition, input.defaultLocale);
 
   // Assemble the compiled entry: matchers, match fn, builders, and metadata.
   return {

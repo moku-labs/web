@@ -102,6 +102,13 @@ type RenderShell = {
   readonly assets: string;
   /** The shell template HTML, or `null` to use the in-code shell. */
   readonly template: string | null;
+  /**
+   * The i18n default locale. It is served at BARE paths (the canonical URL); each
+   * default-locale page on a `{lang:?}` route is ALSO emitted at `/{defaultLocale}/`
+   * (a content-identical alias whose canonical already points to bare), so explicit
+   * `/{defaultLocale}/…` links keep resolving with no redirect.
+   */
+  readonly defaultLocale: string;
 };
 
 /**
@@ -525,7 +532,25 @@ async function writeDocument(
   params: Record<string, string>,
   html: string
 ): Promise<void> {
-  const filePath = path.join(outDir, entry.toFile(params));
+  await writeDocumentAt(outDir, entry.toFile(params), html);
+}
+
+/**
+ * Write an HTML document to an explicit relative path under `outDir`, creating parent
+ * directories first. Backs both the canonical page path ({@link writeDocument}) and the
+ * default-locale `/{defaultLocale}/…` alias copy ({@link renderInstance}).
+ *
+ * @param outDir - The build output directory.
+ * @param relativeFile - The output file path relative to `outDir` (e.g. `en/index.html`).
+ * @param html - The complete HTML document to write.
+ * @returns A promise resolved once the file is written.
+ * @example
+ * ```ts
+ * await writeDocumentAt("dist", "en/about/index.html", "<!DOCTYPE html>…");
+ * ```
+ */
+async function writeDocumentAt(outDir: string, relativeFile: string, html: string): Promise<void> {
+  const filePath = path.join(outDir, relativeFile);
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, html, "utf8");
 }
@@ -536,14 +561,19 @@ async function writeDocument(
  * `<head>`/body → assemble the document (template fill or in-code shell) → write.
  * Uses the configured shell `template` when supplied, otherwise the in-code shell.
  *
+ * The default locale is served at BARE paths, so each default-locale page on a
+ * `{lang:?}` route is ALSO written to `/{defaultLocale}/…` — the SAME rendered HTML (its
+ * canonical already points at the bare URL) — so an explicit `/{defaultLocale}/…` link
+ * serves the page directly with no redirect. Both pages are returned so each gets a sidecar.
+ *
  * @param ctx - Plugin context (provides `require`, `state`, `config`, `has`).
  * @param instance - The concrete page instance to render.
- * @param shell - Per-build wiring shared across instances (asset tags + template).
+ * @param shell - Per-build wiring shared across instances (asset tags + template + default locale).
  * @param reuse - Whether this run may reuse a cached body (incremental, no code change).
- * @returns The instance's URL, rendered HTML, loaded data, and client-nav flag.
+ * @returns The rendered page(s): the canonical page, plus the `/{defaultLocale}/` alias when emitted.
  * @example
  * ```ts
- * await renderInstance(ctx, instance, { assets: "", template: null }, false);
+ * await renderInstance(ctx, instance, shell, false);
  * ```
  */
 async function renderInstance(
@@ -551,7 +581,7 @@ async function renderInstance(
   instance: PageInstance,
   shell: RenderShell,
   reuse: boolean
-): Promise<RenderedPage> {
+): Promise<RenderedPage[]> {
   const { definition, entry, params, locale } = instance;
   const router = ctx.require(routerPlugin);
 
@@ -579,10 +609,23 @@ async function renderInstance(
   const html =
     shell.template === null ? renderDocument(parts) : fillTemplate(shell.template, parts);
 
-  // Persist the document. A route with a `.render()` is client-navigable and so always
-  // gets a data sidecar (see writeDataSidecars).
+  // Persist the canonical document. A route with a `.render()` is client-navigable and so
+  // always gets a data sidecar (see writeDataSidecars).
   await writeDocument(ctx.config.outDir, entry, params, html);
-  return { url, html, data, clientNavigable: definition._handlers.render !== undefined };
+  const clientNavigable = definition._handlers.render !== undefined;
+  const pages: RenderedPage[] = [{ url, html, data, clientNavigable }];
+
+  // Default locale served bare: also emit the content-identical `/{defaultLocale}/` alias
+  // so explicit prefixed links resolve without a redirect (canonical still points to bare).
+  if (locale === shell.defaultLocale && entry.pattern.includes("{lang:?}")) {
+    await writeDocumentAt(
+      ctx.config.outDir,
+      `${shell.defaultLocale}/${entry.toFile(params)}`,
+      html
+    );
+    pages.push({ url: `/${shell.defaultLocale}${url}`, html, data, clientNavigable });
+  }
+  return pages;
 }
 
 // ── Phase orchestration (manifest → all pages → data sidecars → root capture) ────
@@ -592,21 +635,27 @@ async function renderInstance(
  * shell `template` from disk when configured + present, and precompute the injected
  * asset tags. `template` is `null` when unset/missing (use the in-code shell).
  *
- * @param ctx - Plugin context (provides `config`, `state`).
- * @returns The shared shell wiring (asset tags + template-or-null) for every page.
+ * @param ctx - Plugin context (provides `config`, `state`, `require`).
+ * @returns The shared shell wiring (asset tags + template-or-null + default locale) for every page.
  * @example
  * ```ts
  * const shell = await prepareShell(ctx);
  * ```
  */
-async function prepareShell(ctx: Pick<PhaseContext, "state" | "config">): Promise<RenderShell> {
+async function prepareShell(
+  ctx: Pick<PhaseContext, "state" | "config" | "require">
+): Promise<RenderShell> {
   const templatePath = ctx.config.template;
   const template =
     typeof templatePath === "string" && existsSync(templatePath)
       ? await readFile(templatePath, "utf8")
       : // eslint-disable-next-line unicorn/no-null -- `null` = use the in-code shell
         null;
-  return { assets: buildAssetTags(ctx), template };
+  return {
+    assets: buildAssetTags(ctx),
+    template,
+    defaultLocale: ctx.require(i18nPlugin).defaultLocale()
+  };
 }
 
 /**
@@ -776,9 +825,12 @@ export async function renderPages(
   const shell = await prepareShell(ctx);
   const instances = await expandAllInstances(manifest, locales, byPattern, ctx);
   const batchSize = reuse ? INCREMENTAL_BATCH_SIZE : RENDER_BATCH_SIZE;
-  const rendered = await renderInBatches(instances, batchSize, instance =>
+  // Each instance yields one canonical page plus, for the default locale, its bare
+  // `/{defaultLocale}/` alias — flatten so both feed sidecar writing + root capture.
+  const renderedBatches = await renderInBatches(instances, batchSize, instance =>
     renderInstance(ctx, instance, shell, reuse)
   );
+  const rendered = renderedBatches.flat();
 
   // Persist client-data sidecars (hybrid/spa) + capture the root page for root-index.
   await writeDataSidecars(ctx, rendered, router.mode());

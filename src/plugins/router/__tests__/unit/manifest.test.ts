@@ -53,11 +53,13 @@ describe("entries()", () => {
     expect(entries.at(-1)?.name).toBe("post");
   });
 
-  it("entries expose toUrl/toFile/match utilities", () => {
+  it("entries expose toUrl/toFile/match utilities (default locale served bare)", () => {
     const api = makeApi({ article: route("/{lang:?}/{slug}/") });
     const e = api.entries()[0];
-    expect(e?.toUrl({ lang: "en", slug: "x" })).toBe("/en/x/");
-    expect(e?.toFile({ lang: "en", slug: "x" })).toBe("en/x/index.html");
+    // Default locale (en) → bare; non-default keeps its prefix.
+    expect(e?.toUrl({ lang: "en", slug: "x" })).toBe("/x/");
+    expect(e?.toFile({ lang: "en", slug: "x" })).toBe("x/index.html");
+    expect(e?.toUrl({ lang: "uk", slug: "x" })).toBe("/uk/x/");
     expect(e?.match("/uk/y/")).toEqual({ lang: "uk", slug: "y" });
   });
 
@@ -84,9 +86,10 @@ describe("match()", () => {
 });
 
 describe("toUrl()", () => {
-  it("substitutes params for a named route", () => {
+  it("substitutes params for a named route (default locale served bare)", () => {
     const api = makeApi({ article: route("/{lang:?}/{slug}/") });
-    expect(api.toUrl("article", { lang: "en", slug: "hi" })).toBe("/en/hi/");
+    expect(api.toUrl("article", { lang: "en", slug: "hi" })).toBe("/hi/");
+    expect(api.toUrl("article", { lang: "uk", slug: "hi" })).toBe("/uk/hi/");
   });
 
   it("throws on an unknown route name", () => {

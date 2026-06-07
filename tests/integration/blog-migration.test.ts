@@ -151,10 +151,13 @@ describe("integration: future blog migration (end-to-end)", () => {
     const out = path.join(tmp, "dist");
     await makeMigratedBlog(out, byLocale).build.run();
 
-    const html = readFileSync(path.join(out, "en", "hello-world", "index.html"), "utf8");
+    // The default locale (en) is served bare: the canonical article lives at `/hello-world/`
+    // (and also at the `/en/hello-world/` alias, whose canonical points here).
+    const html = readFileSync(path.join(out, "hello-world", "index.html"), "utf8");
     expect(html).toContain("<title>Hello World — Moku Blog</title>");
     expect(html).toContain('rel="canonical"');
-    expect(html).toContain(`${SITE.url}/en/hello-world/`);
+    expect(html).toContain(`${SITE.url}/hello-world/`);
+    expect(existsSync(path.join(out, "en", "hello-world", "index.html"))).toBe(true);
     // hreflang alternates for both locales + x-default.
     expect(html).toContain('hreflang="en"');
     expect(html).toContain('hreflang="uk"');
