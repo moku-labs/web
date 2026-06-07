@@ -547,10 +547,12 @@ export async function generateOgImages(
   const fonts = options.renderPng ? [] : await loadFonts(config);
   const renderHook = config.render ? { render: config.render } : {};
   const renderPng = options.renderPng ?? makeDefaultRenderer({ fonts, ...renderHook });
-  // Site card uses the built-in {@link defaultSiteCard} (never the per-article `render` hook); falls
-  // back to the injected `renderPng` under test so unit runs avoid real Satori rasterization.
-  const renderSitePng =
-    options.renderPng ?? makeDefaultRenderer({ fonts, render: defaultSiteCard });
+  // Site card renderer: a `defaultCard` function is the consumer's own card; otherwise the built-in
+  // generic {@link defaultSiteCard}. NEVER the per-article `render` hook. Falls back to the injected
+  // `renderPng` under test so unit runs avoid real Satori rasterization.
+  const siteCardRender =
+    typeof config.defaultCard === "function" ? config.defaultCard : defaultSiteCard;
+  const renderSitePng = options.renderPng ?? makeDefaultRenderer({ fonts, render: siteCardRender });
 
   // Gather the inputs: site name, published default-locale articles, and the warmed hash cache.
   const siteName = resolveSiteName(ctx);
@@ -574,9 +576,9 @@ export async function generateOgImages(
     )
   );
 
-  // Optionally render the single site-level default card to `<outDir>/og-default.png`
-  // (a generic siteName + description card; the per-article `render` hook is not applied).
-  const defaultCard = config.defaultCard === true;
+  // Optionally render the single site-level default card to `<outDir>/og-default.png` — enabled by
+  // `defaultCard: true` (built-in card) OR a `defaultCard` render function (the consumer's own card).
+  const defaultCard = config.defaultCard === true || typeof config.defaultCard === "function";
   if (defaultCard) {
     const siteInput: RichOgInput = {
       title: siteName,
