@@ -244,4 +244,35 @@ describe("build/phases/og-images", () => {
       rmSync(noFonts, { recursive: true, force: true });
     }
   });
+
+  it("writes the site default card to og-default.png when ogImage.defaultCard is true", async () => {
+    const ctx = makeCtx({
+      config: { outDir: tmp, ogImage: { fontDir: "./fonts", defaultCard: true } },
+      requireMap: {
+        i18n: { defaultLocale: () => "en", locales: () => ["en"] },
+        site: { name: () => "My Blog", description: () => "A dev blog" }
+      }
+    });
+    ctx.state.buildCache.set(CONTENT_CACHE_KEY, new Map([["en", [makeArticle()]]]));
+    const renderPng = vi.fn(async () => new Uint8Array([9]));
+
+    const result = await generateOgImages(ctx, { renderPng });
+
+    expect(result?.defaultCard).toBe(true);
+    expect(existsSync(path.join(tmp, "og-default.png"))).toBe(true);
+    // One extra render beyond the single article: the site card.
+    expect(renderPng).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not write og-default.png when ogImage.defaultCard is unset", async () => {
+    const ctx = ogCtx(tmp, [makeArticle()]);
+    const renderPng = vi.fn(async () => new Uint8Array([1]));
+
+    const result = await generateOgImages(ctx, { renderPng });
+
+    expect(result?.defaultCard).toBe(false);
+    expect(existsSync(path.join(tmp, "og-default.png"))).toBe(false);
+    // Only the article rendered — no site card.
+    expect(renderPng).toHaveBeenCalledTimes(1);
+  });
 });
