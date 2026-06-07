@@ -90,14 +90,14 @@ The render `mode` is read from `ctx.global.mode`, not from a dependency.
 
 **Generic-erasure mitigation.** The route map is an opaque carrier (`RouteMap = Record<string, RouteDefinition>`); per-route `TParams`/`TData` erase at that boundary. Type safety is a **call-site** property of `route()` + `defineRoutes()`, and per-route definition types are recovered for build time via the `manifest()` **API return**.
 
-**Isomorphic core.** `iso-match.ts` imports nothing (no `node:*`, no DOM; `URLPattern` is read as a Node-24+ global) and is the single source of placeholder parsing (`parsePlaceholder`), specificity (`dynamicSegmentCount`/`bySpecificity`), group extraction (`extractGroups`), and lazy client matcher compilation (`compileClientMatcher`). The build-time compiler and the browser SPA both consume it, so server and client route resolution can never drift. URL generation collapses an absent optional segment cleanly (no double slash); file derivation always produces `…/index.html`, honoring a `.toFile()` override when present.
+**Isomorphic core.** `iso-match.ts` imports nothing (no `node:*`, no DOM) and is the single source of placeholder parsing (`parsePlaceholder`), specificity (`dynamicSegmentCount`/`bySpecificity`), group extraction (`extractGroups`), native-`RegExp` matcher compilation (`createPathMatcher` — no `URLPattern` global, so matching works in every engine incl. Safari/Firefox without it), and lazy client matcher compilation (`compileClientMatcher`). The build-time compiler and the browser SPA both consume it, so server and client route resolution can never drift. URL generation collapses an absent optional segment cleanly (no double slash); file derivation always produces `…/index.html`, honoring a `.toFile()` override when present.
 
 ## Files
 
 | File | Responsibility |
 |---|---|
 | `index.ts` | Plugin wiring: `depends`, `helpers`, `createState`, `api`, and the `onInit` that compiles `config.routes` via `registerRoutes`. |
-| `iso-match.ts` | Isomorphic core (no `node:*`/DOM): `parsePlaceholder`, `dynamicSegmentCount`, `bySpecificity`, `extractGroups`, `compileClientMatcher`. |
+| `iso-match.ts` | Isomorphic core (no `node:*`/DOM): `parsePlaceholder`, `dynamicSegmentCount`, `bySpecificity`, `extractGroups`, `createPathMatcher` (native-`RegExp`, `URLPattern`-free), `compileClientMatcher`. |
 | `builders/route-builder.ts` | `route()` fluent builder + `defineRoutes()` identity + `createUrls()` pure URL builder. |
 | `builders/compile.ts` | `validateRoutes`, `patternToUrlPattern`, `buildUrl`, `buildFilePath`, `compileRoutes`. |
 | `builders/match.ts` | `createMatchFunction`, `extractParams` (re-exported `extractGroups`), `matchRoute`. |

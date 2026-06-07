@@ -7,6 +7,7 @@
  * (`CompiledRoute`, `MatcherTable`). All signatures are concrete per spec/05 §2–§4.
  */
 import type { ComponentChildren, VNode } from "preact";
+import type { PathMatcher } from "./iso-match";
 
 /**
  * Param contribution of a single path segment. `{name:?}` / `:name?` → optional;
@@ -318,8 +319,8 @@ export interface CompiledRoute {
   readonly pattern: string;
   /** Dynamic-segment count (lower = more specific = matched first). */
   readonly dynamicSegmentCount: number;
-  /** Pre-built URLPattern matchers (lang-aware + bare fallback). */
-  readonly matchers: { readonly withLang: URLPattern; readonly bare: URLPattern };
+  /** Pre-built path matchers (lang-aware + bare fallback). */
+  readonly matchers: { readonly withLang: PathMatcher; readonly bare: PathMatcher };
   /** Resolve pathname into params (withLang first, then bare with defaultLocale injected). */
   readonly matchFn: (pathname: string) => Record<string, string> | null;
   /** Build a URL from params. */
