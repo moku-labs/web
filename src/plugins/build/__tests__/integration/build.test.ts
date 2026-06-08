@@ -265,10 +265,13 @@ describe("build integration", () => {
     const home = readFileSync(path.join(out, "index.html"), "utf8");
     expect(home).not.toContain("<!--moku:");
     expect(home).toContain("Home");
-    // #5 localeRedirects → bare-path redirect for the locale-prefixed route, no _redirects.
-    const redirect = readFileSync(path.join(out, "guide", "index.html"), "utf8");
-    expect(redirect).toContain("/en/guide/");
-    expect(redirect).toContain('http-equiv="refresh"');
+    // #5 The guide route uses an OPTIONAL `{lang:?}`, so the default locale is served bare:
+    // `/guide/` holds REAL content (not a redirect), the explicit `/en/guide/` alias is emitted,
+    // localeRedirects becomes a no-op for it, and no `_redirects` catch-all is written.
+    const guide = readFileSync(path.join(out, "guide", "index.html"), "utf8");
+    expect(guide).not.toContain('http-equiv="refresh"');
+    expect(guide).toContain("Guide");
+    expect(existsSync(path.join(out, "en", "guide", "index.html"))).toBe(true);
     expect(existsSync(path.join(out, "_redirects"))).toBe(false);
   });
 

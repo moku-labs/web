@@ -237,15 +237,24 @@ export function defineRoutes<T extends RouteMap>(routes: T): T {
  * directly: no `app.router` reference, no manual "bind", no module global, no
  * "not bound" guard, and no createApp ↔ routes cycle.
  *
+ * Pass `defaultLocale` so the builder serves that locale at BARE paths, matching the
+ * runtime `router.toUrl` (which reads the default locale from the i18n plugin):
+ * `toUrl("home", { lang: defaultLocale })` then resolves to `/` instead of
+ * `/{defaultLocale}/`. It is app-free, so the default locale cannot be inferred — the
+ * consumer supplies it (e.g. `createUrls(routes, "en")`). Omit it to keep every locale
+ * prefixed.
+ *
  * @param routes - The route map (typically the value returned by {@link defineRoutes}).
+ * @param defaultLocale - The locale to serve bare (its `{lang:?}` prefix is omitted).
  * @returns A {@link Urls} builder whose `toUrl` accepts only this map's route names.
  * @example
  * ```ts
- * const url = createUrls(routes);
- * url.toUrl("article", { lang: "en", slug: "hello" }); // "/en/hello/"
+ * const url = createUrls(routes, "en");
+ * url.toUrl("article", { lang: "en", slug: "hello" }); // "/hello/"
+ * url.toUrl("article", { lang: "ru", slug: "hello" }); // "/ru/hello/"
  * ```
  */
-export function createUrls<T extends RouteMap>(routes: T): Urls<T> {
+export function createUrls<T extends RouteMap>(routes: T, defaultLocale?: string): Urls<T> {
   return {
     /**
      * Build a route's URL path from its name and params.
@@ -256,7 +265,7 @@ export function createUrls<T extends RouteMap>(routes: T): Urls<T> {
      * @throws {Error} If `name` is not present in the route map.
      * @example
      * ```ts
-     * url.toUrl("home", { lang: "en" }); // "/en/"
+     * url.toUrl("home", { lang: "ru" }); // "/ru/"
      * ```
      */
     toUrl(name, params = {}) {
@@ -266,7 +275,7 @@ export function createUrls<T extends RouteMap>(routes: T): Urls<T> {
           `[web] router: unknown route name "${String(name)}".\n  Check the name matches a key in the route map passed to createUrls.`
         );
       }
-      return buildUrl(definition.pattern, params);
+      return buildUrl(definition.pattern, params, defaultLocale);
     }
   };
 }

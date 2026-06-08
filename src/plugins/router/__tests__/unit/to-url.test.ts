@@ -28,8 +28,14 @@ describe("buildUrl()", () => {
     expect(buildUrl("/{lang:?}/{slug}/", { slug: "hello" })).toBe("/hello/");
   });
 
-  it("keeps the optional segment when its param is present", () => {
+  it("keeps the optional segment when its param is present (no default locale given)", () => {
     expect(buildUrl("/{lang:?}/{slug}/", { lang: "en", slug: "hello" })).toBe("/en/hello/");
+  });
+
+  it("serves the default locale bare when one is given, others prefixed", () => {
+    expect(buildUrl("/{lang:?}/{slug}/", { lang: "en", slug: "hello" }, "en")).toBe("/hello/");
+    expect(buildUrl("/{lang:?}/", { lang: "en" }, "en")).toBe("/");
+    expect(buildUrl("/{lang:?}/{slug}/", { lang: "uk", slug: "hello" }, "en")).toBe("/uk/hello/");
   });
 
   it("leaves a static pattern untouched", () => {
@@ -62,9 +68,13 @@ describe("dynamicSegmentCount()", () => {
 });
 
 describe("compiled toUrl via byName", () => {
-  it("byName.toUrl substitutes params for a named route", () => {
+  it("byName.toUrl serves the default locale bare, others prefixed", () => {
     const table = compileRoutes(makeInput({ article: route("/{lang:?}/{slug}/") }));
-    expect(table.byName.get("article")?.toUrl({ lang: "en", slug: "hello" })).toBe("/en/hello/");
+    const article = table.byName.get("article");
+    expect(article?.toUrl({ lang: "en", slug: "hello" })).toBe("/hello/");
+    expect(article?.toUrl({ lang: "uk", slug: "hello" })).toBe("/uk/hello/");
+    expect(article?.toFile({ lang: "en", slug: "hello" })).toBe("hello/index.html");
+    expect(article?.toFile({ lang: "uk", slug: "hello" })).toBe("uk/hello/index.html");
   });
 
   it("toFile builds the output path", () => {

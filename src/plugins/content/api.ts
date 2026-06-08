@@ -240,13 +240,37 @@ async function resolveArticle(
   locale: string
 ): Promise<Article | null> {
   const native = await ctx.provider.readArticle(slug, locale, locale, false);
-  if (native !== null) return native;
+  if (native !== null) return bareDefaultLocaleUrl(ctx, native);
   const fallbackLocale = ctx.defaultLocale();
   if (fallbackLocale === locale) {
     // eslint-disable-next-line unicorn/no-null -- resolveArticle returns `Article | null`; no fallback possible
     return null;
   }
-  return ctx.provider.readArticle(slug, fallbackLocale, locale, true);
+  const fallback = await ctx.provider.readArticle(slug, fallbackLocale, locale, true);
+  return fallback === null ? fallback : bareDefaultLocaleUrl(ctx, fallback);
+}
+
+/**
+ * The default locale is served at BARE paths, so strip the leading `/{defaultLocale}`
+ * from a default-locale article's `url` (`/en/hello/` → `/hello/`). Providers build
+ * always-prefixed URLs (they have no i18n access); this is the single place the bare
+ * default is applied, so article canonicals + feed GUIDs match the served URL.
+ * Idempotent (a bare URL has no prefix to strip) and a no-op for non-default locales.
+ *
+ * @param ctx - Kernel-free domain context (i18n helpers).
+ * @param article - The resolved article (mutated in place).
+ * @returns The same article, with a bare `url` when it is the default locale.
+ * @example
+ * ```ts
+ * bareDefaultLocaleUrl(ctx, { ...article, locale: "en", url: "/en/hello/" }).url; // "/hello/"
+ * ```
+ */
+function bareDefaultLocaleUrl(ctx: ContentApiContext, article: Article): Article {
+  const prefix = `/${ctx.defaultLocale()}`;
+  if (article.locale === ctx.defaultLocale() && article.url.startsWith(`${prefix}/`)) {
+    article.url = article.url.slice(prefix.length);
+  }
+  return article;
 }
 
 /**
