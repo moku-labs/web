@@ -38,7 +38,7 @@ bun add @moku-labs/web
 ```
 
 > [!NOTE]
-> **Status: `0.x` — pre-1.0.** The architecture is stable; the public API is settling but not yet frozen. Pin the version — the npm badge above tracks the current release.
+> **Status: `1.x` — stable.** The architecture and public API are stable and follow [semver](https://semver.org) — breaking changes land only in a new major. The npm badge above tracks the current release.
 
 ## Why @moku-labs/web
 
@@ -246,7 +246,7 @@ bun run check:bundle       # assert the browser bundle is node-free + under the 
 
 ## Requirements
 
-- **Node `>= 24`** — the router uses the global [`URLPattern`](https://developer.mozilla.org/docs/Web/API/URLPattern).
+- **Node `>= 24`** — the engines floor declared in `package.json`. (The route matcher is native `RegExp` — no [`URLPattern`](https://developer.mozilla.org/docs/Web/API/URLPattern) global needed, in Node or in any browser.)
 - **Bun `>= 1.3.14`** — the package manager and test runner. Use `bun` exclusively (never npm/yarn/pnpm).
 - **TypeScript** in strict mode, with `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess`.
 

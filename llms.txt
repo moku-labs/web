@@ -2,7 +2,7 @@
 
 > A content-focused static-site + SPA framework built on the @moku-labs/core micro-kernel (three-layer plugin model). It SSG-renders Preact pages to static HTML for SEO + first paint, then progressively enhances them with client-side island hydration and DATA-driven navigation. The framework ships browser-safe **isomorphic** plugins by default and exposes **node-only** plugins for the Node build, composed à la carte via `createApp({ plugins: [...] })`.
 
-Requires Node 24+ (the router uses the global `URLPattern`). Package manager: `bun`. Strict TypeScript (`exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`).
+Requires Node 24+. Package manager: `bun`. Strict TypeScript (`exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`). The route matcher is native `RegExp` (no `URLPattern` global), so client-side matching works in every engine, including Safari/Firefox without `URLPattern`.
 
 ## Mental model
 
@@ -10,7 +10,8 @@ Requires Node 24+ (the router uses the global `URLPattern`). Package manager: `b
 - **Two entries:** `@moku-labs/web` (`.`) is dual ESM+CJS with the full surface (Node SSG build). `@moku-labs/web/browser` is the ESM-only browser-safe entry — same `createApp`/`createPlugin` over the same isomorphic defaults, plus `dataPlugin`/`defineRoutes`/`route`/`createUrls`/`createComponent`/`browserEnv` + the SEO head primitives, with all node-only plugins/providers excluded and `browserEnv()` pre-wired as the default env provider.
 - **Defaults are isomorphic** (run on Node AND in the browser): `site`, `i18n`, `router`, `head`, `spa` + the `log`/`env` core.
 - **Node-only plugins** (`content`, `build`, `deploy`, `data`, `cli`) are exported but NOT defaults — add them for a Node build. For a browser bundle import from **`@moku-labs/web/browser`** instead: an ESM-only entry whose static import graph references zero node-only modules, so node/native code can NEVER reach the client bundle regardless of bundler/tree-shaking (stronger than relying on `sideEffects`/tree-shaking). It also pre-wires `browserEnv()` as the default env provider, so env works with zero config (no `pluginConfigs.env.providers` needed).
-- **The route is the contract:** `route(pattern).load(ctx→D)?.render(ctx:D→VNode).head(→HeadConfig).generate(ctx→params[])`. `.load` is OPTIONAL and BUILD-ONLY; `.load`/`.generate` receive `{ params, locale, require, has }` so a loader pulls sibling APIs the spec way — `ctx.require(contentPlugin)` (instance-only, no module global). `.render`/`.head` receive `ctx.url(name, params)` (link builder). `ctx.data` is typed from `.load()`'s return; on a client nav the fetched JSON is used directly as `ctx.data` (no validation step). The SAME `render` runs at build (SSG→HTML) and on the client (DATA nav) → structural parity. Routes are registered via `pluginConfigs.router.routes` (compiled at init) or `app.router.set(routes)` at runtime; render `mode` is a global config option.
+- **The route is the contract:** `route(pattern).load(ctx→D)?.render(ctx:D→VNode).head(→HeadConfig).generate(ctx→params[])`. `.load` is OPTIONAL and BUILD-ONLY; `.load`/`.generate` receive `{ params, locale, require, has }` so a loader pulls sibling APIs the spec way — `ctx.require(contentPlugin)` (instance-only, no module global). `.render`/`.head` receive `ctx.url(name, params)` (link builder). `ctx.data` is typed from `.load()`'s return; on a client nav the fetched JSON is used directly as `ctx.data` (no validation step). The SAME `render` runs at build (SSG→HTML) and on the client (DATA nav) → structural parity. Routes are registered via `pluginConfigs.router.routes` (the SOLE registration path, compiled at init — the imperative `router.set()` API was removed); render `mode` is a global config option.
+- **The default locale is served BARE:** routes with an optional `{lang:?}` segment emit the default locale at bare paths (`/`, `/post/`) and non-default locales at `/{locale}/…` — no config flag, it is the default behavior. `toUrl`, canonical, hreflang/x-default, sitemap, and SPA nav all emit the bare URL; the build ALSO writes each default-locale page at `/{defaultLocale}/…` (a content-identical alias whose canonical points at the bare URL). The pure link builder takes the default locale to match: `createUrls(routes, defaultLocale?)`.
 - **One switch:** `router.mode` = `"ssg" | "spa" | "hybrid"`. `build` writes per-page data + `spa` data-renders only when it is not `"ssg"`.
 
 ## Quickstart
@@ -36,26 +37,25 @@ const app = createApp({
   }
 });
 await app.build.run();   // writes dist/<path>/index.html + (mode!==ssg) dist/_data/<path>/index.json
-// Runtime (re-)registration alternative: app.router.set(routes)
 ```
 
 ## Plugins (one-liner each; see each plugin's README)
 
 - [site](src/plugins/site/README.md): site identity (name/url/author) + canonical URL helper. Default.
-- [i18n](src/plugins/i18n/README.md): locales, default-locale fallback, translations, hreflang/ogLocale maps. Default.
-- [router](src/plugins/router/README.md): typed route DSL (`route`/`defineRoutes`) — optional `.load` (takes one `ctx`), `.render`/`.head`/`.generate`; pure `createUrls(routes)` link builder; routes registered via `pluginConfigs.router.routes` (or `app.router.set`); `match`/`toUrl`/`entries`/`manifest`/`mode`. Default.
-- [head](src/plugins/head/README.md): SEO `<head>` composition (title template, canonical, OG/Twitter, JSON-LD, hreflang). Default.
+- [i18n](src/plugins/i18n/README.md): locales, default-locale fallback, translations, hreflang/ogLocale maps; the default locale is served at bare paths (no `/{lang}/` prefix). Default.
+- [router](src/plugins/router/README.md): typed route DSL (`route`/`defineRoutes`) — optional `.load` (takes one `ctx`), `.render`/`.head`/`.generate`; pure `createUrls(routes, defaultLocale?)` link builder; routes registered via `pluginConfigs.router.routes` (sole path); native-`RegExp` matcher; `match`/`toUrl`/`entries`/`manifest`/`mode`. Default.
+- [head](src/plugins/head/README.md): SEO `<head>` composition (title template, canonical, OG/Twitter, JSON-LD, hreflang) + `siteHead({ url, locale })` site-level OG block for pages with no route identity (gated on `defaultOgImage`). Default.
 - [spa](src/plugins/spa/README.md): client runtime — island hydration + intercepted navigation (HTML-over-fetch, or DATA nav when `data` is composed). Inert on Node. Default.
 - [content](src/plugins/content/README.md): provider-driven Markdown model (markdown → sanitized HTML, frontmatter, reading time, locale fallback). The plugin SHELL is browser-safe (isomorphic, like `env`); compose the node `fileSystemContent` provider for a build. `ctx.require(contentPlugin)` in loaders.
-- [build](src/plugins/build/README.md): SSG orchestrator — pages, feeds, sitemap, OG images; persists per-page data when `mode!=="ssg"`. Node-only.
+- [build](src/plugins/build/README.md): SSG orchestrator — pages, feeds, sitemap, OG images (incl. a site-level default card: `ogImage.defaultCard: boolean | (input) => VNode` → `og-default.png`), custom 404 (`notFound: true | { body } | { path }` — `path` writes a complete HTML file VERBATIM), custom shell `template` with `<!--moku:head/body/assets/lang-->` placeholders; persists per-page data when `mode!=="ssg"`. Node-only.
 - [deploy](src/plugins/deploy/README.md): Cloudflare Pages scaffolding + deploy. Node-only.
-- [cli](src/plugins/cli/README.md): developer CLI — `build`/`serve`/`preview`/`deploy` with a boxed Panel renderer + live build progress (via hooks on `build:phase`/`build:complete`/`deploy:complete`); driven from thin per-command scripts. Deploy confirm is TTY-only (CI auto-proceeds). Node-only. `depends: [build, deploy]`.
+- [cli](src/plugins/cli/README.md): developer CLI — `build`/`serve`/`preview`/`deploy` with the animated Velocity Panel UI + live build progress (via hooks on `build:phase`/`build:complete`/`deploy:complete`); driven from thin per-command scripts. `cli.deploy({ guided: true })` runs an interactive setup wizard (prereq diagnosis, `wrangler.jsonc`/`.env` scaffolding, build smoke test); deploy confirm is TTY-only (CI auto-proceeds). Node-only. `depends: [build, deploy]`.
 - [data](src/plugins/data/README.md): agnostic data provider — `write(entries)` (Node) persists per-page JSON keyed by URL; `at(path)` (browser) fetches it for `spa` DATA nav (used directly as `ctx.data`). Optional, isomorphic.
 - log, env: structured logging + validated environment access (`dotenv`/`processEnv`/`cloudflareBindings` on Node, `browserEnv()` in the browser). Core.
 
 ## Consumer helpers
 
-- `createApp`, `createPlugin`, `defineRoutes`, `route`, `createUrls` (pure name→URL builder), `createComponent` (spa islands), `fileSystemContent` (node content provider).
+- `createApp`, `createPlugin`, `defineRoutes`, `route`, `createUrls(routes, defaultLocale?)` (pure name→URL builder; pass the default locale so it serves bare URLs like the runtime router), `createComponent` (spa islands), `fileSystemContent` (node content provider).
 - env providers: `dotenv`, `processEnv`, `cloudflareBindings` (Node), `browserEnv` (browser — pre-wired as the default when importing `@moku-labs/web/browser`).
 - SEO primitives for `.head()`: `meta`, `og`, `twitter`, `jsonLd`, `canonical`, `hreflang`, `feedLink`, `buildArticleHead`.
 - Type namespaces: `Site`, `I18n`, `Router`, `Head`, `Spa`, `Content`, `Build`, `Deploy`, `Data`, `Log`, `Env`.
