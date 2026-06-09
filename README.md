@@ -34,8 +34,11 @@ Built on the [@moku-labs/core](https://github.com/moku-labs/core) micro-kernel �
 ---
 
 ```sh
-bun add @moku-labs/web
+bun add @moku-labs/web preact preact-render-to-string
 ```
+
+> [!NOTE]
+> `preact` (and `preact-render-to-string`, used by the SSG build) are **peer dependencies** — your app compiles its JSX against the same single `preact` instance the framework renders with. Most package managers install peers automatically, but declare them explicitly so *you* own the version: a second nested copy of preact silently breaks hooks and island hydration.
 
 > [!NOTE]
 > **Status: `0.x` — pre-1.0.** The architecture is stable; the public API is settling but not yet frozen. Pin the version — the npm badge above tracks the current release.
