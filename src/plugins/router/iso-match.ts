@@ -118,11 +118,9 @@ function toUrlPatternSource(pattern: string): string {
 }
 
 /**
- * Decode a captured group's percent-escapes back to the literal param value, so
- * params round-trip with `buildUrl`'s `encodeURIComponent` (matchers run against
- * the percent-encoded `location.pathname`). Falls back to the raw text when the
- * capture is not valid percent-encoding — a literal `%` in a hand-typed URL must
- * yield a no-match downstream, never throw `URIError` during matching.
+ * Decode a captured group's percent-escapes so params round-trip with
+ * `buildUrl`'s encoding (matchers run against the encoded `location.pathname`).
+ * Falls back to the raw text on malformed escapes (never throw mid-match).
  *
  * @param value - The raw captured segment text (possibly percent-encoded).
  * @returns The decoded param value, or the raw text on malformed escapes.
@@ -142,8 +140,8 @@ function decodeGroupValue(value: string): string {
 /**
  * Extract named groups from a `URLPattern` match result, dropping numeric/regex
  * group keys and `undefined` values so only declared, present params remain.
- * Each value is percent-DECODED ({@link decodeGroupValue}) so params extracted
- * from an encoded pathname equal the literal values `buildUrl` was given.
+ * Each value is percent-DECODED ({@link decodeGroupValue}) back to the literal
+ * value `buildUrl` was given.
  *
  * @param groups - The `URLPatternResult.pathname.groups` object.
  * @returns A clean record of named params.

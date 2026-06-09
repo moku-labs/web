@@ -10,10 +10,8 @@
  *   `/en/hello`    → `en/hello/index.json`  (trailing slash normalized)
  *
  * Encoding split: the FETCH suffix ({@link dataSuffix}) keeps the page URL's
- * percent-encoding (the browser requests the encoded path), while the FILE path
- * ({@link relativeDataFile}) decodes it — static hosts and the dev/preview servers
- * decode the percent-encoded request path before resolving it against literal
- * file names, exactly like the page's own `…/index.html` (router `buildFilePath`).
+ * percent-encoding (the browser requests the encoded path); the FILE path
+ * ({@link relativeDataFile}) decodes it, like the page's own `…/index.html`.
  */
 
 /**
@@ -42,11 +40,9 @@ export function dataSuffix(path: string): string {
 }
 
 /**
- * Decode a data suffix's percent-escapes so the on-disk file carries the literal
- * (decoded) name — servers decode the encoded fetch URL before resolving it against
- * the filesystem, so the file must match the DECODED request path. Falls back to
- * the raw suffix when it is not valid percent-encoding (a literal `%` in a page
- * path must not throw `URIError` mid-write).
+ * Decode a data suffix's percent-escapes so the on-disk file carries the
+ * literal name (servers decode the encoded fetch URL before filesystem
+ * lookup). Falls back to the raw suffix on malformed escapes.
  *
  * @param suffix - The computed data suffix (possibly percent-encoded).
  * @returns The decoded suffix, or the raw suffix on malformed escapes.
@@ -65,11 +61,9 @@ function decodeSuffix(suffix: string): string {
 
 /**
  * Compute the `outputDir`-relative data file for a page path, joining the trimmed
- * output dir with the DECODED {@link dataSuffix}. Shared by the Node writer and the
- * pure `fileFor` accessor so the written file and the reported path can never drift.
- * The suffix's percent-escapes are decoded ({@link decodeSuffix}) because servers
- * decode the encoded fetch URL before resolving it against literal file names —
- * matching how the page's own `…/index.html` is written (router `buildFilePath`).
+ * output dir with the DECODED {@link dataSuffix} (servers resolve the decoded
+ * request path against literal file names). Shared by the Node writer and the
+ * pure `fileFor` accessor so the written file and the reported path never drift.
  *
  * @param outputDir - The configured data output subdir (e.g. `"_data"` or `"_data/"`).
  * @param path - The page URL path (e.g. `/en/hello/`).

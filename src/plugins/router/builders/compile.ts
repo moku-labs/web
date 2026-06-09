@@ -183,16 +183,10 @@ export function patternToUrlPattern(
 }
 
 /**
- * Substitute a pattern's placeholders with param values, one `/`-segment at a time
- * (no backtracking regex), passing every substituted value through `encodeValue`.
- * Shared by {@link buildUrl} (percent-encodes for URLs) and {@link buildFilePath}
- * (identity — on-disk names keep the literal text). An optional placeholder whose
- * param is absent has its segment skipped entirely (no empty segment), so a missing
- * `{lang:?}` collapses cleanly instead of leaving a double slash.
- *
- * The default locale is served at BARE paths: when `defaultLocale` is given, the
- * optional `{lang:?}` segment is also skipped for it (so `{ lang: defaultLocale }`
- * resolves to `/…` while every other locale keeps its `/{locale}/…` prefix).
+ * Substitute a pattern's placeholders one `/`-segment at a time (no backtracking
+ * regex), passing each value through `encodeValue` — percent-encoding for
+ * {@link buildUrl}, identity for {@link buildFilePath}. An absent optional segment
+ * collapses (no double slash), as does `{lang:?}` for the bare `defaultLocale`.
  *
  * @param pattern - The route pattern.
  * @param params - Param values to substitute.
@@ -231,20 +225,11 @@ function substitutePattern(
 }
 
 /**
- * Build a URL from a pattern and params (substitutes `{param}` / `{param:?}`).
- * Walks segment-by-segment (no backtracking regex). An optional placeholder whose
- * param is absent has its segment skipped entirely (no empty segment), so a missing
- * `{lang:?}` collapses cleanly instead of leaving a double slash.
- *
- * Every substituted value is percent-encoded (`encodeURIComponent`), so reserved
- * characters in a param (`#`, `?`, `&`, spaces, …) cannot truncate the path,
- * leak raw into href/canonical/hreflang attributes, or break the sitemap XML —
- * and the generated URL round-trips through the matchers (which run against the
- * percent-encoded `location.pathname`; `extractGroups` decodes captures back).
- *
- * The default locale is served at BARE paths: when `defaultLocale` is given, the
- * optional `{lang:?}` segment is also skipped for it (so `{ lang: defaultLocale }`
- * resolves to `/…` while every other locale keeps its `/{locale}/…` prefix).
+ * Build a URL from a pattern and params (substitutes `{param}` / `{param:?}`;
+ * segment walk in {@link substitutePattern}). Substituted values are
+ * percent-encoded so reserved characters (`#`, `?`, `&`, spaces, …) cannot
+ * truncate the path or break the sitemap XML, and the URL round-trips through
+ * the matchers (`extractGroups` decodes captures back).
  *
  * @param pattern - The route pattern.
  * @param params - Param values to substitute.
@@ -252,7 +237,6 @@ function substitutePattern(
  * @returns The resolved relative URL string.
  * @example
  * ```ts
- * buildUrl("/{slug}/", { slug: "hello" }); // "/hello/"
  * buildUrl("/{slug}/", { slug: "a & b" }); // "/a%20%26%20b/"
  * buildUrl("/{lang:?}/", { lang: "en" }, "en"); // "/"
  * buildUrl("/{lang:?}/", { lang: "ru" }, "en"); // "/ru/"
@@ -268,11 +252,8 @@ export function buildUrl(
 
 /**
  * Build an output file path from a pattern and params (always `…/index.html`).
- *
- * Param values are written LITERALLY (no percent-encoding): static hosts and the
- * dev/preview servers decode the percent-encoded request path before resolving it
- * against the filesystem, so the on-disk name must be the decoded, human-sensible
- * text for the encoded URL from {@link buildUrl} to resolve to this file.
+ * Param values stay LITERAL: servers decode the encoded request path before
+ * filesystem lookup, so on-disk names carry the decoded text.
  *
  * @param pattern - The route pattern.
  * @param params - Param values to substitute.
