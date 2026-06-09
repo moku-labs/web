@@ -14,9 +14,12 @@ import type { Options } from "rehype-sanitize";
  * Clones the library default and additively allowlists the markup our custom
  * transforms emit: `class` values (`pull-quote`, `section-divider`,
  * `section-divider-ornament`) on `aside`/`div`/`span`, and the `loading`
- * attribute on `img`. `class`/`className`/`style` are allowlisted globally (`*`,
- * i.e. on every element) — not just on `pre`/`code`/`span` — so Shiki's inline
- * token colors survive the sanitize pass.
+ * attribute on `img`. `class`/`className` are allowlisted globally (`*`, i.e.
+ * on every element) so Shiki's class hooks survive the sanitize pass. `style`
+ * is deliberately NOT global — CSS values are not sanitized, so a global
+ * `style` allowlist would let untrusted content run overlay/exfiltration
+ * styling; it is allowed only on `pre`/`code`, where Shiki places its
+ * block-level theme background/foreground.
  *
  * @returns The extended, security-hardened sanitize schema.
  * @example
@@ -34,7 +37,7 @@ export function buildSanitizeSchema(): Options {
     tagNames: [...(base.tagNames ?? []), "aside", "div", "span", "pre", "code"],
     attributes: {
       ...baseAttributes,
-      "*": [...(baseAttributes["*"] ?? []), "className", "class", "style"],
+      "*": [...(baseAttributes["*"] ?? []), "className", "class"],
       aside: [...(baseAttributes.aside ?? []), ["className", ...directiveClasses], "class"],
       div: [...(baseAttributes.div ?? []), ["className", ...directiveClasses], "class"],
       span: [...(baseAttributes.span ?? []), ["className", ...directiveClasses], "class"],
