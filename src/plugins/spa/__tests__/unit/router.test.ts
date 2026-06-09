@@ -281,24 +281,33 @@ describe("swapRegion / runSwap (View Transitions)", () => {
     expect(order).toEqual(["beforeCapture", "swap"]);
   });
 
-  it("swapRegion replaces the matched region and runs onSwapped", () => {
+  it("swapRegion replaces the matched region, runs onSwapped, and reports success", () => {
     document.body.innerHTML = `<main><section id="page">old</section></main>`;
     const doc = new DOMParser().parseFromString(
       `<html><body><main><section id="page">new</section></main></body></html>`,
       "text/html"
     );
     const onSwapped = vi.fn();
-    swapRegion(doc, "main > section", false, onSwapped);
+    expect(swapRegion(doc, "main > section", false, onSwapped)).toBe(true);
     expect(document.querySelector("#page")?.textContent).toBe("new");
     expect(onSwapped).toHaveBeenCalledTimes(1);
   });
 
-  it("swapRegion is a no-op when the region is missing in either document", () => {
+  it("swapRegion returns false (no swap) when the live document lacks the region", () => {
     document.body.innerHTML = `<div>no region</div>`;
     const doc = new DOMParser().parseFromString(`<main><section>x</section></main>`, "text/html");
     const onSwapped = vi.fn();
-    swapRegion(doc, "main > section", false, onSwapped);
+    expect(swapRegion(doc, "main > section", false, onSwapped)).toBe(false);
     expect(onSwapped).not.toHaveBeenCalled();
+  });
+
+  it("swapRegion returns false (no swap) when the fetched document lacks the region", () => {
+    document.body.innerHTML = `<main><section id="page">old</section></main>`;
+    const doc = new DOMParser().parseFromString(`<div>no region</div>`, "text/html");
+    const onSwapped = vi.fn();
+    expect(swapRegion(doc, "main > section", false, onSwapped)).toBe(false);
+    expect(onSwapped).not.toHaveBeenCalled();
+    expect(document.querySelector("#page")?.textContent).toBe("old");
   });
 });
 
