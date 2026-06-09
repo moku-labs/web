@@ -301,6 +301,10 @@ export function attachHistoryFallback(
   const onClick = (event: MouseEvent): void => {
     const url = resolveClickTarget(event);
     if (!url) return;
+    // Same-page fragment link (<a href="#section">): bail WITHOUT preventDefault so the
+    // browser performs the native anchor jump and updates the hash. This mirrors the
+    // Navigation API path, which skips hash-only navigations via `navEvent.hashChange`.
+    if (url.pathname === location.pathname && url.hash) return;
     event.preventDefault();
     if (url.pathname === location.pathname) {
       window.scrollTo({ top: 0, behavior: "smooth" });
