@@ -112,5 +112,6 @@
     "test:integration": "vitest run --project integration",
     "test:cli-e2e": "bun test src/plugins/cli/__tests__/e2e/",
     "test:coverage": "vitest run --project unit --project integration --coverage"
-  }
+  },
+  "version": "1.6.2"
 }
