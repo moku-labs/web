@@ -12,8 +12,13 @@ export type RouterTeardown = () => void;
  * (match → data.at(path) → route.render — no `load` on the client) that falls
  * back to the default HTML-over-fetch ({@link performNavigation}); without
  * injection the default is used.
+ *
+ * `scrollToTop` (default `true`) is applied as part of the swap (just before the
+ * View Transition snapshot), NOT by the router after navigating — so the old/new
+ * snapshots share the same scrollY and a sticky header never un-pins. Traverse
+ * (back/forward) passes `false` to keep its restored scroll position.
  */
-export type NavigateFunction = (pathname: string) => Promise<void>;
+export type NavigateFunction = (pathname: string, scrollToTop?: boolean) => Promise<void>;
 
 /**
  * Minimal Navigation API surface used by the router. The Navigation API is not
@@ -174,12 +179,27 @@ export async function performNavigation(pathname: string, handlers: RouterHandle
  * Run a DOM-mutating swap, optionally wrapped in the View Transitions API when
  * enabled and supported (instant swap otherwise — never throws).
  *
+ * `beforeCapture` runs synchronously immediately before the swap — for the View
+ * Transitions path that is before `startViewTransition` captures the "old" snapshot.
+ * Scroll restoration belongs HERE, not in the router after the navigation: setting
+ * the destination scroll at this moment means the old and new snapshots share the
+ * same scrollY, so there is no scroll delta for the transition to animate and a
+ * `position: sticky` header never un-pins (the cross-engine flicker, worst on WebKit).
+ * Because the swap is post-fetch, doing it here also avoids the visible "scroll up,
+ * THEN the page loads" pause that scrolling in the router (pre-fetch) produced.
+ *
  * @param doSwap - The synchronous DOM mutation to perform.
  * @param viewTransitions - Whether to wrap the swap in `startViewTransition`.
+ * @param beforeCapture - Optional hook run synchronously just before the swap/capture
+ *   (e.g. scroll to the destination position).
  * @example
- * runSwap(() => current.replaceWith(next), true);
+ * runSwap(() => current.replaceWith(next), true, () => scrollTo({ top: 0, behavior: "instant" }));
  */
-export function runSwap(doSwap: () => void, viewTransitions: boolean): void {
+export function runSwap(
+  doSwap: () => void,
+  viewTransitions: boolean,
+  beforeCapture?: () => void
+): void {
   const reduced =
     typeof globalThis.matchMedia === "function" &&
     globalThis.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -188,6 +208,9 @@ export function runSwap(doSwap: () => void, viewTransitions: boolean): void {
   };
   const canUseViewTransitions =
     viewTransitions && !reduced && typeof docWithVt.startViewTransition === "function";
+  // Set the destination scroll BEFORE the "old" snapshot is captured (see above): no
+  // scroll delta to animate → the sticky header holds, and no pre-fetch scroll pause.
+  beforeCapture?.();
   if (canUseViewTransitions) {
     docWithVt.startViewTransition(doSwap);
   } else {
@@ -205,6 +228,8 @@ export function runSwap(doSwap: () => void, viewTransitions: boolean): void {
  * @param swapSelector - CSS selector for the region to replace.
  * @param viewTransitions - Whether to wrap the swap in `startViewTransition`.
  * @param onSwapped - Callback run after the DOM mutation (mount/notify/scroll).
+ * @param beforeCapture - Optional hook run synchronously just before the swap/capture
+ *   (forwarded to {@link runSwap} — e.g. scroll to the destination position).
  * @example
  * swapRegion(doc, "main > section", false, () => mountNew());
  */
@@ -212,15 +237,20 @@ export function swapRegion(
   doc: Document,
   swapSelector: string,
   viewTransitions: boolean,
-  onSwapped: () => void
+  onSwapped: () => void,
+  beforeCapture?: () => void
 ): void {
   const newContent = doc.querySelector(swapSelector);
   const currentContent = document.querySelector(swapSelector);
   if (!newContent || !currentContent) return;
-  runSwap(() => {
-    currentContent.replaceWith(newContent);
-    onSwapped();
-  }, viewTransitions);
+  runSwap(
+    () => {
+      currentContent.replaceWith(newContent);
+      onSwapped();
+    },
+    viewTransitions,
+    beforeCapture
+  );
 }
 
 /**
@@ -278,9 +308,11 @@ export function attachHistoryFallback(
     }
     saveScrollPosition(location.pathname);
     history.pushState({ scrollY: 0 }, "", url.pathname);
-    navigate(url.pathname)
-      .then(() => window.scrollTo(0, 0))
-      .catch(() => {});
+    // Forward nav scrolls to top as PART of the swap (runSwap's `beforeCapture`), not
+    // here: that fires just before the View Transition snapshot (so scrollY=0 at capture
+    // → no delta → the sticky header holds) AND after the fetch (so there is no "scroll
+    // up, then the page loads" pause). The router just hands off the navigation.
+    navigate(url.pathname).catch(() => {});
   };
   /**
    * Re-run navigation on back/forward, restoring the saved scroll position.
@@ -289,7 +321,9 @@ export function attachHistoryFallback(
    * globalThis.addEventListener("popstate", onPopState);
    */
   const onPopState = (): void => {
-    navigate(location.pathname)
+    // Traverse: keep the saved scroll. `scrollToTop: false` stops the swap resetting to
+    // top, then we restore the saved position once the swap has dispatched.
+    navigate(location.pathname, false)
       .then(() => restoreScrollPosition(location.pathname))
       .catch(() => {});
   };
@@ -343,11 +377,16 @@ export function attachNavigationApi(
       scroll: "manual",
       // eslint-disable-next-line jsdoc/require-jsdoc -- inline fetch-and-swap handler
       handler: async () => {
-        await navigate(url.pathname);
+        // Traverse (back/forward) keeps its saved scroll: `scrollToTop: false` so the swap
+        // does not reset to top, then the browser restores the position after the swap.
+        // Forward nav (push/replace) scrolls to top as PART of the swap (runSwap's
+        // `beforeCapture`) — captured at scrollY=0 (no delta → the sticky header holds) and
+        // after the fetch (no "scroll up, then load" pause).
         if (navEvent.navigationType === "traverse") {
+          await navigate(url.pathname, false);
           navEvent.scroll();
         } else {
-          window.scrollTo(0, 0);
+          await navigate(url.pathname);
         }
       }
     });
