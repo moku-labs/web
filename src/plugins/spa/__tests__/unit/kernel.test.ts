@@ -171,6 +171,43 @@ describe("kernel.processNav", () => {
   });
 });
 
+describe("kernel.processNav — swap-time scroll (scroll-before-snapshot)", () => {
+  it("forward nav scrolls to top (instant) as part of the swap", async () => {
+    const { kernel } = setup();
+    kernel.init();
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    const html = `<html><body><main><section id="page">new</section></main></body></html>`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(new Response(html, { status: 200 })))
+    );
+
+    kernel.processNav("/about");
+    await vi.waitFor(() => expect(document.querySelector("#page")?.textContent).toBe("new"));
+
+    // The scroll is now performed by the swap (runSwap's beforeCapture), instant so it
+    // defeats `scroll-behavior: smooth`. Running it just before the snapshot (and after the
+    // fetch) is what kills the WebKit header flicker AND the "scroll up, then load" pause.
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "instant" });
+  });
+
+  it("DATA-path forward nav also scrolls to top (instant) as part of the swap", async () => {
+    const { kernel } = setupData({ route: makeDataRoute(), raw: { title: "T" } });
+    kernel.init();
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+
+    kernel.processNav("/en/hello/");
+    await vi.waitFor(() => expect(document.querySelector("#page")?.textContent).toBe("data:T"));
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "instant" });
+    expect(fetchSpy).not.toHaveBeenCalled(); // DATA path, not HTML-over-fetch
+  });
+});
+
 describe("double-boot guard", () => {
   it("booting twice throws the [web] already-started error", () => {
     const { kernel } = setup();

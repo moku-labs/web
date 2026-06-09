@@ -105,6 +105,26 @@ export function createSpaKernel(
 ): SpaKernel {
   const resolved = resolveSpaConfig(config);
   let progress: ProgressBar | undefined;
+  // Scroll intent for the in-flight navigation, applied as the swap's `beforeCapture`
+  // (just before the View Transition snapshot). `true` for forward navs (scroll to top),
+  // `false` for traverse (back/forward keeps its restored position). Set by `navigate`.
+  let pendingScrollToTop = true;
+
+  /**
+   * Apply the in-flight navigation's scroll intent — the swap's `beforeCapture` hook.
+   * For a forward nav it scrolls to top BEFORE the snapshot is captured, so the old and
+   * new states share scrollY=0 (no delta → the sticky header never un-pins) and there is
+   * no pre-fetch scroll pause. `behavior: "instant"` defeats a page-level
+   * `scroll-behavior: smooth` that would otherwise animate the reset and re-create the
+   * delta. Traverse (back/forward) sets `pendingScrollToTop = false` and restores its
+   * saved position after the swap instead.
+   *
+   * @example
+   * runSwap(renderAndMount, viewTransitions, applyPendingScroll);
+   */
+  const applyPendingScroll = (): void => {
+    if (pendingScrollToTop) window.scrollTo({ top: 0, behavior: "instant" });
+  };
 
   /**
    * Process one navigation: head-sync, unmount, swap, re-mount, emit navigated.
@@ -118,10 +138,16 @@ export function createSpaKernel(
     const doc = new DOMParser().parseFromString(html, "text/html");
     syncHead(deps.head, doc);
     unmountPageSpecific(state, emit);
-    swapRegion(doc, resolved.swapSelector, resolved.viewTransitions, () => {
-      scanAndMount(state, emit, resolved.swapSelector);
-      notifyNavEnd(state);
-    });
+    swapRegion(
+      doc,
+      resolved.swapSelector,
+      resolved.viewTransitions,
+      () => {
+        scanAndMount(state, emit, resolved.swapSelector);
+        notifyNavEnd(state);
+      },
+      applyPendingScroll
+    );
     state.currentUrl = pathname;
     progress?.done();
     emit("spa:navigated", { url: pathname });
@@ -251,7 +277,7 @@ export function createSpaKernel(
      *
      * @example
      * ```ts
-     * runSwap(renderAndMount, resolved.viewTransitions);
+     * runSwap(renderAndMount, resolved.viewTransitions, applyPendingScroll);
      * ```
      */
     const renderAndMount = (): void => {
@@ -262,7 +288,7 @@ export function createSpaKernel(
       scanAndMount(state, emit, resolved.swapSelector);
       notifyNavEnd(state);
     };
-    runSwap(renderAndMount, resolved.viewTransitions);
+    runSwap(renderAndMount, resolved.viewTransitions, applyPendingScroll);
 
     // Record the new URL and announce the completed navigation.
     state.currentUrl = pathname;
@@ -305,11 +331,19 @@ export function createSpaKernel(
    * navigation entry point (Navigation API, History, programmatic) goes through it.
    *
    * @param pathname - The destination pathname.
+   * @param scrollToTop - Whether the swap should scroll to top before its snapshot
+   *   (default `true`; forward navs). Traverse passes `false` to keep its restored scroll.
    * @returns A promise resolving once the swap (or fallback) is dispatched.
    * @example
    * await navigate("/en/world/");
    */
-  const navigate: NavigateFunction = async (pathname: string): Promise<void> => {
+  const navigate: NavigateFunction = async (
+    pathname: string,
+    scrollToTop = true
+  ): Promise<void> => {
+    // Record the scroll intent for this navigation's swap (read by `applyPendingScroll`,
+    // run just before the snapshot). Forward navs scroll to top; traverse keeps its scroll.
+    pendingScrollToTop = scrollToTop;
     if (deps.router.mode() !== "ssg" && (await tryDataRender(pathname))) return;
     await performNavigation(pathname, handlers);
   };

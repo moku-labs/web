@@ -160,12 +160,17 @@ describe("attachHistoryFallback (fetch error → full browser navigation)", () =
     dispose();
   });
 
-  it("cross-page click pushes history, fetches, and delivers HTML via onEnd", async () => {
+  it("cross-page click pushes history and hands off to navigate WITHOUT scrolling", async () => {
     Object.defineProperty(globalThis, "location", {
       value: { origin: "http://localhost:3000", pathname: "/" },
       configurable: true
     });
-    vi.stubGlobal("scrollTo", vi.fn());
+    // Forward nav no longer scrolls in the router: the scroll-to-top is the swap's job
+    // (runSwap's `beforeCapture`), fired just before the View Transition snapshot and
+    // after the fetch — so there is no scroll delta (no header flicker) and no pre-fetch
+    // "scroll up, then load" pause. The kernel's swap-time scroll is covered in kernel.test.
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
     vi.stubGlobal(
       "fetch",
       vi.fn(() => Promise.resolve(new Response("<p>ok</p>", { status: 200 })))
@@ -181,6 +186,7 @@ describe("attachHistoryFallback (fetch error → full browser navigation)", () =
 
     await vi.waitFor(() => expect(onEnd).toHaveBeenCalledWith("<p>ok</p>", "/next"));
     expect(pushState).toHaveBeenCalled();
+    expect(scrollTo).not.toHaveBeenCalled();
     dispose();
   });
 
@@ -239,6 +245,40 @@ describe("swapRegion / runSwap (View Transitions)", () => {
       }, true)
     ).not.toThrow();
     expect(ran).toBe(true);
+  });
+
+  it("runs beforeCapture synchronously BEFORE the snapshot+swap (scroll-before-snapshot)", () => {
+    const order: string[] = [];
+    const startViewTransition = vi.fn((cb: () => void) => {
+      order.push("capture"); // the "old" snapshot is taken here, before the DOM mutates
+      cb();
+      return {};
+    });
+    (
+      document as unknown as { startViewTransition: typeof startViewTransition }
+    ).startViewTransition = startViewTransition;
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+
+    runSwap(
+      () => order.push("swap"),
+      true,
+      () => order.push("beforeCapture")
+    );
+    // beforeCapture (e.g. scroll to top) must precede the capture, so scrollY=0 is baked
+    // into the "old" snapshot → no scroll delta → the sticky header never un-pins.
+    expect(order).toEqual(["beforeCapture", "capture", "swap"]);
+    delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
+  });
+
+  it("runs beforeCapture before an instant swap when View Transitions are unsupported", () => {
+    delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
+    const order: string[] = [];
+    runSwap(
+      () => order.push("swap"),
+      true,
+      () => order.push("beforeCapture")
+    );
+    expect(order).toEqual(["beforeCapture", "swap"]);
   });
 
   it("swapRegion replaces the matched region and runs onSwapped", () => {
@@ -380,22 +420,26 @@ describe("Navigation API intercept handlers", () => {
     expect(event.scroll).toHaveBeenCalledTimes(1);
   });
 
-  it("push navigation scrolls to top after a successful swap", async () => {
+  it("push navigation hands off to navigate WITHOUT scrolling (scroll is the swap's job)", async () => {
     Object.defineProperty(globalThis, "location", {
       value: { origin: "http://localhost:3000", pathname: "/" },
       configurable: true
     });
+    // Forward nav doesn't scroll in the router; the kernel scrolls to top as part of the
+    // swap (just before the snapshot, after the fetch). See kernel.test for that assertion.
     const scrollTo = vi.fn();
     vi.stubGlobal("scrollTo", scrollTo);
     vi.stubGlobal(
       "fetch",
       vi.fn(() => Promise.resolve(new Response("<p>x</p>", { status: 200 })))
     );
-    const listener = attachAndCapture({ onStart: vi.fn(), onEnd: vi.fn(), onError: vi.fn() });
+    const onEnd = vi.fn();
+    const listener = attachAndCapture({ onStart: vi.fn(), onEnd, onError: vi.fn() });
     const event = fakeNavEvent({ navigationType: "push" });
 
     listener(event);
     await runIntercept(event);
-    expect(scrollTo).toHaveBeenCalledWith(0, 0);
+    expect(onEnd).toHaveBeenCalledWith("<p>x</p>", "/about");
+    expect(scrollTo).not.toHaveBeenCalled();
   });
 });
