@@ -213,10 +213,13 @@ export async function generateSitemap(
   const locales = ctx.require(i18nPlugin).locales();
   const router = ctx.require(routerPlugin);
 
-  // Expand every route to its canonical (absolute) URLs across all locales.
+  // Expand every route to its canonical (absolute) URLs across all locales, deduplicating
+  // with a Set (first occurrence wins): a route without a lang placeholder (or whose
+  // `generate()` params omit `lang`) resolves to the SAME URL for every locale, which
+  // would otherwise push one duplicate sitemap entry per locale.
   const byPattern = indexRoutesByPattern(router);
   const relativeUrls = await collectRelativeUrls(router.manifest(), byPattern, locales, ctx);
-  const urls = relativeUrls.map(relative => site.canonical(relative));
+  const urls = [...new Set(relativeUrls)].map(relative => site.canonical(relative));
 
   // Serialize the sitemap + robots documents and persist them to outDir.
   const xml = serializeSitemap(urls);

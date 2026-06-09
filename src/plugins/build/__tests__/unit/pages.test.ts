@@ -180,6 +180,64 @@ describe("build/phases/pages", () => {
     expect(result.rootHtml).toContain("root");
   });
 
+  it("renders a lang-less route exactly once (default locale) in a multi-locale app", async () => {
+    // Regression: a route with no {lang}/{lang:?} placeholder resolves to the SAME
+    // output file for every locale — without dedupe both locales' writes raced on one
+    // path (same Promise.all batch), so the shipped HTML's locale was nondeterministic.
+    const render = vi.fn((rctx: { locale: string }) => h("h1", {}, rctx.locale));
+    const feed = makeRoute("/feed/", { render });
+    const ctx = makeCtx({
+      config: { outDir: tmp },
+      requireMap: {
+        router: {
+          mode: () => "ssg",
+          manifest: () => [feed],
+          entries: makeEntries([{ name: "feed", pattern: "/feed/" }])
+        },
+        // The default locale is NOT first — the kept instance must still be the default's.
+        i18n: { locales: () => ["uk", "en"], defaultLocale: () => "en" },
+        head: { render: () => "" }
+      }
+    });
+
+    const result = await renderPages(ctx);
+
+    expect(result.pageCount).toBe(1);
+    expect(render).toHaveBeenCalledTimes(1);
+    const html = readFileSync(path.join(tmp, "feed", "index.html"), "utf8");
+    expect(html).toContain('<html lang="en">');
+    expect(html).toContain("<h1>en</h1>");
+  });
+
+  it("still fans a localized route out to one page per locale (no over-dedupe)", async () => {
+    // A lang route whose generate() includes `lang` resolves to a DIFFERENT file per
+    // locale — the output-file dedupe must keep every one of those instances.
+    const guide = makeRoute("/{lang}/guide/", {
+      generate: (gctx: { locale: string }) => [{ lang: gctx.locale }],
+      render: rctx => h("h1", {}, (rctx as { locale: string }).locale)
+    });
+    const ctx = makeCtx({
+      config: { outDir: tmp },
+      requireMap: {
+        router: {
+          mode: () => "ssg",
+          manifest: () => [guide],
+          entries: makeEntries([{ name: "guide", pattern: "/{lang}/guide/" }])
+        },
+        i18n: { locales: () => ["en", "uk"], defaultLocale: () => "en" },
+        head: { render: () => "" }
+      }
+    });
+
+    const result = await renderPages(ctx);
+
+    expect(result.pageCount).toBe(2);
+    const en = readFileSync(path.join(tmp, "en", "guide", "index.html"), "utf8");
+    const uk = readFileSync(path.join(tmp, "uk", "guide", "index.html"), "utf8");
+    expect(en).toContain("<h1>en</h1>");
+    expect(uk).toContain("<h1>uk</h1>");
+  });
+
   it("injects bundled CSS/JS asset tags from the typed manifest when injectAssets is on (default)", async () => {
     const home = makeRoute("/", { render: () => h("h1", {}, "Home") });
     const ctx = makeCtx({
