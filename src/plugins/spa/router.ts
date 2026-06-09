@@ -123,6 +123,24 @@ export function isInternalLink(url: URL): boolean {
 }
 
 /**
+ * The navigable path of a URL or Location: pathname plus query string. The query
+ * is part of page identity (the kernel's `currentUrl` is pathname + search), so
+ * same-page checks, history entries, fetches, and scroll keys must all carry it —
+ * comparing pathnames alone would treat `/search?q=a` → `/search?q=b` as same-page
+ * and the History fallback would drop the query from the address bar.
+ *
+ * @param target - The URL or Location to read.
+ * @param target.pathname - The path component.
+ * @param target.search - The query-string component (`""` when absent).
+ * @returns The pathname + search string.
+ * @example
+ * pathWithSearch(new URL("https://x.dev/search?q=a")); // "/search?q=a"
+ */
+function pathWithSearch(target: { pathname: string; search: string }): string {
+  return target.pathname + target.search;
+}
+
+/**
  * Save the current scroll position keyed by path (best-effort; ignores storage errors).
  *
  * @param path - The path to key the scroll position under.
@@ -302,17 +320,17 @@ export function attachHistoryFallback(
     const url = resolveClickTarget(event);
     if (!url) return;
     event.preventDefault();
-    if (url.pathname === location.pathname) {
+    if (pathWithSearch(url) === pathWithSearch(location)) {
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
-    saveScrollPosition(location.pathname);
-    history.pushState({ scrollY: 0 }, "", url.pathname);
+    saveScrollPosition(pathWithSearch(location));
+    history.pushState({ scrollY: 0 }, "", pathWithSearch(url));
     // Forward nav scrolls to top as PART of the swap (runSwap's `beforeCapture`), not
     // here: that fires just before the View Transition snapshot (so scrollY=0 at capture
     // → no delta → the sticky header holds) AND after the fetch (so there is no "scroll
     // up, then the page loads" pause). The router just hands off the navigation.
-    navigate(url.pathname).catch(() => {});
+    navigate(pathWithSearch(url)).catch(() => {});
   };
   /**
    * Re-run navigation on back/forward, restoring the saved scroll position.
@@ -323,8 +341,9 @@ export function attachHistoryFallback(
   const onPopState = (): void => {
     // Traverse: keep the saved scroll. `scrollToTop: false` stops the swap resetting to
     // top, then we restore the saved position once the swap has dispatched.
-    navigate(location.pathname, false)
-      .then(() => restoreScrollPosition(location.pathname))
+    const path = pathWithSearch(location);
+    navigate(path, false)
+      .then(() => restoreScrollPosition(path))
       .catch(() => {});
   };
   document.addEventListener("click", onClick);
@@ -363,7 +382,7 @@ export function attachNavigationApi(
       !navEvent.canIntercept || navEvent.hashChange || navEvent.downloadRequest;
     if (shouldSkipIntercept) return;
     if (!isInternalLink(url)) return;
-    if (url.pathname === location.pathname) {
+    if (pathWithSearch(url) === pathWithSearch(location)) {
       navEvent.intercept({
         // eslint-disable-next-line jsdoc/require-jsdoc -- inline same-page scroll handler
         handler: () => {
@@ -383,10 +402,10 @@ export function attachNavigationApi(
         // `beforeCapture`) — captured at scrollY=0 (no delta → the sticky header holds) and
         // after the fetch (no "scroll up, then load" pause).
         if (navEvent.navigationType === "traverse") {
-          await navigate(url.pathname, false);
+          await navigate(pathWithSearch(url), false);
           navEvent.scroll();
         } else {
-          await navigate(url.pathname);
+          await navigate(pathWithSearch(url));
         }
       }
     });
