@@ -579,3 +579,59 @@ describe("superseded navigation (rapid back→forward race)", () => {
     expect(hrefSetter).not.toHaveBeenCalled();
   });
 });
+
+describe("superseded navigation via History fallback (rapid popstate race)", () => {
+  it("a stale swap that resolves LAST never lands — only the live navigation swaps", async () => {
+    const hrefSetter = vi.fn();
+    const loc = {
+      origin: "http://localhost:3000",
+      pathname: "/page-a",
+      get href() {
+        return "";
+      },
+      set href(v: string) {
+        hrefSetter(v);
+      }
+    };
+    Object.defineProperty(globalThis, "location", { value: loc, configurable: true });
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    // B has a saved scroll position — if the stale navigation poked restoration it
+    // would re-restore it, so the scrollTo call count exposes the guard.
+    sessionStorage.setItem("spa:scroll:/page-b", "111");
+    // Each fetch hangs until its release function is called — resolution order is ours.
+    const release: Array<(html: string) => void> = [];
+    const fetchSpy = vi.fn(
+      (_path: string, _options?: { signal?: AbortSignal }) =>
+        new Promise<Response>(resolve => {
+          release.push((html: string) => resolve(new Response(html, { status: 200 })));
+        })
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+    const onEnd = vi.fn();
+    const dispose = attachHistoryFallback({ onStart() {}, onEnd, onError() {} });
+
+    // Back navigation A begins (popstate fired, fetch in flight)…
+    globalThis.dispatchEvent(new Event("popstate"));
+    // …then a rapid forward B supersedes it: the fallback aborts A's controller
+    // and starts B's fetch-and-swap.
+    loc.pathname = "/page-b";
+    globalThis.dispatchEvent(new Event("popstate"));
+    expect(fetchSpy.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+
+    // B's fetch resolves first; its swap lands and its scroll position is restored.
+    release[1]?.("<p>B</p>");
+    await vi.waitFor(() => expect(scrollTo).toHaveBeenCalledWith(0, 111));
+    // A's STALE fetch resolves last (the racy ordering); let its chain fully settle.
+    release[0]?.("<p>A</p>");
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    // Last-write-wins is dead: only the live navigation swapped; the stale one
+    // neither swapped, nor restored scroll, nor fell back to a full reload.
+    expect(onEnd).toHaveBeenCalledTimes(1);
+    expect(onEnd).toHaveBeenCalledWith("<p>B</p>", "/page-b");
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+    expect(hrefSetter).not.toHaveBeenCalled();
+    dispose();
+  });
+});

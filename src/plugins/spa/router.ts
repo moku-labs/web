@@ -318,8 +318,26 @@ export function resolveClickTarget(event: MouseEvent): URL | undefined {
  */
 export function attachHistoryFallback(
   handlers: RouterHandlers,
-  navigate: NavigateFunction = pathname => performNavigation(pathname, handlers)
+  navigate: NavigateFunction = (pathname, _scrollToTop, signal) =>
+    performNavigation(pathname, handlers, signal)
 ): RouterTeardown {
+  // One in-flight navigation at a time. The History API has no navEvent.signal, so the
+  // router mints its own: each new click/popstate aborts the previous fetch-and-swap,
+  // closing the same last-write-wins race the Navigation API path closes — without this,
+  // a stale fetch resolving late would swap its body over the live navigation's URL.
+  let controller: AbortController | undefined;
+  /**
+   * Supersede the in-flight navigation (if any) and mint the next one's abort signal.
+   *
+   * @returns The fresh navigation's abort signal.
+   * @example
+   * const signal = supersede();
+   */
+  const supersede = (): AbortSignal => {
+    controller?.abort();
+    controller = new AbortController();
+    return controller.signal;
+  };
   /**
    * Intercept an internal-link click and run a History-API navigation.
    *
@@ -341,7 +359,7 @@ export function attachHistoryFallback(
     // here: that fires just before the View Transition snapshot (so scrollY=0 at capture
     // → no delta → the sticky header holds) AND after the fetch (so there is no "scroll
     // up, then the page loads" pause). The router just hands off the navigation.
-    navigate(url.pathname).catch(() => {});
+    navigate(url.pathname, true, supersede()).catch(() => {});
   };
   /**
    * Re-run navigation on back/forward, restoring the saved scroll position.
@@ -352,8 +370,12 @@ export function attachHistoryFallback(
   const onPopState = (): void => {
     // Traverse: keep the saved scroll. `scrollToTop: false` stops the swap resetting to
     // top, then we restore the saved position once the swap has dispatched.
-    navigate(location.pathname, false)
-      .then(() => restoreScrollPosition(location.pathname))
+    const signal = supersede();
+    navigate(location.pathname, false, signal)
+      .then(() => {
+        // A superseded traverse must not poke scroll restoration on a dead navigation.
+        if (!signal.aborted) restoreScrollPosition(location.pathname);
+      })
       .catch(() => {});
   };
   document.addEventListener("click", onClick);
