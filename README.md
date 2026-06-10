@@ -239,7 +239,7 @@ bun run build              # build with tsdown (dual ESM+CJS + ESM-only browser 
 bun run test               # all tests (vitest)
 bun run test:unit          # unit tests only
 bun run test:integration   # integration tests only
-bun run test:coverage      # tests with coverage (90% threshold)
+bun run test:coverage      # tests with coverage (85% threshold)
 bun run lint               # biome check + eslint
 bun run lint:fix           # auto-fix lint issues
 bun run format             # format with biome

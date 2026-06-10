@@ -2,7 +2,7 @@
 
 > A content-focused static-site + SPA framework built on the @moku-labs/core micro-kernel (three-layer plugin model). It SSG-renders Preact pages to static HTML for SEO + first paint, then progressively enhances them with client-side island hydration and DATA-driven navigation. The framework ships browser-safe **isomorphic** plugins by default and exposes **node-only** plugins for the Node build, composed à la carte via `createApp({ plugins: [...] })`.
 
-Requires Node 24+. Package manager: `bun`. Strict TypeScript (`exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`). The route matcher is native `RegExp` (no `URLPattern` global), so client-side matching works in every engine, including Safari/Firefox without `URLPattern`.
+Requires Node 24+. Package manager: `bun`. Strict TypeScript (`exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`). The route matcher is native `RegExp` (no `URLPattern` global), so client-side matching works in every engine, including Safari/Firefox without `URLPattern`. `preact` and `preact-render-to-string` are **peerDependencies** — install them alongside the package (`bun add @moku-labs/web preact preact-render-to-string`) so the app and the framework share ONE preact instance; a second nested copy silently breaks hooks and island hydration.
 
 ## Mental model
 

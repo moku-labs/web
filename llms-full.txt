@@ -8,6 +8,7 @@ plugins are composed à la carte for the build.
 
 - Runtime: **Node 24+**, Bun, Cloudflare Workers, browsers. The route matcher is native `RegExp` (no `URLPattern` global), so matching works in every engine — including Safari/Firefox versions that ship no `URLPattern`.
 - Package manager: **bun**. Strict TS: `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`.
+- Dependencies: `preact` + `preact-render-to-string` are **peerDependencies** — install them alongside the package (`bun add @moku-labs/web preact preact-render-to-string`) so the app compiles its JSX against the SAME single preact instance the framework renders with; a second nested copy silently breaks hooks and island hydration.
 - Two entry points: `.` (Node SSG; dual ESM + CJS, full surface) and `./browser` (client bundle; ESM-only, guaranteed node-free). Prefer `./browser` for the client — do NOT rely on tree-shaking `.` for browser safety (see §0).
 
 ## 0. Entry points (`.` vs `./browser`)
@@ -91,7 +92,7 @@ Pattern syntax: `{name}` required param, `{name:?}` optional, `{lang:?}` is the 
 
 ### RouterApi (`ctx.require(routerPlugin)` / `app.router`)
 - `match(pathname) => { params, route } | null` — specificity-sorted; most specific wins.
-- `toUrl(name, params) => string` — substitute params; throws on unknown name.
+- `toUrl(name, params) => string` — substitute params; throws on unknown name. Param values are percent-encoded into the URL (and `match` decodes captured groups), so raw values like `"a/b"` or `"café"` round-trip safely.
 - `entries() => readonly TypedRoute[]` — URL-utility view, specificity order.
 - `manifest() => readonly RouteDefinition[]` — full defs with `_handlers` (load/render/head/generate), declaration order (build).
 - `clientManifest() => readonly { pattern, name, meta }[]` — serializable projection (no closures).
@@ -159,8 +160,8 @@ SEO primitives for `.head()` handlers (all exported):
 ## 7. build — SSG orchestrator (node-only)
 
 `app.build.run(options?: { outDir? }) => Promise<{ outDir, pageCount, durationMs }>`. Phases:
-0. **clean** — `rm(outDir)`.
-1. **bundle** — optional client JS/CSS (injectable runner).
+0. **clean** — `rm(outDir)`, GUARDED: the build refuses an unsafe `outDir` before the recursive force-delete — the target must sit strictly inside the project root (or the OS temp dir), never `/`, the home directory, or the project root itself; a misconfigured `outDir` fails the build with a clear error instead of wiping anything.
+1. **bundle** — optional client JS/CSS (injectable runner). Code splitting is ON: dynamic `import()`s become lazy chunks (e.g. the spa plugin's Preact render module and the data plugin's node-only writer stay out of the main bundle).
 2. **content + images** (parallel) — `content.loadAll()`; copy static image dirs.
 3. **pages** — expand routes ONCE; per instance: `load` → `head.render` → `render` → write `outDir/<path>/index.html`. The default locale is served BARE, so each default-locale page on a `{lang:?}` route is ALSO written to `/{defaultLocale}/…` — a content-identical alias whose canonical points at the bare URL — so an explicit `/{defaultLocale}/…` link resolves directly (no redirect). **When `router.mode() !== "ssg"` and `data` is composed**, the same expansion persists each client-navigable page's data (the `load()` output, or `{}` for a no-`load` static route) via `app.data.write(...)` — so even static pages get a sidecar and hybrid nav resolves cleanly.
 4. **feeds + sitemap + og-images** (parallel, gated by config flags).
@@ -190,8 +191,9 @@ Compose a provider per target via `env: { providers: [...] }`:
 
 ## 11. Testing (vitest)
 
-- Two projects: `unit` (`tests/unit/**`, `src/plugins/**/__tests__/unit/**`) and `integration` (`tests/integration/**`, `src/plugins/**/__tests__/integration/**`). Browser-side tests use `// @vitest-environment happy-dom`.
-- Coverage thresholds 85% (istanbul). Framework-level integration drives the REAL `createApp`.
+- Two vitest projects: `unit` (`tests/unit/**`, `src/plugins/**/__tests__/unit/**`) and `integration` (`tests/integration/**`, `src/plugins/**/__tests__/integration/**`). Browser-side tests use `// @vitest-environment happy-dom`.
+- Two e2e suites run under `bun test` (NOT vitest), wired into CI: `bun run test:cli-e2e` (`src/plugins/cli/__tests__/e2e/`) and `bun run test:build-e2e` (`src/plugins/build/__tests__/e2e/`, drives the real `Bun.build` bundler).
+- Coverage thresholds 85% (istanbul), over `src/**/*.{ts,tsx}`. Framework-level integration drives the REAL `createApp`.
 - Plugin tests are colocated; root `tests/` is framework-level only.
 
 ## 12. Key invariants
