@@ -141,7 +141,7 @@ describe("attachHistoryFallback (fetch error → full browser navigation)", () =
 
   it("same-page click scrolls to top without fetching", () => {
     Object.defineProperty(globalThis, "location", {
-      value: { origin: "http://localhost:3000", pathname: "/here" },
+      value: { origin: "http://localhost:3000", pathname: "/here", search: "" },
       configurable: true
     });
     const scrollTo = vi.fn();
@@ -214,7 +214,7 @@ describe("attachHistoryFallback (fetch error → full browser navigation)", () =
 
   it("cross-page click pushes history and hands off to navigate WITHOUT scrolling", async () => {
     Object.defineProperty(globalThis, "location", {
-      value: { origin: "http://localhost:3000", pathname: "/" },
+      value: { origin: "http://localhost:3000", pathname: "/", search: "" },
       configurable: true
     });
     // Forward nav no longer scrolls in the router: the scroll-to-top is the swap's job
@@ -242,9 +242,57 @@ describe("attachHistoryFallback (fetch error → full browser navigation)", () =
     dispose();
   });
 
+  it("query-only change is a real navigation: history and fetch keep the search", async () => {
+    Object.defineProperty(globalThis, "location", {
+      value: { origin: "http://localhost:3000", pathname: "/search", search: "?q=a" },
+      configurable: true
+    });
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    const fetchSpy = vi.fn(() => Promise.resolve(new Response("<p>b</p>", { status: 200 })));
+    vi.stubGlobal("fetch", fetchSpy);
+    const pushState = vi.spyOn(history, "pushState");
+    const onEnd = vi.fn();
+    const dispose = attachHistoryFallback({ onStart() {}, onEnd, onError() {} });
+
+    document.body.innerHTML = `<a id="a" href="/search?q=b">x</a>`;
+    const anchor = document.querySelector("#a") as HTMLAnchorElement;
+    Object.defineProperty(anchor, "href", { value: "http://localhost:3000/search?q=b" });
+    anchor.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+    // /search?q=a → /search?q=b is NOT same-page: the query is part of page identity, so
+    // the address bar, the fetch, and the handlers must all carry "?q=b" (not lose it).
+    await vi.waitFor(() => expect(onEnd).toHaveBeenCalledWith("<p>b</p>", "/search?q=b"));
+    expect(pushState).toHaveBeenCalledWith({ scrollY: 0 }, "", "/search?q=b");
+    expect(fetchSpy).toHaveBeenCalledWith("/search?q=b");
+    expect(scrollTo).not.toHaveBeenCalled();
+    dispose();
+  });
+
+  it("same-page click matches on pathname + search (identical query scrolls to top)", () => {
+    Object.defineProperty(globalThis, "location", {
+      value: { origin: "http://localhost:3000", pathname: "/search", search: "?q=a" },
+      configurable: true
+    });
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const dispose = attachHistoryFallback({ onStart() {}, onEnd() {}, onError() {} });
+
+    document.body.innerHTML = `<a id="a" href="/search?q=a">x</a>`;
+    const anchor = document.querySelector("#a") as HTMLAnchorElement;
+    Object.defineProperty(anchor, "href", { value: "http://localhost:3000/search?q=a" });
+    anchor.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    dispose();
+  });
+
   it("popstate re-runs navigation for the current location", async () => {
     Object.defineProperty(globalThis, "location", {
-      value: { origin: "http://localhost:3000", pathname: "/back" },
+      value: { origin: "http://localhost:3000", pathname: "/back", search: "" },
       configurable: true
     });
     vi.stubGlobal("scrollTo", vi.fn());
@@ -257,6 +305,27 @@ describe("attachHistoryFallback (fetch error → full browser navigation)", () =
 
     globalThis.dispatchEvent(new Event("popstate"));
     await vi.waitFor(() => expect(onEnd).toHaveBeenCalledWith("<p>b</p>", "/back"));
+    dispose();
+  });
+
+  it("popstate carries the query string and restores scroll by the full path", async () => {
+    Object.defineProperty(globalThis, "location", {
+      value: { origin: "http://localhost:3000", pathname: "/list", search: "?page=2" },
+      configurable: true
+    });
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    sessionStorage.setItem("spa:scroll:/list?page=2", "120");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(new Response("<p>p2</p>", { status: 200 })))
+    );
+    const onEnd = vi.fn();
+    const dispose = attachHistoryFallback({ onStart() {}, onEnd, onError() {} });
+
+    globalThis.dispatchEvent(new Event("popstate"));
+    await vi.waitFor(() => expect(onEnd).toHaveBeenCalledWith("<p>p2</p>", "/list?page=2"));
+    await vi.waitFor(() => expect(scrollTo).toHaveBeenCalledWith(0, 120));
     dispose();
   });
 
@@ -396,7 +465,7 @@ describe("performNavigation", () => {
 describe("Navigation API path", () => {
   it("attachRouter uses the Navigation API when present and intercepts internal nav", () => {
     Object.defineProperty(globalThis, "location", {
-      value: { origin: "http://localhost:3000", pathname: "/" },
+      value: { origin: "http://localhost:3000", pathname: "/", search: "" },
       configurable: true
     });
     const listeners: Array<(e: unknown) => void> = [];
@@ -417,7 +486,7 @@ describe("Navigation API path", () => {
 
   it("ignores non-interceptable and external navigations", () => {
     Object.defineProperty(globalThis, "location", {
-      value: { origin: "http://localhost:3000", pathname: "/" },
+      value: { origin: "http://localhost:3000", pathname: "/", search: "" },
       configurable: true
     });
     let listener: ((e: unknown) => void) | undefined;
@@ -439,7 +508,7 @@ describe("Navigation API path", () => {
 describe("Navigation API intercept handlers", () => {
   it("same-page navigation scrolls to top via the intercept handler", async () => {
     Object.defineProperty(globalThis, "location", {
-      value: { origin: "http://localhost:3000", pathname: "/about" },
+      value: { origin: "http://localhost:3000", pathname: "/about", search: "" },
       configurable: true
     });
     const scrollTo = vi.fn();
@@ -452,9 +521,48 @@ describe("Navigation API intercept handlers", () => {
     expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
   });
 
+  it("query-only change fetches the new query (not treated as same-page)", async () => {
+    Object.defineProperty(globalThis, "location", {
+      value: { origin: "http://localhost:3000", pathname: "/search", search: "?q=a" },
+      configurable: true
+    });
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    const fetchSpy = vi.fn(() => Promise.resolve(new Response("<p>b</p>", { status: 200 })));
+    vi.stubGlobal("fetch", fetchSpy);
+    const onEnd = vi.fn();
+    const listener = attachAndCapture({ onStart: vi.fn(), onEnd, onError: vi.fn() });
+    const event = fakeNavEvent({ destination: { url: "http://localhost:3000/search?q=b" } });
+
+    listener(event);
+    await runIntercept(event);
+    // /search?q=a → /search?q=b must fetch "?q=b" — not short-circuit to a scroll-to-top.
+    expect(fetchSpy).toHaveBeenCalledWith("/search?q=b");
+    expect(onEnd).toHaveBeenCalledWith("<p>b</p>", "/search?q=b");
+    expect(scrollTo).not.toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
+  });
+
+  it("same-page check matches on pathname + search (identical query scrolls to top)", async () => {
+    Object.defineProperty(globalThis, "location", {
+      value: { origin: "http://localhost:3000", pathname: "/search", search: "?q=a" },
+      configurable: true
+    });
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const listener = attachAndCapture({ onStart: vi.fn(), onEnd: vi.fn(), onError: vi.fn() });
+    const event = fakeNavEvent({ destination: { url: "http://localhost:3000/search?q=a" } });
+
+    listener(event);
+    await runIntercept(event);
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("traverse navigation defers scroll restoration to the browser", async () => {
     Object.defineProperty(globalThis, "location", {
-      value: { origin: "http://localhost:3000", pathname: "/" },
+      value: { origin: "http://localhost:3000", pathname: "/", search: "" },
       configurable: true
     });
     vi.stubGlobal("scrollTo", vi.fn());
@@ -474,7 +582,7 @@ describe("Navigation API intercept handlers", () => {
 
   it("push navigation hands off to navigate WITHOUT scrolling (scroll is the swap's job)", async () => {
     Object.defineProperty(globalThis, "location", {
-      value: { origin: "http://localhost:3000", pathname: "/" },
+      value: { origin: "http://localhost:3000", pathname: "/", search: "" },
       configurable: true
     });
     // Forward nav doesn't scroll in the router; the kernel scrolls to top as part of the
