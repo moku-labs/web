@@ -1,8 +1,12 @@
 /**
- * @file build phase — locale-redirects. For each non-prefixed route path, emits a
+ * @file build phase — locale-redirects. For each REQUIRED-`{lang}` route (whose bare,
+ * locale-less path would otherwise 404 — pages writes only `/{locale}/…`), emits a
  * redirect HTML page (`<meta http-equiv="refresh">` + canonical `<link>`) at the
- * bare path that points at the default-locale-prefixed URL. Deliberately does NOT
- * emit a Cloudflare `_redirects` catch-all (an SSG infinite-loop trap). Gated by
+ * bare path that points at the default-locale-prefixed URL. OPTIONAL-`{lang:?}`
+ * routes get NO redirect: the default locale is served BARE, so the pages phase
+ * already writes the real content page at the bare path (plus a `/{defaultLocale}/…`
+ * alias) — a redirect there would overwrite content. Deliberately does NOT emit a
+ * Cloudflare `_redirects` catch-all (an SSG infinite-loop trap). Gated by
  * `config.localeRedirects` (false/unset disables).
  *
  * When `head.defaultOgImage` is configured, each redirect page ALSO carries the
@@ -83,6 +87,12 @@ function pairRoutes(router: RouterSlice): Array<[RouteDefinition, TypedRoute]> {
  * redirect is ever emitted. Removing `lang` yields the real lang-less file/URL
  * (`/`, `/about/`, `/{slug}/`) that must redirect to the default-locale URL.
  *
+ * Only a REQUIRED-`{lang}` route produces a job. On an OPTIONAL-`{lang:?}` route the
+ * compiled `toUrl` serves the default locale BARE (`toUrl({ lang: defaultLocale })`
+ * equals the bare URL), so `target === bareUrl` → `null`. That is by design AND the
+ * collision guard: the pages phase writes the default-locale content page at exactly
+ * that bare file, and a redirect would overwrite it.
+ *
  * @param entry - The compiled `TypedRoute` (owns `toFile`/`toUrl`).
  * @param raw - One raw parameter set from `generate()` (may be `null`/`undefined`).
  * @param defaultLocale - The default locale to redirect bare paths to.
@@ -107,7 +117,10 @@ function redirectJobFor(
   const target = entry.toUrl({ ...bareParams, lang: defaultLocale });
   const bareUrl = entry.toUrl(bareParams);
 
-  // A redirect is only needed when the route is locale-prefixed (bare URL differs).
+  // A redirect is only needed when the default-locale URL differs from the bare URL —
+  // true only for REQUIRED `{lang}` routes. Optional `{lang:?}` routes serve the default
+  // locale bare (target === bareUrl), so they are skipped and the bare content page
+  // written by the pages phase is never clobbered.
   const isLocalePrefixed = target !== bareUrl;
   if (!isLocalePrefixed) {
     // eslint-disable-next-line unicorn/no-null -- `null` signals "no redirect needed"

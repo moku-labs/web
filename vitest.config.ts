@@ -41,7 +41,11 @@ export default defineConfig({
     },
     coverage: {
       provider: "istanbul",
-      include: ["src/**/*.ts"],
+      // Must cover .tsx too: the build phase renderers (og-images.tsx, pages.tsx)
+      // are source like any other. With a bare `*.ts` include, a .tsx file that no
+      // test loads would never be globbed as "untested" and would silently escape
+      // the coverage thresholds.
+      include: ["src/**/*.{ts,tsx}"],
       exclude: ["src/**/types.ts", "src/**/types/**", "src/**/__tests__/**"],
       reporter: ["text", "lcov"],
       thresholds: { lines: 85, functions: 85, branches: 85, statements: 85 }

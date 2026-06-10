@@ -466,6 +466,15 @@ export function createContentApi(ctx: ContentApiContext): Api {
      * suppressed and throws the SAME not-found error (drafts indistinguishable from
      * missing); in development and test drafts load normally.
      *
+     * Cache-first: when a preceding `loadAll()` (or earlier `load()`) already resolved +
+     * rendered this `(slug, locale)`, the cached Article (full html included) is returned
+     * without re-running the Markdown/Shiki pipeline — during a full build every
+     * per-article route loader would otherwise re-render an article `loadAll()` just
+     * rendered. Draft semantics are preserved: in production `loadAll()` filters drafts
+     * out BEFORE caching and the production `load()` path throws before caching, so a
+     * production cache hit is never a draft; misses fall through to a fresh resolve,
+     * which suppresses drafts exactly as before.
+     *
      * @param slug - Article directory name.
      * @param locale - Requested locale code.
      * @returns The resolved Article.
@@ -477,6 +486,10 @@ export function createContentApi(ctx: ContentApiContext): Api {
      * ```
      */
     async load(slug: string, locale: string): Promise<Article> {
+      // Cache hit — reuse the already-rendered article (no re-read, no re-render).
+      const cached = ctx.state.articles.get(locale)?.get(slug);
+      if (cached !== undefined) return cached;
+
       const article = await resolveArticle(ctx, slug, locale);
       if (article === null) {
         throw articleNotFound(slug, locale);
