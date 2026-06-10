@@ -118,21 +118,43 @@ function toUrlPatternSource(pattern: string): string {
 }
 
 /**
+ * Decode a captured group's percent-escapes so params round-trip with
+ * `buildUrl`'s encoding (matchers run against the encoded `location.pathname`).
+ * Falls back to the raw text on malformed escapes (never throw mid-match).
+ *
+ * @param value - The raw captured segment text (possibly percent-encoded).
+ * @returns The decoded param value, or the raw text on malformed escapes.
+ * @example
+ * ```ts
+ * decodeGroupValue("c%23%20tips"); // "c# tips"
+ * ```
+ */
+function decodeGroupValue(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+/**
  * Extract named groups from a `URLPattern` match result, dropping numeric/regex
  * group keys and `undefined` values so only declared, present params remain.
+ * Each value is percent-DECODED ({@link decodeGroupValue}) back to the literal
+ * value `buildUrl` was given.
  *
  * @param groups - The `URLPatternResult.pathname.groups` object.
  * @returns A clean record of named params.
  * @example
  * ```ts
- * extractGroups({ slug: "hello", "0": "x" }); // { slug: "hello" }
+ * extractGroups({ slug: "hello%20there", "0": "x" }); // { slug: "hello there" }
  * ```
  */
 export function extractGroups(groups: Record<string, string | undefined>): Record<string, string> {
   const params: Record<string, string> = {};
   for (const [key, value] of Object.entries(groups)) {
     if (/^\d+$/.test(key)) continue;
-    if (value !== undefined) params[key] = value;
+    if (value !== undefined) params[key] = decodeGroupValue(value);
   }
   return params;
 }

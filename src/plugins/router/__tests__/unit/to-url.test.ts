@@ -41,6 +41,17 @@ describe("buildUrl()", () => {
   it("leaves a static pattern untouched", () => {
     expect(buildUrl("/about/", {})).toBe("/about/");
   });
+
+  it("percent-encodes substituted values (space, &, #, ?)", () => {
+    expect(buildUrl("/tags/{tag}/", { tag: "c# tips & tricks" })).toBe(
+      "/tags/c%23%20tips%20%26%20tricks/"
+    );
+    expect(buildUrl("/{slug}/", { slug: "what?" })).toBe("/what%3F/");
+  });
+
+  it("does not encode static pattern segments", () => {
+    expect(buildUrl("/tags/{tag}/", { tag: "x" })).toBe("/tags/x/");
+  });
 });
 
 describe("buildFilePath()", () => {
@@ -50,6 +61,12 @@ describe("buildFilePath()", () => {
 
   it("handles the root pattern", () => {
     expect(buildFilePath("/", {})).toBe("index.html");
+  });
+
+  it("keeps param values literal (servers decode the request path before file lookup)", () => {
+    expect(buildFilePath("/{lang:?}/tags/{tag}/", { lang: "uk", tag: "c# tips & tricks" })).toBe(
+      "uk/tags/c# tips & tricks/index.html"
+    );
   });
 });
 
@@ -86,5 +103,26 @@ describe("compiled toUrl via byName", () => {
     const feed = route("/feed/").toFile(() => "feed.xml");
     const table = compileRoutes(makeInput({ feed }));
     expect(table.byName.get("feed")?.toFile({})).toBe("feed.xml");
+  });
+});
+
+describe("URL round-trip (buildUrl → matchFn → params)", () => {
+  it("round-trips params containing spaces and '&' through the compiled matcher", () => {
+    const table = compileRoutes(makeInput({ tag: route("/{lang:?}/tags/{tag}/") }));
+    const entry = table.byName.get("tag");
+    const params = { lang: "uk", tag: "c# tips & tricks" };
+
+    const url = entry?.toUrl(params) ?? "";
+    expect(url).toBe("/uk/tags/c%23%20tips%20%26%20tricks/");
+    expect(entry?.matchFn(url)).toEqual(params);
+  });
+
+  it("round-trips a default-locale bare URL back to the injected locale", () => {
+    const table = compileRoutes(makeInput({ tag: route("/{lang:?}/tags/{tag}/") }));
+    const entry = table.byName.get("tag");
+
+    const url = entry?.toUrl({ lang: "en", tag: "a & b" }) ?? "";
+    expect(url).toBe("/tags/a%20%26%20b/");
+    expect(entry?.matchFn(url)).toEqual({ lang: "en", tag: "a & b" });
   });
 });
