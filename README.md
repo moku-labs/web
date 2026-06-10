@@ -41,7 +41,7 @@ bun add @moku-labs/web preact preact-render-to-string
 > `preact` (and `preact-render-to-string`, used by the SSG build) are **peer dependencies** — your app compiles its JSX against the same single `preact` instance the framework renders with. Most package managers install peers automatically, but declare them explicitly so *you* own the version: a second nested copy of preact silently breaks hooks and island hydration.
 
 > [!NOTE]
-> **Status: `0.x` — pre-1.0.** The architecture is stable; the public API is settling but not yet frozen. Pin the version — the npm badge above tracks the current release.
+> **Status: `1.x` — stable.** The architecture and public API are stable and follow [semver](https://semver.org) — breaking changes land only in a new major. The npm badge above tracks the current release.
 
 ## Why @moku-labs/web
 
@@ -239,7 +239,7 @@ bun run build              # build with tsdown (dual ESM+CJS + ESM-only browser 
 bun run test               # all tests (vitest)
 bun run test:unit          # unit tests only
 bun run test:integration   # integration tests only
-bun run test:coverage      # tests with coverage (90% threshold)
+bun run test:coverage      # tests with coverage (85% threshold)
 bun run lint               # biome check + eslint
 bun run lint:fix           # auto-fix lint issues
 bun run format             # format with biome
@@ -249,7 +249,7 @@ bun run check:bundle       # assert the browser bundle is node-free + under the 
 
 ## Requirements
 
-- **Node `>= 24`** — the router uses the global [`URLPattern`](https://developer.mozilla.org/docs/Web/API/URLPattern).
+- **Node `>= 24`** — the engines floor declared in `package.json`. (The route matcher is native `RegExp` — no [`URLPattern`](https://developer.mozilla.org/docs/Web/API/URLPattern) global needed, in Node or in any browser.)
 - **Bun `>= 1.3.14`** — the package manager and test runner. Use `bun` exclusively (never npm/yarn/pnpm).
 - **TypeScript** in strict mode, with `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess`.
 
