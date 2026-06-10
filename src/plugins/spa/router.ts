@@ -123,6 +123,24 @@ export function isInternalLink(url: URL): boolean {
 }
 
 /**
+ * The navigable path of a URL or Location: pathname plus query string. The query
+ * is part of page identity (the kernel's `currentUrl` is pathname + search), so
+ * same-page checks, history entries, fetches, and scroll keys must all carry it —
+ * comparing pathnames alone would treat `/search?q=a` → `/search?q=b` as same-page
+ * and the History fallback would drop the query from the address bar.
+ *
+ * @param target - The URL or Location to read.
+ * @param target.pathname - The path component.
+ * @param target.search - The query-string component (`""` when absent).
+ * @returns The pathname + search string.
+ * @example
+ * pathWithSearch(new URL("https://x.dev/search?q=a")); // "/search?q=a"
+ */
+function pathWithSearch(target: { pathname: string; search: string }): string {
+  return target.pathname + target.search;
+}
+
+/**
  * Save the current scroll position keyed by path (best-effort; ignores storage errors).
  *
  * @param path - The path to key the scroll position under.
@@ -224,12 +242,17 @@ export function runSwap(
  * inside the same transition frame (after the DOM mutation) so component
  * re-mounting is captured by the transition snapshot.
  *
+ * Returns whether the swap was dispatched: `false` when either document lacks
+ * the `swapSelector` region, so the caller can fall back to a full navigation
+ * instead of finishing the SPA nav against an un-swapped body.
+ *
  * @param doc - The fetched document (DOMParser-parsed) holding the new region.
  * @param swapSelector - CSS selector for the region to replace.
  * @param viewTransitions - Whether to wrap the swap in `startViewTransition`.
  * @param onSwapped - Callback run after the DOM mutation (mount/notify/scroll).
  * @param beforeCapture - Optional hook run synchronously just before the swap/capture
  *   (forwarded to {@link runSwap} — e.g. scroll to the destination position).
+ * @returns `true` when the swap was dispatched, `false` when either document lacks the region.
  * @example
  * swapRegion(doc, "main > section", false, () => mountNew());
  */
@@ -239,10 +262,10 @@ export function swapRegion(
   viewTransitions: boolean,
   onSwapped: () => void,
   beforeCapture?: () => void
-): void {
+): boolean {
   const newContent = doc.querySelector(swapSelector);
   const currentContent = document.querySelector(swapSelector);
-  if (!newContent || !currentContent) return;
+  if (!newContent || !currentContent) return false;
   runSwap(
     () => {
       currentContent.replaceWith(newContent);
@@ -251,6 +274,7 @@ export function swapRegion(
     viewTransitions,
     beforeCapture
   );
+  return true;
 }
 
 /**
@@ -301,18 +325,22 @@ export function attachHistoryFallback(
   const onClick = (event: MouseEvent): void => {
     const url = resolveClickTarget(event);
     if (!url) return;
+    // Same-page fragment link (<a href="#section">): bail WITHOUT preventDefault so the
+    // browser performs the native anchor jump and updates the hash. This mirrors the
+    // Navigation API path, which skips hash-only navigations via `navEvent.hashChange`.
+    if (url.pathname === location.pathname && url.hash) return;
     event.preventDefault();
-    if (url.pathname === location.pathname) {
+    if (pathWithSearch(url) === pathWithSearch(location)) {
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
-    saveScrollPosition(location.pathname);
-    history.pushState({ scrollY: 0 }, "", url.pathname);
+    saveScrollPosition(pathWithSearch(location));
+    history.pushState({ scrollY: 0 }, "", pathWithSearch(url));
     // Forward nav scrolls to top as PART of the swap (runSwap's `beforeCapture`), not
     // here: that fires just before the View Transition snapshot (so scrollY=0 at capture
     // → no delta → the sticky header holds) AND after the fetch (so there is no "scroll
     // up, then the page loads" pause). The router just hands off the navigation.
-    navigate(url.pathname).catch(() => {});
+    navigate(pathWithSearch(url)).catch(() => {});
   };
   /**
    * Re-run navigation on back/forward, restoring the saved scroll position.
@@ -323,8 +351,9 @@ export function attachHistoryFallback(
   const onPopState = (): void => {
     // Traverse: keep the saved scroll. `scrollToTop: false` stops the swap resetting to
     // top, then we restore the saved position once the swap has dispatched.
-    navigate(location.pathname, false)
-      .then(() => restoreScrollPosition(location.pathname))
+    const path = pathWithSearch(location);
+    navigate(path, false)
+      .then(() => restoreScrollPosition(path))
       .catch(() => {});
   };
   document.addEventListener("click", onClick);
@@ -363,7 +392,7 @@ export function attachNavigationApi(
       !navEvent.canIntercept || navEvent.hashChange || navEvent.downloadRequest;
     if (shouldSkipIntercept) return;
     if (!isInternalLink(url)) return;
-    if (url.pathname === location.pathname) {
+    if (pathWithSearch(url) === pathWithSearch(location)) {
       navEvent.intercept({
         // eslint-disable-next-line jsdoc/require-jsdoc -- inline same-page scroll handler
         handler: () => {
@@ -383,10 +412,10 @@ export function attachNavigationApi(
         // `beforeCapture`) — captured at scrollY=0 (no delta → the sticky header holds) and
         // after the fetch (no "scroll up, then load" pause).
         if (navEvent.navigationType === "traverse") {
-          await navigate(url.pathname, false);
+          await navigate(pathWithSearch(url), false);
           navEvent.scroll();
         } else {
-          await navigate(url.pathname);
+          await navigate(pathWithSearch(url));
         }
       }
     });
