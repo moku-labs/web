@@ -20,15 +20,15 @@
  * locally via `bun run check:bundle`. Node built-ins only — no dependencies.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { basename, dirname, relative, resolve } from "node:path";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 
 // ───────────────────────────── Configuration ─────────────────────────────
 
-const DIST = resolve(dirname(fileURLToPath(import.meta.url)), "..", "dist");
-const BROWSER_ENTRY = resolve(DIST, "browser.mjs");
-const NODE_ENTRY = resolve(DIST, "index.mjs");
+const DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "dist");
+const BROWSER_ENTRY = path.resolve(DIST, "browser.mjs");
+const NODE_ENTRY = path.resolve(DIST, "index.mjs");
 
 /** A STATIC import of any of these into the browser graph is a node/native leak. */
 const BANNED_SPECIFIERS: readonly RegExp[] = [
@@ -71,8 +71,8 @@ interface GateReport {
   readonly closure: readonly SizedFile[];
   /** Sum of each closure file's individual gzip size — what a client downloads. */
   readonly closureGzipBytes: number;
-  /** The Node entry's sizes for contrast, or `null` when it has not been built. */
-  readonly nodeEntry: { readonly rawBytes: number; readonly gzipBytes: number } | null;
+  /** The Node entry's sizes for contrast, or `undefined` when it has not been built. */
+  readonly nodeEntry: { readonly rawBytes: number; readonly gzipBytes: number } | undefined;
   /** Human-readable gate violations; empty when the bundle is clean. */
   readonly problems: readonly string[];
 }
@@ -97,17 +97,24 @@ type Closure = ReadonlyMap<string, readonly string[]>;
  * @returns The specifier of every static import/re-export, in source order.
  */
 function staticSpecifiers(code: string): string[] {
+  // The backtracking these patterns allow is acceptable: they only ever scan
+  // TRUSTED, machine-generated bundler output from our own `dist/` (hoisted,
+  // one-import-per-line chunks) — never untrusted input — so ReDoS is not a
+  // realistic concern here and the readable patterns win.
   const patterns = [
     // `import … from "x"` (default / named / namespace)
+    // eslint-disable-next-line sonarjs/slow-regex -- trusted local bundler output only (see above)
     /(?:^|[;\n}])\s*import\b[^'"()]*?\bfrom\s*["']([^"']+)["']/g,
     // side-effect `import "x"` — the `\s+` after `import` excludes dynamic `import("x")`
+    // eslint-disable-next-line sonarjs/slow-regex -- trusted local bundler output only (see above)
     /(?:^|[;\n}])\s*import\s+["']([^"']+)["']/g,
     // `export … from "x"`
+    // eslint-disable-next-line sonarjs/slow-regex -- trusted local bundler output only (see above)
     /(?:^|[;\n}])\s*export\b[^'"()]*?\bfrom\s*["']([^"']+)["']/g
   ];
-  return patterns.flatMap((re) =>
+  return patterns.flatMap(re =>
     [...code.matchAll(re)]
-      .map((match) => match[1])
+      .map(match => match[1])
       .filter((specifier): specifier is string => specifier !== undefined)
   );
 }
@@ -117,13 +124,13 @@ function staticSpecifiers(code: string): string[] {
  *
  * @param specifier - The import specifier (e.g. `"./chunk.mjs"` or `"node:fs"`).
  * @param fromFile - Absolute path of the importing file, for relative resolution.
- * @returns The absolute local path, or `null` for bare/package specifiers and for
- *   relative paths that do not resolve to an existing file.
+ * @returns The absolute local path, or `undefined` for bare/package specifiers and
+ *   for relative paths that do not resolve to an existing file.
  */
-function resolveLocalImport(specifier: string, fromFile: string): string | null {
-  if (!specifier.startsWith(".")) return null;
-  const target = resolve(dirname(fromFile), specifier);
-  return existsSync(target) ? target : null;
+function resolveLocalImport(specifier: string, fromFile: string): string | undefined {
+  if (!specifier.startsWith(".")) return undefined;
+  const target = path.resolve(path.dirname(fromFile), specifier);
+  return existsSync(target) ? target : undefined;
 }
 
 /**
@@ -145,7 +152,7 @@ function staticClosure(entry: string): Closure {
     modules.set(file, specifiers);
     for (const specifier of specifiers) {
       const local = resolveLocalImport(specifier, file);
-      if (local !== null) queue.push(local);
+      if (local !== undefined) queue.push(local);
     }
   }
   return modules;
@@ -188,9 +195,11 @@ function formatKb(bytes: number): string {
 function findNodeLeaks(closure: Closure): string[] {
   const leaks: string[] = [];
   for (const [file, specifiers] of closure) {
-    const banned = specifiers.filter((spec) => BANNED_SPECIFIERS.some((pattern) => pattern.test(spec)));
+    const banned = specifiers.filter(spec => BANNED_SPECIFIERS.some(pattern => pattern.test(spec)));
     if (banned.length > 0) {
-      leaks.push(`${relative(DIST, file)} statically imports → ${[...new Set(banned)].join(", ")}`);
+      leaks.push(
+        `${path.relative(DIST, file)} statically imports → ${[...new Set(banned)].join(", ")}`
+      );
     }
   }
   return leaks;
@@ -207,8 +216,11 @@ function findNodeLeaks(closure: Closure): string[] {
  */
 function findStaticWriterChunk(files: Iterable<string>): string[] {
   return [...files]
-    .filter((file) => /(?:^|\/)writer-[^/]*\.mjs$/.test(file))
-    .map((file) => `static closure includes the node writer chunk ${basename(file)} (must be dynamic-only)`);
+    .filter(file => /(?:^|\/)writer-[^/]*\.mjs$/.test(file))
+    .map(
+      file =>
+        `static closure includes the node writer chunk ${path.basename(file)} (must be dynamic-only)`
+    );
 }
 
 /**
@@ -220,7 +232,9 @@ function findStaticWriterChunk(files: Iterable<string>): string[] {
  */
 function checkSizeBudget(closureGzipBytes: number): string[] {
   if (closureGzipBytes <= SIZE_BUDGET_BYTES) return [];
-  return [`static closure ${formatKb(closureGzipBytes)} gz exceeds budget ${formatKb(SIZE_BUDGET_BYTES)} gz`];
+  return [
+    `static closure ${formatKb(closureGzipBytes)} gz exceeds budget ${formatKb(SIZE_BUDGET_BYTES)} gz`
+  ];
 }
 
 // ────────────────────────────── Orchestration ────────────────────────────
@@ -234,8 +248,8 @@ function checkSizeBudget(closureGzipBytes: number): string[] {
 function analyzeBrowserBundle(): GateReport {
   const closure = staticClosure(BROWSER_ENTRY);
   const sizedClosure: SizedFile[] = [...closure.keys()]
-    .sort()
-    .map((file) => ({ path: relative(DIST, file), gzipBytes: gzipBytesOf(file) }));
+    .toSorted()
+    .map(file => ({ path: path.relative(DIST, file), gzipBytes: gzipBytesOf(file) }));
   const closureGzipBytes = sizedClosure.reduce((total, file) => total + file.gzipBytes, 0);
 
   return {
@@ -245,7 +259,7 @@ function analyzeBrowserBundle(): GateReport {
     closureGzipBytes,
     nodeEntry: existsSync(NODE_ENTRY)
       ? { rawBytes: readFileSync(NODE_ENTRY).length, gzipBytes: gzipBytesOf(NODE_ENTRY) }
-      : null,
+      : undefined,
     problems: [
       ...findNodeLeaks(closure),
       ...findStaticWriterChunk(closure.keys()),
@@ -263,16 +277,21 @@ function analyzeBrowserBundle(): GateReport {
  * @returns The formatted report, ready to print in a single call.
  */
 function formatReport(report: GateReport): string {
-  const pathWidth = Math.max(...report.closure.map((file) => file.path.length));
+  const pathWidth = Math.max(...report.closure.map(file => file.path.length));
   const lines = [
     "browser bundle gate — static graph = what a client actually ships",
     "",
     `  entry   dist/browser.mjs   ${formatKb(report.entryRawBytes)} raw / ${formatKb(report.entryGzipBytes)} gz`,
     `  static closure (${report.closure.length} files):   ${formatKb(report.closureGzipBytes)} gz   (budget ${formatKb(SIZE_BUDGET_BYTES)} gz)`,
-    ...report.closure.map((file) => `    ${file.path.padEnd(pathWidth)}   ${formatKb(file.gzipBytes).padStart(10)} gz`)
+    ...report.closure.map(
+      file => `    ${file.path.padEnd(pathWidth)}   ${formatKb(file.gzipBytes).padStart(10)} gz`
+    )
   ];
-  if (report.nodeEntry !== null) {
-    lines.push("", `  contrast  dist/index.mjs (Node entry)   ${formatKb(report.nodeEntry.rawBytes)} raw / ${formatKb(report.nodeEntry.gzipBytes)} gz`);
+  if (report.nodeEntry !== undefined) {
+    lines.push(
+      "",
+      `  contrast  dist/index.mjs (Node entry)   ${formatKb(report.nodeEntry.rawBytes)} raw / ${formatKb(report.nodeEntry.gzipBytes)} gz`
+    );
   }
   return lines.join("\n");
 }
@@ -284,10 +303,13 @@ function formatReport(report: GateReport): string {
  * @returns The formatted failure message.
  */
 function formatFailure(problems: readonly string[]): string {
-  return ["❌ browser bundle gate FAILED:", ...problems.map((problem) => `   - ${problem}`)].join("\n");
+  return ["❌ browser bundle gate FAILED:", ...problems.map(problem => `   - ${problem}`)].join(
+    "\n"
+  );
 }
 
-const PASS_MESSAGE = "✅ browser bundle gate passed — zero static node/native imports, under size budget.";
+const PASS_MESSAGE =
+  "✅ browser bundle gate passed — zero static node/native imports, under size budget.";
 
 /**
  * Entry point: guards that the bundle is built, analyzes it, prints the report, and
