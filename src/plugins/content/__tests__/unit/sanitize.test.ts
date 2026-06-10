@@ -20,4 +20,19 @@ describe("content/pipeline/sanitize", () => {
     const imgAttrs = schema.attributes?.img ?? [];
     expect(imgAttrs).toContain("loading");
   });
+
+  it("allowlists class/className globally but NEVER style (CSS is not sanitized)", () => {
+    const schema = buildSanitizeSchema();
+    const wildcard = schema.attributes?.["*"] ?? [];
+    expect(wildcard).toContain("class");
+    expect(wildcard).toContain("className");
+    // A global style allowlist would weaken the XSS boundary (overlay/exfiltration CSS).
+    expect(wildcard).not.toContain("style");
+  });
+
+  it("keeps style scoped to pre/code for Shiki block-level theme colors", () => {
+    const schema = buildSanitizeSchema();
+    expect(schema.attributes?.pre ?? []).toContain("style");
+    expect(schema.attributes?.code ?? []).toContain("style");
+  });
 });

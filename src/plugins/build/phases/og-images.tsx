@@ -500,8 +500,9 @@ async function renderArticleOg(
     const png = await deps.renderPng(deps.input);
     await mkdir(deps.outDir, { recursive: true });
     // Name the PNG by the URL-clean `slug`, NOT `loadAll`'s reassigned `${locale}:${index}:${slug}`
-    // contentId. Route loaders see `load()`'s contentId === slug (and `computed.slug`), so the file
-    // must be `/og/{slug}.png` for a consumer's `og:image` to resolve. The hash CACHE key stays
+    // contentId. Route loaders' `load()` sees contentId as the raw slug on a cache miss and the
+    // reassigned id on a cache hit, while `computed.slug` is stable in both — so the file must be
+    // `/og/{slug}.png` for a consumer's `og:image` to resolve. The hash CACHE key stays
     // `contentId` (stable + unique across locales).
     await writeFile(path.join(deps.outDir, `${article.computed.slug}.png`), png);
     deps.cache.set(key, deps.hash);
