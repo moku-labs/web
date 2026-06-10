@@ -17,8 +17,19 @@ export type RouterTeardown = () => void;
  * View Transition snapshot), NOT by the router after navigating — so the old/new
  * snapshots share the same scrollY and a sticky header never un-pins. Traverse
  * (back/forward) passes `false` to keep its restored scroll position.
+ *
+ * `signal` (the Navigation API's `navEvent.signal`) aborts when this navigation
+ * is superseded or canceled. Implementations MUST NOT apply their swap once it
+ * has aborted: on a rapid back→forward the URL commits synchronously per
+ * navigation but the fetch-and-swap is async, so without the signal two fetches
+ * race last-write-wins and a stale swap can land after the live navigation
+ * committed (URL showing one page, body showing another).
  */
-export type NavigateFunction = (pathname: string, scrollToTop?: boolean) => Promise<void>;
+export type NavigateFunction = (
+  pathname: string,
+  scrollToTop?: boolean,
+  signal?: AbortSignal
+) => Promise<void>;
 
 /**
  * Minimal Navigation API surface used by the router. The Navigation API is not
@@ -35,6 +46,8 @@ interface NavigateEvent extends Event {
   readonly hashChange: boolean;
   /** The navigation type. */
   readonly navigationType: "push" | "replace" | "reload" | "traverse";
+  /** Aborts when this navigation is superseded by a newer one (or canceled). */
+  readonly signal: AbortSignal;
   /**
    * Intercept the navigation with a custom handler.
    *
@@ -175,19 +188,35 @@ export function restoreScrollPosition(path: string): void {
  * Fetch a page and hand its HTML to the handlers; on any error fall back to a
  * full browser navigation (`location.href = pathname`).
  *
+ * When `signal` aborts (this navigation was superseded by a newer one) the
+ * fetch is cancelled and NOTHING is applied: no swap (onEnd) and no fallback
+ * reload — the live navigation owns the document from that point on.
+ *
  * @param pathname - The destination pathname.
  * @param handlers - The navigation lifecycle callbacks.
+ * @param signal - Aborts when this navigation is superseded (`navEvent.signal`).
  * @returns A promise that resolves once the swap (or fallback) is dispatched.
  * @example
- * await performNavigation("/about", handlers);
+ * await performNavigation("/about", handlers, navEvent.signal);
  */
-export async function performNavigation(pathname: string, handlers: RouterHandlers): Promise<void> {
+export async function performNavigation(
+  pathname: string,
+  handlers: RouterHandlers,
+  signal?: AbortSignal
+): Promise<void> {
   handlers.onStart(pathname);
   try {
-    const response = await fetch(pathname);
+    const response = await (signal ? fetch(pathname, { signal }) : fetch(pathname));
     if (!response.ok) throw new Error(`HTTP ${String(response.status)}`);
-    handlers.onEnd(await response.text(), pathname);
+    const html = await response.text();
+    // A superseded navigation must never apply its swap: bail before onEnd
+    // (swap + head-sync + island teardown) once the browser aborted this nav.
+    if (signal?.aborted) return;
+    handlers.onEnd(html, pathname);
   } catch {
+    // Aborted = superseded, not failed: vanish quietly. The href fallback would
+    // force a full reload of the STALE destination over the live navigation.
+    if (signal?.aborted) return;
     handlers.onError();
     location.href = pathname;
   }
@@ -313,8 +342,26 @@ export function resolveClickTarget(event: MouseEvent): URL | undefined {
  */
 export function attachHistoryFallback(
   handlers: RouterHandlers,
-  navigate: NavigateFunction = pathname => performNavigation(pathname, handlers)
+  navigate: NavigateFunction = (pathname, _scrollToTop, signal) =>
+    performNavigation(pathname, handlers, signal)
 ): RouterTeardown {
+  // One in-flight navigation at a time. The History API has no navEvent.signal, so the
+  // router mints its own: each new click/popstate aborts the previous fetch-and-swap,
+  // closing the same last-write-wins race the Navigation API path closes — without this,
+  // a stale fetch resolving late would swap its body over the live navigation's URL.
+  let controller: AbortController | undefined;
+  /**
+   * Supersede the in-flight navigation (if any) and mint the next one's abort signal.
+   *
+   * @returns The fresh navigation's abort signal.
+   * @example
+   * const signal = supersede();
+   */
+  const supersede = (): AbortSignal => {
+    controller?.abort();
+    controller = new AbortController();
+    return controller.signal;
+  };
   /**
    * Intercept an internal-link click and run a History-API navigation.
    *
@@ -340,7 +387,7 @@ export function attachHistoryFallback(
     // here: that fires just before the View Transition snapshot (so scrollY=0 at capture
     // → no delta → the sticky header holds) AND after the fetch (so there is no "scroll
     // up, then the page loads" pause). The router just hands off the navigation.
-    navigate(pathWithSearch(url)).catch(() => {});
+    navigate(pathWithSearch(url), true, supersede()).catch(() => {});
   };
   /**
    * Re-run navigation on back/forward, restoring the saved scroll position.
@@ -352,8 +399,12 @@ export function attachHistoryFallback(
     // Traverse: keep the saved scroll. `scrollToTop: false` stops the swap resetting to
     // top, then we restore the saved position once the swap has dispatched.
     const path = pathWithSearch(location);
-    navigate(path, false)
-      .then(() => restoreScrollPosition(path))
+    const signal = supersede();
+    navigate(path, false, signal)
+      .then(() => {
+        // A superseded traverse must not poke scroll restoration on a dead navigation.
+        if (!signal.aborted) restoreScrollPosition(path);
+      })
       .catch(() => {});
   };
   document.addEventListener("click", onClick);
@@ -377,7 +428,8 @@ export function attachHistoryFallback(
 export function attachNavigationApi(
   navigation: NavigationApi,
   handlers: RouterHandlers,
-  navigate: NavigateFunction = pathname => performNavigation(pathname, handlers)
+  navigate: NavigateFunction = (pathname, _scrollToTop, signal) =>
+    performNavigation(pathname, handlers, signal)
 ): RouterTeardown {
   /**
    * Handle a `navigate` event: classify, then intercept with fetch-and-swap.
@@ -411,11 +463,14 @@ export function attachNavigationApi(
         // Forward nav (push/replace) scrolls to top as PART of the swap (runSwap's
         // `beforeCapture`) — captured at scrollY=0 (no delta → the sticky header holds) and
         // after the fetch (no "scroll up, then load" pause).
+        // `navEvent.signal` rides along so a superseded navigation (rapid back→forward)
+        // can never apply its swap after the live one committed.
         if (navEvent.navigationType === "traverse") {
-          await navigate(pathWithSearch(url), false);
-          navEvent.scroll();
+          await navigate(pathWithSearch(url), false, navEvent.signal);
+          // A superseded traverse must not poke scroll restoration on a dead navigation.
+          if (!navEvent.signal.aborted) navEvent.scroll();
         } else {
-          await navigate(pathWithSearch(url));
+          await navigate(pathWithSearch(url), true, navEvent.signal);
         }
       }
     });

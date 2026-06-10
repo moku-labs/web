@@ -34,6 +34,7 @@ function fakeNavEvent(overrides: Record<string, unknown> = {}) {
     // eslint-disable-next-line unicorn/no-null -- mirrors the native NavigateEvent.downloadRequest shape
     downloadRequest: null,
     navigationType: "push",
+    signal: new AbortController().signal,
     intercept: vi.fn(),
     scroll: vi.fn(),
     ...overrides
@@ -264,7 +265,7 @@ describe("attachHistoryFallback (fetch error → full browser navigation)", () =
     // the address bar, the fetch, and the handlers must all carry "?q=b" (not lose it).
     await vi.waitFor(() => expect(onEnd).toHaveBeenCalledWith("<p>b</p>", "/search?q=b"));
     expect(pushState).toHaveBeenCalledWith({ scrollY: 0 }, "", "/search?q=b");
-    expect(fetchSpy).toHaveBeenCalledWith("/search?q=b");
+    expect(fetchSpy).toHaveBeenCalledWith("/search?q=b", { signal: expect.any(AbortSignal) });
     expect(scrollTo).not.toHaveBeenCalled();
     dispose();
   });
@@ -445,6 +446,59 @@ describe("performNavigation", () => {
     expect(onEnd).toHaveBeenCalledWith("<p>hi</p>", "/page");
   });
 
+  it("passes the navigation's abort signal to fetch", async () => {
+    const fetchSpy = vi.fn(() => Promise.resolve(new Response("<p>x</p>", { status: 200 })));
+    vi.stubGlobal("fetch", fetchSpy);
+    const controller = new AbortController();
+    await performNavigation("/page", { onStart() {}, onEnd() {}, onError() {} }, controller.signal);
+    expect(fetchSpy).toHaveBeenCalledWith("/page", { signal: controller.signal });
+  });
+
+  it("never applies the swap once the signal has aborted (abort lands mid-fetch)", async () => {
+    const controller = new AbortController();
+    const onEnd = vi.fn();
+    // The stub ignores the signal and still resolves with HTML — the hostile case:
+    // the explicit aborted check before onEnd must stop the swap, not the fetch rejection.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => {
+        controller.abort();
+        return Promise.resolve(new Response("<p>stale</p>", { status: 200 }));
+      })
+    );
+    await performNavigation("/stale", { onStart() {}, onEnd, onError() {} }, controller.signal);
+    expect(onEnd).not.toHaveBeenCalled();
+  });
+
+  it("an aborted fetch does NOT trigger the full-reload fallback", async () => {
+    const hrefSetter = vi.fn();
+    Object.defineProperty(globalThis, "location", {
+      value: {
+        origin: "http://localhost:3000",
+        pathname: "/",
+        search: "",
+        get href() {
+          return "";
+        },
+        set href(v: string) {
+          hrefSetter(v);
+        }
+      },
+      configurable: true
+    });
+    const controller = new AbortController();
+    controller.abort();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.reject(new DOMException("The operation was aborted.", "AbortError")))
+    );
+    const onError = vi.fn();
+    await performNavigation("/stale", { onStart() {}, onEnd() {}, onError }, controller.signal);
+    // Superseded ≠ failed: falling back here would full-reload the STALE destination.
+    expect(onError).not.toHaveBeenCalled();
+    expect(hrefSetter).not.toHaveBeenCalled();
+  });
+
   it("calls onError when the response is not ok", async () => {
     const onError = vi.fn();
     const hrefSetter = vi.fn();
@@ -452,6 +506,7 @@ describe("performNavigation", () => {
       value: {
         origin: "http://localhost:3000",
         pathname: "/",
+        search: "",
         get href() {
           return "";
         },
@@ -546,7 +601,7 @@ describe("Navigation API intercept handlers", () => {
     listener(event);
     await runIntercept(event);
     // /search?q=a → /search?q=b must fetch "?q=b" — not short-circuit to a scroll-to-top.
-    expect(fetchSpy).toHaveBeenCalledWith("/search?q=b");
+    expect(fetchSpy).toHaveBeenCalledWith("/search?q=b", { signal: event.signal });
     expect(onEnd).toHaveBeenCalledWith("<p>b</p>", "/search?q=b");
     expect(scrollTo).not.toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
   });
@@ -610,5 +665,146 @@ describe("Navigation API intercept handlers", () => {
     await runIntercept(event);
     expect(onEnd).toHaveBeenCalledWith("<p>x</p>", "/about");
     expect(scrollTo).not.toHaveBeenCalled();
+  });
+
+  it("threads navEvent.signal into the default navigate's fetch", async () => {
+    Object.defineProperty(globalThis, "location", {
+      value: { origin: "http://localhost:3000", pathname: "/" },
+      configurable: true
+    });
+    const fetchSpy = vi.fn(() => Promise.resolve(new Response("<p>x</p>", { status: 200 })));
+    vi.stubGlobal("fetch", fetchSpy);
+    const listener = attachAndCapture({ onStart: vi.fn(), onEnd: vi.fn(), onError: vi.fn() });
+    const controller = new AbortController();
+    const event = fakeNavEvent({ signal: controller.signal });
+
+    listener(event);
+    await runIntercept(event);
+    expect(fetchSpy).toHaveBeenCalledWith("/about", { signal: controller.signal });
+  });
+});
+
+describe("superseded navigation (rapid back→forward race)", () => {
+  it("a stale swap that resolves LAST never lands — only the live navigation swaps", async () => {
+    const hrefSetter = vi.fn();
+    Object.defineProperty(globalThis, "location", {
+      value: {
+        origin: "http://localhost:3000",
+        pathname: "/",
+        search: "",
+        get href() {
+          return "";
+        },
+        set href(v: string) {
+          hrefSetter(v);
+        }
+      },
+      configurable: true
+    });
+    // Each fetch hangs until its release function is called — resolution order is ours.
+    const release: Array<(html: string) => void> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<Response>(resolve => {
+            release.push((html: string) => resolve(new Response(html, { status: 200 })));
+          })
+      )
+    );
+    const onEnd = vi.fn();
+    const listener = attachAndCapture({ onStart: vi.fn(), onEnd, onError: vi.fn() });
+
+    // Back navigation A begins (its URL commits, fetch in flight)…
+    const abortA = new AbortController();
+    const eventA = fakeNavEvent({
+      navigationType: "traverse",
+      destination: { url: "http://localhost:3000/page-a" },
+      signal: abortA.signal
+    });
+    listener(eventA);
+    const pendingA = runIntercept(eventA);
+
+    // …then a rapid forward B supersedes it: the browser aborts A's signal and
+    // dispatches B's navigate event.
+    abortA.abort();
+    const eventB = fakeNavEvent({
+      navigationType: "traverse",
+      destination: { url: "http://localhost:3000/page-b" },
+      signal: new AbortController().signal
+    });
+    listener(eventB);
+    const pendingB = runIntercept(eventB);
+
+    // B's fetch resolves first; A's STALE fetch resolves last (the racy ordering).
+    release[1]?.("<p>B</p>");
+    await pendingB;
+    release[0]?.("<p>A</p>");
+    await pendingA;
+
+    // Last-write-wins is dead: only the live navigation swapped; the stale one
+    // neither swapped, nor restored scroll, nor fell back to a full reload.
+    expect(onEnd).toHaveBeenCalledTimes(1);
+    expect(onEnd).toHaveBeenCalledWith("<p>B</p>", "/page-b");
+    expect(eventB.scroll).toHaveBeenCalledTimes(1);
+    expect(eventA.scroll).not.toHaveBeenCalled();
+    expect(hrefSetter).not.toHaveBeenCalled();
+  });
+});
+
+describe("superseded navigation via History fallback (rapid popstate race)", () => {
+  it("a stale swap that resolves LAST never lands — only the live navigation swaps", async () => {
+    const hrefSetter = vi.fn();
+    const loc = {
+      origin: "http://localhost:3000",
+      pathname: "/page-a",
+      search: "",
+      get href() {
+        return "";
+      },
+      set href(v: string) {
+        hrefSetter(v);
+      }
+    };
+    Object.defineProperty(globalThis, "location", { value: loc, configurable: true });
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    // B has a saved scroll position — if the stale navigation poked restoration it
+    // would re-restore it, so the scrollTo call count exposes the guard.
+    sessionStorage.setItem("spa:scroll:/page-b", "111");
+    // Each fetch hangs until its release function is called — resolution order is ours.
+    const release: Array<(html: string) => void> = [];
+    const fetchSpy = vi.fn(
+      (_path: string, _options?: { signal?: AbortSignal }) =>
+        new Promise<Response>(resolve => {
+          release.push((html: string) => resolve(new Response(html, { status: 200 })));
+        })
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+    const onEnd = vi.fn();
+    const dispose = attachHistoryFallback({ onStart() {}, onEnd, onError() {} });
+
+    // Back navigation A begins (popstate fired, fetch in flight)…
+    globalThis.dispatchEvent(new Event("popstate"));
+    // …then a rapid forward B supersedes it: the fallback aborts A's controller
+    // and starts B's fetch-and-swap.
+    loc.pathname = "/page-b";
+    globalThis.dispatchEvent(new Event("popstate"));
+    expect(fetchSpy.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+
+    // B's fetch resolves first; its swap lands and its scroll position is restored.
+    release[1]?.("<p>B</p>");
+    await vi.waitFor(() => expect(scrollTo).toHaveBeenCalledWith(0, 111));
+    // A's STALE fetch resolves last (the racy ordering); let its chain fully settle.
+    release[0]?.("<p>A</p>");
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    // Last-write-wins is dead: only the live navigation swapped; the stale one
+    // neither swapped, nor restored scroll, nor fell back to a full reload.
+    expect(onEnd).toHaveBeenCalledTimes(1);
+    expect(onEnd).toHaveBeenCalledWith("<p>B</p>", "/page-b");
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+    expect(hrefSetter).not.toHaveBeenCalled();
+    dispose();
   });
 });

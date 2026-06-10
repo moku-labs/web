@@ -480,3 +480,73 @@ describe("kernel.processNav — client DATA path (data plugin composed)", () => 
     await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledWith("/en/hello/"));
   });
 });
+
+describe("kernel navigation — superseded navigation (navEvent.signal)", () => {
+  it("a DATA navigation superseded mid-fetch never swaps and never falls back", async () => {
+    // A data reader that hangs until released — the abort lands while it is in flight.
+    let releaseData: ((value: unknown) => void) | undefined;
+    const state: SpaState = createState({ global: {}, config: {} });
+    const emit = vi.fn();
+    const dataDeps: SpaKernelDeps = {
+      router: makeRouter("hybrid", makeDataRoute()),
+      head: { render: () => "" } as unknown as HeadApi,
+      dataAt: vi.fn(
+        () =>
+          new Promise(resolve => {
+            releaseData = resolve;
+          })
+      )
+    };
+    const kernel = createSpaKernel(state, {}, emit, dataDeps);
+    kernel.init();
+
+    // Pin the location (the router classifies the destination against location.origin).
+    Object.defineProperty(globalThis, "location", {
+      value: { origin: "http://localhost:3000", pathname: "/", search: "" },
+      configurable: true
+    });
+
+    // Boot against a stubbed Navigation API to capture the kernel's injected navigate.
+    let listener: ((e: unknown) => void) | undefined;
+    vi.stubGlobal("navigation", {
+      addEventListener: (_t: string, l: (e: unknown) => void) => {
+        listener = l;
+      },
+      removeEventListener: vi.fn()
+    });
+    kernel.boot();
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+
+    // A navigation begins (data fetch in flight)…
+    const controller = new AbortController();
+    const intercept = vi.fn();
+    listener?.({
+      destination: { url: "http://localhost:3000/en/hello/" },
+      canIntercept: true,
+      hashChange: false,
+      // eslint-disable-next-line unicorn/no-null -- mirrors the native NavigateEvent.downloadRequest shape
+      downloadRequest: null,
+      navigationType: "push",
+      signal: controller.signal,
+      intercept,
+      scroll: vi.fn()
+    });
+    const options = intercept.mock.calls.at(0)?.at(0) as { handler: () => Promise<void> };
+    const pending = options.handler();
+
+    // …and is superseded (the browser aborts its signal) while the data fetch hangs.
+    controller.abort();
+    releaseData?.({ title: "Stale" });
+    await pending;
+
+    // The dead navigation swapped nothing, emitted nothing, and did NOT degrade to
+    // the HTML-over-fetch fallback (that fetch would race the live navigation).
+    expect(document.querySelector("#page")?.textContent).toBe("old");
+    expect(emit).not.toHaveBeenCalledWith("spa:navigated", expect.anything());
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    kernel.dispose();
+    vi.unstubAllGlobals();
+  });
+});
