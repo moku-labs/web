@@ -242,6 +242,50 @@ describe("content/api", () => {
     expect(article.frontmatter.language).toBe("uk");
   });
 
+  it("load() reuses the loadAll cache — each article renders ONCE across loadAll + load", async () => {
+    // Regression: during a full build loadAll() resolves + renders every article, then
+    // every per-article route loader calls load() — which used to re-read + re-run the
+    // Markdown/Shiki pipeline, rendering every article TWICE per build.
+    const { ctx } = makeCtx({ locales: ["en"], defaultLocale: "en" });
+    const api = createContentApi(ctx);
+    const spy = vi.spyOn(ctx.provider, "readArticle");
+
+    const byLocale = await api.loadAll(); // the full build's single render pass
+    const readsAfterLoadAll = spy.mock.calls.length;
+    expect(readsAfterLoadAll).toBeGreaterThan(0);
+
+    // Every per-article loader call hits the cache — zero additional reads/renders.
+    for (const article of byLocale.get("en") ?? []) {
+      const loaded = await api.load(article.computed.slug, "en");
+      expect(loaded.html).toBeTruthy(); // the cached entry carries the full rendered html
+    }
+    expect(spy.mock.calls.length).toBe(readsAfterLoadAll);
+  });
+
+  it("load() serves the cached fallback article for a non-default locale after loadAll", async () => {
+    const { ctx } = makeCtx({ locales: ["en", "uk"], defaultLocale: "en" });
+    const api = createContentApi(ctx);
+    await api.loadAll(); // caches uk's fallback-resolved second-post under the uk locale
+
+    const spy = vi.spyOn(ctx.provider, "readArticle");
+    const article = await api.load("second-post", "uk");
+    expect(article.isFallback).toBe(true);
+    expect(article.locale).toBe("uk");
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("load() re-resolves a slug evicted by invalidate() (cache miss falls through)", async () => {
+    const { ctx } = makeCtx({ locales: ["en"], defaultLocale: "en" });
+    const api = createContentApi(ctx);
+    await api.loadAll();
+
+    api.invalidate([`${FIXTURE_DIR}/hello-world/en.md`]);
+    const spy = vi.spyOn(ctx.provider, "readArticle");
+    const article = await api.load("hello-world", "en");
+    expect(article.computed.slug).toBe("hello-world");
+    expect(spy.mock.calls.map(call => call[0])).toEqual(["hello-world"]);
+  });
+
   it("load throws [web] content when neither requested nor default file exists", async () => {
     const { ctx } = makeCtx({ locales: ["en"], defaultLocale: "en" });
     await expect(createContentApi(ctx).load("missing-slug", "en")).rejects.toThrow(
@@ -257,6 +301,32 @@ describe("content/api", () => {
       `[web] content article "draft-post" not found for locale "en".\n` +
       `  Looked for draft-post/en.md and the default-locale fallback.`;
     await expect(createContentApi(ctx).load("draft-post", "en")).rejects.toThrow(expectedMessage);
+  });
+
+  it("load still throws not-found for a production draft AFTER loadAll (drafts never cached)", async () => {
+    const { ctx, state } = makeCtx({ locales: ["en"], defaultLocale: "en", mode: "production" });
+    const api = createContentApi(ctx);
+    await api.loadAll(); // production loadAll filters drafts BEFORE caching
+    expect(state.articles.get("en")?.has("draft-post")).toBe(false);
+
+    // The cache-first path misses, falls through to a fresh resolve, and suppresses
+    // the draft with the IDENTICAL not-found message (drafts stay indistinguishable
+    // from missing articles in production).
+    const expectedMessage =
+      `[web] content article "draft-post" not found for locale "en".\n` +
+      `  Looked for draft-post/en.md and the default-locale fallback.`;
+    await expect(api.load("draft-post", "en")).rejects.toThrow(expectedMessage);
+  });
+
+  it("load serves the cached draft in development after loadAll (drafts cached outside production)", async () => {
+    const { ctx } = makeCtx({ locales: ["en"], defaultLocale: "en", mode: "development" });
+    const api = createContentApi(ctx);
+    await api.loadAll(); // development loadAll includes + caches the draft
+
+    const spy = vi.spyOn(ctx.provider, "readArticle");
+    const article = await api.load("draft-post", "en");
+    expect(article.computed.status).toBe("draft");
+    expect(spy).not.toHaveBeenCalled();
   });
 
   it("load returns the draft article in development", async () => {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ComposeInput, SiteHeadInput } from "../../compose";
 import { composeHead, composeSiteHead, serializeHead } from "../../compose";
 import { meta } from "../../primitives";
-import type { HeadDefaults, ResolvedRoute } from "../../types";
+import type { HeadDefaults, HeadElement, ResolvedRoute } from "../../types";
 
 /** A site API stub matching the slice composeHead reads. */
 function makeSite() {
@@ -62,6 +62,11 @@ function input(overrides: Partial<ComposeInput> = {}): ComposeInput {
     router: makeRouter(),
     ...overrides
   };
+}
+
+/** Pluck the x-default alternate's href from a composed element set. */
+function xDefaultHref(els: HeadElement[]): string | undefined {
+  return els.find(e => e.attrs?.hreflang === "x-default")?.attrs?.href;
 }
 
 /** Build a SiteHeadInput with sensible defaults + overrides (for composeSiteHead tests). */
@@ -169,6 +174,27 @@ describe("head compose", () => {
       // hrefs are absolute, built via router.toUrl per locale + site base.
       const uk = alternates.find(e => e.attrs?.hreflang === "uk");
       expect(uk?.attrs?.href).toBe("https://blog.dev/uk/post/");
+    });
+
+    it("declares a byte-identical x-default across locale variants of the same route", () => {
+      // Default-locale ("en") variant and non-default ("uk") variant of the same route.
+      const enEls = composeHead(input());
+      const ukEls = composeHead(
+        input({
+          route: {
+            path: "/uk/post/",
+            params: { lang: "uk" },
+            locale: "uk",
+            name: "article",
+            head: { title: "Hello", description: "Hello desc" }
+          }
+        })
+      );
+
+      // x-default is the bare URL (lang stripped), NOT the page's own locale URL.
+      expect(xDefaultHref(enEls)).toBe("https://blog.dev/post/");
+      expect(xDefaultHref(ukEls)).toBe("https://blog.dev/post/");
+      expect(xDefaultHref(ukEls)).toBe(xDefaultHref(enEls));
     });
 
     it("merges route elements and de-duplicates by key (later wins)", () => {
