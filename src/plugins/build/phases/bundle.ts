@@ -44,7 +44,8 @@ export type BuildRunnerResult = {
 
 /**
  * Injectable bundler runner. Defaults to `Bun.build`; unit tests inject a fake to
- * assert the entrypoints + `minify` flag without invoking the real bundler.
+ * assert the entrypoints + `minify`/`splitting`/`target` flags without invoking
+ * the real bundler.
  *
  * @example
  * ```ts
@@ -58,6 +59,10 @@ export type BundleRunner = (options: {
   outdir: string;
   /** Whether to minify. */
   minify: boolean;
+  /** Whether to split dynamic `import(...)`s into separate lazy chunks. */
+  splitting: boolean;
+  /** The bundling target platform. */
+  target: "browser";
 }) => Promise<BuildRunnerResult>;
 
 /**
@@ -80,20 +85,24 @@ export type BundleOptions = {
 /**
  * The default bundler runner — adapts the built-in `Bun.build`.
  *
- * @param options - Entry/outdir/minify settings forwarded to `Bun.build`.
+ * @param options - Entry/outdir/minify/splitting/target settings forwarded to `Bun.build`.
  * @param options.entrypoints - Entry files for this build.
  * @param options.outdir - Output directory.
  * @param options.minify - Whether to minify.
+ * @param options.splitting - Whether to split dynamic imports into lazy chunks.
+ * @param options.target - The bundling target platform.
  * @returns The structural build result.
  * @example
  * ```ts
- * await defaultRunner({ entrypoints: ["a.css"], outdir: "dist", minify: true });
+ * await defaultRunner({ entrypoints: ["a.css"], outdir: "dist", minify: true, splitting: true, target: "browser" });
  * ```
  */
 async function defaultRunner(options: {
   entrypoints: string[];
   outdir: string;
   minify: boolean;
+  splitting: boolean;
+  target: "browser";
 }): Promise<BuildRunnerResult> {
   const bun = (globalThis as { Bun?: { build: BundleRunner } }).Bun;
   if (!bun) {
@@ -165,7 +174,9 @@ function normalizeAssetPath(absolutePath: string, outDir: string): string {
 
 /**
  * Run one bundler pass for a single asset kind and record the hashed output
- * paths under `state.buildCache` keyed by the original entry basename.
+ * paths under `state.buildCache` keyed by the original entry basename. Lazy
+ * split chunks are emitted to disk but excluded from the recorded manifest
+ * (they must never be embedded as eager `<script>` tags).
  *
  * @param ctx - The phase context (state + log).
  * @param runner - The bundler runner to invoke.
@@ -191,15 +202,26 @@ async function runOne(
   // Nothing to bundle for this kind — skip the pass entirely.
   if (entrypoints.length === 0) return;
 
-  // Run the bundler pass; a failed build aborts the whole phase.
-  const result = await runner({ entrypoints, outdir, minify });
+  // Run the bundler pass; a failed build aborts the whole phase. `splitting`
+  // must be ON: `Bun.build` defaults to splitting:false, which INLINES local
+  // dynamic imports — the spa lazy render chunk (Preact `render`) and the data
+  // plugin's node-only writer (with a silent node:fs shim) would ship in every
+  // client bundle. With splitting on, dynamic imports become separate chunks
+  // fetched only when actually reached. `target: "browser"` is explicit because
+  // these passes only ever produce client assets.
+  const result = await runner({ entrypoints, outdir, minify, splitting: true, target: "browser" });
   if (!result.success) {
     throw new Error(`[web] build.bundle ${kind} build failed`);
   }
 
-  // Map each hashed artifact basename to its embeddable web path.
+  // Map each hashed artifact basename to its embeddable web path. Lazy split
+  // chunks (kind "chunk") are deliberately NOT recorded: this manifest feeds the
+  // pages phase's <link>/<script> injection, and script-tagging a chunk would
+  // eagerly load it on every page — the entry's rewritten `import("./chunk-…")`
+  // already fetches it on demand.
   const hashed: BuildCacheEntry = {};
   for (const output of result.outputs) {
+    if (output.kind === "chunk") continue;
     hashed[path.basename(output.path)] = normalizeAssetPath(output.path, outDir);
   }
 

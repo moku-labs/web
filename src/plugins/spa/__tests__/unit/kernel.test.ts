@@ -169,11 +169,78 @@ describe("kernel.processNav", () => {
     kernel.processNav("/broken");
     await vi.waitFor(() => expect(hrefSetter).toHaveBeenCalledWith("/broken"));
   });
+
+  it("falls back to a full browser navigation when the fetched page lacks the swap region", async () => {
+    const { state, emit, kernel } = setup();
+    kernel.init();
+    const initialUrl = state.currentUrl;
+    // A 200 page whose markup has no `main > section` — the region cannot be swapped.
+    const html = `<html><head><title>Bare</title></head><body><div>no region here</div></body></html>`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(new Response(html, { status: 200 })))
+    );
+    const hrefSetter = vi.fn();
+    Object.defineProperty(globalThis, "location", {
+      value: {
+        pathname: "/",
+        search: "",
+        get href() {
+          return "";
+        },
+        set href(v: string) {
+          hrefSetter(v);
+        }
+      },
+      configurable: true
+    });
+
+    kernel.processNav("/bare");
+    await vi.waitFor(() => expect(hrefSetter).toHaveBeenCalledWith("/bare"));
+
+    // The old body is still rendered — the nav must NOT be reported as completed.
+    expect(document.querySelector("#page")?.textContent).toBe("old");
+    expect(state.currentUrl).toBe(initialUrl);
+    expect(emit).not.toHaveBeenCalledWith("spa:navigated", expect.anything());
+  });
+
+  it("falls back to a full browser navigation when the live document lacks the swap region", async () => {
+    const { state, emit, kernel } = setup();
+    kernel.init();
+    const initialUrl = state.currentUrl;
+    // The live document has no `main > section` (e.g. the selector never matched this page).
+    document.body.innerHTML = `<div>no region in the live document</div>`;
+    const html = `<html><head><title>Next</title></head><body><main><section id="page">new</section></main></body></html>`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(new Response(html, { status: 200 })))
+    );
+    const hrefSetter = vi.fn();
+    Object.defineProperty(globalThis, "location", {
+      value: {
+        pathname: "/",
+        search: "",
+        get href() {
+          return "";
+        },
+        set href(v: string) {
+          hrefSetter(v);
+        }
+      },
+      configurable: true
+    });
+
+    kernel.processNav("/next");
+    await vi.waitFor(() => expect(hrefSetter).toHaveBeenCalledWith("/next"));
+
+    expect(state.currentUrl).toBe(initialUrl);
+    expect(emit).not.toHaveBeenCalledWith("spa:navigated", expect.anything());
+  });
 });
 
 describe("kernel.processNav — swap-time scroll (scroll-before-snapshot)", () => {
-  it("forward nav scrolls to top (instant) as part of the swap", async () => {
-    const { kernel } = setup();
+  it("forward nav scrolls to top as part of the swap; honours scroll-behavior when VT is OFF", async () => {
+    const { kernel } = setup(); // default config → viewTransitions: false
     kernel.init();
     const scrollTo = vi.fn();
     vi.stubGlobal("scrollTo", scrollTo);
@@ -186,13 +253,13 @@ describe("kernel.processNav — swap-time scroll (scroll-before-snapshot)", () =
     kernel.processNav("/about");
     await vi.waitFor(() => expect(document.querySelector("#page")?.textContent).toBe("new"));
 
-    // The scroll is now performed by the swap (runSwap's beforeCapture), instant so it
-    // defeats `scroll-behavior: smooth`. Running it just before the snapshot (and after the
-    // fetch) is what kills the WebKit header flicker AND the "scroll up, then load" pause.
-    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "instant" });
+    // Scroll happens in the swap (runSwap's beforeCapture), after the fetch, before any snapshot.
+    // With view transitions OFF there is no snapshot to protect, so `behavior: "auto"` defers to
+    // the page's `scroll-behavior` (e.g. a smooth scroll-to-top on navigation).
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "auto" });
   });
 
-  it("DATA-path forward nav also scrolls to top (instant) as part of the swap", async () => {
+  it("DATA-path forward nav also scrolls to top in the swap (auto when VT off)", async () => {
     const { kernel } = setupData({ route: makeDataRoute(), raw: { title: "T" } });
     kernel.init();
     const scrollTo = vi.fn();
@@ -203,8 +270,25 @@ describe("kernel.processNav — swap-time scroll (scroll-before-snapshot)", () =
     kernel.processNav("/en/hello/");
     await vi.waitFor(() => expect(document.querySelector("#page")?.textContent).toBe("data:T"));
 
-    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "instant" });
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "auto" });
     expect(fetchSpy).not.toHaveBeenCalled(); // DATA path, not HTML-over-fetch
+  });
+
+  it("forward nav scrolls INSTANT when view transitions are ON (keeps scrollY=0 in the snapshot)", async () => {
+    const { kernel } = setup({ viewTransitions: true });
+    kernel.init();
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    const html = `<html><body><main><section id="page">new</section></main></body></html>`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(new Response(html, { status: 200 })))
+    );
+
+    kernel.processNav("/about");
+    await vi.waitFor(() => expect(document.querySelector("#page")?.textContent).toBe("new"));
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "instant" });
   });
 });
 
