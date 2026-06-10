@@ -62,7 +62,28 @@ async function expandUrls(
 }
 
 /**
- * Serialize a `<urlset>` sitemap document from a canonical URL set.
+ * XML-escape a value for safe insertion into a text node (`& < > " '`). `&` is
+ * escaped first so already-escaped entities are not double-escaped.
+ *
+ * @param raw - The unsafe string.
+ * @returns The XML-escaped string.
+ * @example
+ * ```ts
+ * escapeXml("https://blog.dev/a&b/"); // "https://blog.dev/a&amp;b/"
+ * ```
+ */
+function escapeXml(raw: string): string {
+  return raw
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+/**
+ * Serialize a `<urlset>` sitemap document from a canonical URL set. Each `<loc>`
+ * value is XML-escaped so slugs containing `&`/`<`/`>` cannot break the document.
  *
  * @param urls - The canonical (absolute) URLs.
  * @returns The serialized sitemap XML.
@@ -72,7 +93,7 @@ async function expandUrls(
  * ```
  */
 function serializeSitemap(urls: readonly string[]): string {
-  const entries = urls.map(url => `  <url><loc>${url}</loc></url>`).join("\n");
+  const entries = urls.map(url => `  <url><loc>${escapeXml(url)}</loc></url>`).join("\n");
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${entries}\n</urlset>\n`;
 }
 
