@@ -134,6 +134,11 @@ export function createSpaKernel(
 
   /**
    * Process one navigation: head-sync, unmount, swap, re-mount, emit navigated.
+   * When the region cannot be swapped (either document lacks the swap selector)
+   * the SPA nav cannot complete — the head is already synced and the islands torn
+   * down, so finishing would leave the OLD body under a NEW URL with a `spa:navigated`
+   * claiming success. Fall back to a full browser navigation instead (mirroring
+   * {@link performNavigation}'s fetch-error fallback).
    *
    * @param html - The fetched page HTML.
    * @param pathname - The destination pathname.
@@ -144,7 +149,7 @@ export function createSpaKernel(
     const doc = new DOMParser().parseFromString(html, "text/html");
     syncHead(deps.head, doc);
     unmountPageSpecific(state, emit);
-    swapRegion(
+    const swapped = swapRegion(
       doc,
       resolved.swapSelector,
       resolved.viewTransitions,
@@ -154,6 +159,11 @@ export function createSpaKernel(
       },
       applyPendingScroll
     );
+    if (!swapped) {
+      handleError();
+      location.href = pathname;
+      return;
+    }
     state.currentUrl = pathname;
     progress?.done();
     emit("spa:navigated", { url: pathname });

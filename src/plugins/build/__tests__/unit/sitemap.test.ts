@@ -81,6 +81,69 @@ describe("build/phases/sitemap", () => {
     expect(robots).toContain("Sitemap: https://blog.dev/sitemap.xml");
   });
 
+  it("emits each URL once when a route collapses across locales (no duplicates)", async () => {
+    // Regression: a route with no {lang}/{lang:?} placeholder (or whose generate()
+    // omits `lang`) resolves to the SAME URL for every locale — the fan-out pushed one
+    // duplicate sitemap entry per locale. Localized routes must still keep every locale.
+    const home = makeRoute("/");
+    const feed = makeRoute("/feed/");
+    const guide = makeRoute("/{lang}/guide/", {
+      generate: (gctx: { locale: string }) => [{ lang: gctx.locale }]
+    });
+    const ctx = makeCtx({
+      config: { outDir: tmp, sitemap: true },
+      requireMap: {
+        site: { url: () => "https://blog.dev", canonical: (p: string) => `https://blog.dev${p}` },
+        i18n: { locales: () => ["en", "uk"] },
+        router: {
+          manifest: () => [home, feed, guide],
+          entries: makeEntries([
+            { name: "home", pattern: "/" },
+            { name: "feed", pattern: "/feed/" },
+            { name: "guide", pattern: "/{lang}/guide/" }
+          ])
+        }
+      }
+    });
+
+    const result = await generateSitemap(ctx);
+
+    expect(result?.urls).toEqual([
+      "https://blog.dev/",
+      "https://blog.dev/feed/",
+      "https://blog.dev/en/guide/",
+      "https://blog.dev/uk/guide/"
+    ]);
+    const xml = readFileSync(path.join(tmp, "sitemap.xml"), "utf8");
+    expect(xml.match(/<loc>https:\/\/blog\.dev\/feed\/<\/loc>/g)).toHaveLength(1);
+  });
+
+  it("XML-escapes special characters in <loc> values", async () => {
+    const article = makeRoute("/{slug}/", {
+      generate: () => [{ slug: "cats&dogs" }, { slug: `<'quoted">` }]
+    });
+    const ctx = makeCtx({
+      config: { outDir: tmp, sitemap: true },
+      requireMap: {
+        site: { url: () => "https://blog.dev", canonical: (p: string) => `https://blog.dev${p}` },
+        i18n: { locales: () => ["en"] },
+        router: {
+          manifest: () => [article],
+          entries: makeEntries([{ name: "article", pattern: "/{slug}/" }])
+        }
+      }
+    });
+
+    const result = await generateSitemap(ctx);
+
+    // The URL set stays raw — only the serialized XML is escaped.
+    expect(result?.urls).toEqual(["https://blog.dev/cats&dogs/", `https://blog.dev/<'quoted">/`]);
+    const xml = readFileSync(path.join(tmp, "sitemap.xml"), "utf8");
+    expect(xml).toContain("<loc>https://blog.dev/cats&amp;dogs/</loc>");
+    expect(xml).toContain("<loc>https://blog.dev/&lt;&apos;quoted&quot;&gt;/</loc>");
+    expect(xml).not.toContain("cats&dogs");
+  });
+
   it("is a no-op when config.sitemap is false", async () => {
     const ctx = makeCtx({ config: { outDir: tmp, sitemap: false } });
     expect(await generateSitemap(ctx)).toBeNull();

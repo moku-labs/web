@@ -49,8 +49,11 @@ describe("content/pipeline/markdown", () => {
       colors: { "editor.background": "#181412", "editor.foreground": "#d4c8b8" },
       tokenColors: [{ scope: ["keyword", "storage.type"], settings: { foreground: "#f97316" } }]
     };
+    // Rendered trusted: token-span styles prove the plumbing, and the untrusted
+    // sanitize pass would strip them (style is only allowlisted on pre/code).
     const html = await render("```ts\nconst x = 1;\n```", {
       ...baseOptions,
+      trustedContent: true,
       shikiTheme: customTheme
     });
     // The custom theme renders to a <pre class="shiki test-warm"> with its bg + the
@@ -94,6 +97,38 @@ describe("content/pipeline/markdown", () => {
     const md = "<script>alert(1)</script>";
     const html = await render(md, { ...baseOptions, trustedContent: true });
     expect(html).toContain("<script>alert(1)</script>");
+  });
+
+  it("strips style attributes from untrusted HTML (no overlay/exfiltration CSS)", async () => {
+    const md = [
+      '<div style="position:fixed;top:0;left:0;width:100vw;height:100vh">overlay</div>',
+      "",
+      '<span style="background:url(https://evil.example/leak)">probe</span>'
+    ].join("\n");
+    const html = await render(md, { ...baseOptions, trustedContent: false });
+    // The elements survive (div/span are allowlisted) but their style does not.
+    expect(html).toContain("overlay");
+    expect(html).toContain("probe");
+    expect(html).not.toContain("style=");
+    expect(html).not.toContain("position:fixed");
+    expect(html).not.toContain("evil.example");
+  });
+
+  it("keeps style attributes when trustedContent is true (author-controlled)", async () => {
+    const md = '<div style="color:red">styled</div>';
+    const html = await render(md, { ...baseOptions, trustedContent: true });
+    expect(html).toContain('style="color:red"');
+  });
+
+  it("keeps Shiki's pre-level theme style but strips token-span styles when untrusted", async () => {
+    const html = await render("```ts\nconst x = 1;\n```", {
+      ...baseOptions,
+      trustedContent: false
+    });
+    // The <pre> keeps Shiki's block-level theme colors (style is allowlisted on pre/code)...
+    expect(html).toMatch(/<pre[^>]+style="/);
+    // ...but token <span>s lose their inline colors — style is not globally allowlisted.
+    expect(html).not.toMatch(/<span[^>]*style="/);
   });
 
   it("preserves pull-quote/section-divider/loading=lazy via the extended schema", async () => {
