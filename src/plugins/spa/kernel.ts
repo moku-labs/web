@@ -114,20 +114,31 @@ export function createSpaKernel(
    * Apply the in-flight navigation's scroll intent — the swap's `beforeCapture` hook.
    * For a forward nav it scrolls to top BEFORE the snapshot is captured, so the old and
    * new states share scrollY=0 (no delta → the sticky header never un-pins) and there is
-   * no pre-fetch scroll pause. `behavior: "instant"` defeats a page-level
-   * `scroll-behavior: smooth` that would otherwise animate the reset and re-create the
-   * delta. Traverse (back/forward) sets `pendingScrollToTop = false` and restores its
-   * saved position after the swap instead.
+   * no pre-fetch scroll pause. Traverse (back/forward) sets `pendingScrollToTop = false`
+   * and restores its saved position after the swap instead.
+   *
+   * Scroll behaviour: `"instant"` ONLY when view transitions are enabled — that is what
+   * keeps scrollY=0 in the captured snapshot (a `scroll-behavior: smooth` would otherwise
+   * animate the reset and re-create the delta → sticky-header flicker). With view
+   * transitions OFF there is no snapshot to protect, so it honours the page's
+   * `scroll-behavior` (`"auto"` = use the CSS value, e.g. a smooth scroll-to-top on nav).
    *
    * @example
    * runSwap(renderAndMount, viewTransitions, applyPendingScroll);
    */
   const applyPendingScroll = (): void => {
-    if (pendingScrollToTop) window.scrollTo({ top: 0, behavior: "instant" });
+    if (!pendingScrollToTop) return;
+    const behavior: ScrollBehavior = resolved.viewTransitions ? "instant" : "auto";
+    window.scrollTo({ top: 0, behavior });
   };
 
   /**
    * Process one navigation: head-sync, unmount, swap, re-mount, emit navigated.
+   * When the region cannot be swapped (either document lacks the swap selector)
+   * the SPA nav cannot complete — the head is already synced and the islands torn
+   * down, so finishing would leave the OLD body under a NEW URL with a `spa:navigated`
+   * claiming success. Fall back to a full browser navigation instead (mirroring
+   * {@link performNavigation}'s fetch-error fallback).
    *
    * @param html - The fetched page HTML.
    * @param pathname - The destination pathname.
@@ -138,7 +149,7 @@ export function createSpaKernel(
     const doc = new DOMParser().parseFromString(html, "text/html");
     syncHead(deps.head, doc);
     unmountPageSpecific(state, emit);
-    swapRegion(
+    const swapped = swapRegion(
       doc,
       resolved.swapSelector,
       resolved.viewTransitions,
@@ -148,6 +159,11 @@ export function createSpaKernel(
       },
       applyPendingScroll
     );
+    if (!swapped) {
+      handleError();
+      location.href = pathname;
+      return;
+    }
     state.currentUrl = pathname;
     progress?.done();
     emit("spa:navigated", { url: pathname });

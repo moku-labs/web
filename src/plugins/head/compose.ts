@@ -110,8 +110,11 @@ function resolveImage(image: string, site: SiteSlice): string {
 
 /**
  * Build the per-locale `hreflang` alternates for a route, plus the `x-default`
- * fallback (the route's URL with no `lang` override). Each alternate URL is the
- * route's canonical URL for that locale, absolutized against the site base URL.
+ * fallback (the route's URL with `lang` STRIPPED, i.e. the bare default-locale
+ * URL). Each alternate URL is the route's canonical URL for that locale,
+ * absolutized against the site base URL. Stripping `lang` — rather than keeping
+ * the page's own locale — keeps the x-default href byte-identical across every
+ * locale variant of the route, as the hreflang spec requires.
  *
  * @param locales - The supported locale codes (drives the alternate set).
  * @param route - The resolved route descriptor (provides `name` + `params`).
@@ -131,7 +134,10 @@ function buildHreflangAlternates(
     return hreflang(locale, href);
   });
 
-  const xDefaultHref = site.canonical(router.toUrl(route.name, { ...route.params }));
+  // Strip `lang` so every locale variant declares the SAME x-default (the bare URL).
+  const bareParams = { ...route.params };
+  delete bareParams.lang;
+  const xDefaultHref = site.canonical(router.toUrl(route.name, bareParams));
   alternates.push(hreflang(X_DEFAULT, xDefaultHref));
   return alternates;
 }

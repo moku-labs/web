@@ -64,10 +64,39 @@ function createFeedChannel(site: SiteApi, defaultLocale: string): Feed {
   });
 }
 
+/** Matches a root-relative `src`/`href` attribute opening (`="/`), excluding protocol-relative `="//`. */
+const ROOT_RELATIVE_URL_ATTR = /\b(src|href)="\/(?!\/)/g;
+
+/**
+ * Absolutize root-relative `src`/`href` URLs in rendered article HTML against the
+ * site base URL. The content pipeline rewrites co-located images to root-relative
+ * paths (`/<slug>/images/...`) — fine on the site, broken inside a feed, where
+ * readers do not reliably resolve relative URLs. Protocol-relative (`//host/...`)
+ * and already-absolute URLs are left untouched.
+ *
+ * @param html - The rendered article HTML.
+ * @param baseUrl - The absolute site base URL (trailing slashes tolerated).
+ * @returns The HTML with every root-relative URL made absolute.
+ * @example
+ * ```ts
+ * absolutizeContentUrls('<img src="/post/images/a.webp">', "https://blog.dev");
+ * // '<img src="https://blog.dev/post/images/a.webp">'
+ * ```
+ */
+function absolutizeContentUrls(html: string, baseUrl: string): string {
+  let base = baseUrl;
+  while (base.endsWith("/")) base = base.slice(0, -1);
+  return html.replaceAll(
+    ROOT_RELATIVE_URL_ATTR,
+    (_match, attribute: string) => `${attribute}="${base}/`
+  );
+}
+
 /**
  * Append one article to the feed and return its canonical GUID. The canonical
  * URL is the article's single stable identity — it is the item's id, guid, and
- * link at once.
+ * link at once. Item content is the rendered HTML with root-relative URLs
+ * absolutized against the site base, so embedded assets resolve in feed readers.
  *
  * @param feed - The feed channel to append to (mutated in place).
  * @param article - The published article to add.
@@ -86,7 +115,7 @@ function addArticleItem(feed: Feed, article: Article, site: SiteApi): string {
     guid: canonicalUrl,
     link: canonicalUrl,
     description: article.frontmatter.description,
-    content: article.html,
+    content: absolutizeContentUrls(article.html, site.url()),
     date: new Date(article.frontmatter.date),
     author: [{ name: article.frontmatter.author ?? site.author() }]
   });
