@@ -23,6 +23,24 @@ describe("build/phases/bundle", () => {
     expect(runner.mock.calls[0]?.[0].minify).toBe(false);
   });
 
+  it("enables code splitting + an explicit browser target on every pass", async () => {
+    // Regression: `Bun.build` defaults to splitting:false, which INLINED local
+    // dynamic imports — the spa lazy render chunk (Preact `render`) and the data
+    // plugin's node-only writer (with a silently shimmed node:fs/promises) shipped
+    // in every deployed client bundle instead of being split into lazy chunks.
+    const runner = vi.fn(async (_opts: Parameters<BundleRunner>[0]) => ({
+      success: true,
+      outputs: []
+    }));
+    const ctx = makeCtx({ config: { outDir: "./dist", minify: false } });
+    await bundle(ctx, { runner, cssEntrypoints: ["styles.css"], jsEntrypoints: ["main.ts"] });
+    expect(runner).toHaveBeenCalledTimes(2);
+    for (const call of runner.mock.calls) {
+      expect(call[0].splitting).toBe(true);
+      expect(call[0].target).toBe("browser");
+    }
+  });
+
   it("caches hashed asset paths in state.buildCache keyed by kind (web-relative to outDir)", async () => {
     const runner = vi.fn(async () => ({
       success: true,
@@ -51,6 +69,24 @@ describe("build/phases/bundle", () => {
     expect(css).toEqual({ "main-abc123.css": "assets/main-abc123.css" });
     // No leading slash → "/" + value is a single-slash root-absolute URL.
     expect(Object.values(css)[0]?.startsWith("/")).toBe(false);
+  });
+
+  it("excludes lazy split chunks from the recorded asset manifest (entry stays)", async () => {
+    // With splitting on, the runner emits chunk artifacts alongside the entry. The
+    // manifest feeds the pages phase's <script> injection — recording a chunk would
+    // eagerly load it on every page, defeating the lazy split.
+    const runner = vi.fn(async () => ({
+      success: true,
+      outputs: [
+        { path: "dist/assets/main.js", kind: "entry-point" },
+        { path: "dist/assets/chunk-render-1a2b.js", kind: "chunk" },
+        { path: "dist/assets/chunk-writer-3c4d.js", kind: "chunk" }
+      ]
+    }));
+    const ctx = makeCtx({ config: { outDir: "./dist", minify: true } });
+    await bundle(ctx, { runner, cssEntrypoints: [], jsEntrypoints: ["main.ts"] });
+    const js = ctx.state.buildCache.get("js") as Record<string, string>;
+    expect(js).toEqual({ "main.js": "assets/main.js" });
   });
 
   it("runs the CSS + JS passes concurrently (both in flight before either resolves)", async () => {

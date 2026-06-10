@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { compileRoutes } from "../../builders/compile";
+import { buildUrl, compileRoutes } from "../../builders/compile";
 import { route } from "../../builders/route-builder";
-import { bySpecificity, compileClientMatcher, dynamicSegmentCount } from "../../iso-match";
+import {
+  bySpecificity,
+  compileClientMatcher,
+  dynamicSegmentCount,
+  extractGroups
+} from "../../iso-match";
 import type { CompileInput } from "../../types";
 
 /** Standard compile input used across the iso-match scenarios. */
@@ -93,5 +98,38 @@ describe("compileClientMatcher()", () => {
   it("supports colon placeholders", () => {
     const m = compileClientMatcher("/:slug/");
     expect(m("/x/")).toEqual({ slug: "x" });
+  });
+
+  it("decodes percent-encoded segments (location.pathname is encoded)", () => {
+    const m = compileClientMatcher("/{lang:?}/tags/{tag}/");
+    expect(m("/uk/tags/c%23%20tips%20%26%20tricks/")).toEqual({
+      lang: "uk",
+      tag: "c# tips & tricks"
+    });
+  });
+});
+
+describe("extractGroups()", () => {
+  it("drops numeric keys and undefined values", () => {
+    expect(extractGroups({ slug: "hello", "0": "x", gone: undefined })).toEqual({
+      slug: "hello"
+    });
+  });
+
+  it("percent-decodes captured values so params round-trip with buildUrl", () => {
+    expect(extractGroups({ tag: "a%20%26%20b" })).toEqual({ tag: "a & b" });
+  });
+
+  it("keeps a malformed escape raw instead of throwing (hand-typed '%' URL)", () => {
+    expect(extractGroups({ slug: "100%" })).toEqual({ slug: "100%" });
+  });
+});
+
+describe("URL round-trip (buildUrl → compileClientMatcher → params)", () => {
+  it("round-trips spaces and '&' in a param value", () => {
+    const pattern = "/{lang:?}/tags/{tag}/";
+    const m = compileClientMatcher(pattern);
+    const url = buildUrl(pattern, { lang: "uk", tag: "c# tips & tricks" });
+    expect(m(url)).toEqual({ lang: "uk", tag: "c# tips & tricks" });
   });
 });

@@ -14,10 +14,7 @@ export default [
       ".claude/**",
       ".planning/**",
       "node_modules/**",
-      "declarations.d.ts",
-      // Build/CI tooling — node scripts, not library source. Biome still formats
-      // them (`biome check .`); they don't follow the strict src JSDoc/process rules.
-      "scripts/**"
+      "declarations.d.ts"
     ]
   },
 
@@ -128,6 +125,16 @@ export default [
       "jsdoc/require-example": "error",
       "@typescript-eslint/consistent-type-imports": ["error", { prefer: "type-imports" }],
       "unicorn/require-module-specifiers": "off"
+    }
+  },
+
+  // 6b. Build/CI tooling scripts: linted with the shared presets (unicorn, sonarjs,
+  //     jsdoc recommended), but without the strict src JSDoc/require-example bar —
+  //     they are node scripts, not library source. Biome formats and lints them too.
+  {
+    files: ["scripts/**/*.ts"],
+    rules: {
+      "jsdoc/require-example": "off"
     }
   },
 

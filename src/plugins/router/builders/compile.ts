@@ -183,30 +183,26 @@ export function patternToUrlPattern(
 }
 
 /**
- * Build a URL from a pattern and params (substitutes `{param}` / `{param:?}`).
- * Walks segment-by-segment (no backtracking regex). An optional placeholder whose
- * param is absent has its segment skipped entirely (no empty segment), so a missing
- * `{lang:?}` collapses cleanly instead of leaving a double slash.
- *
- * The default locale is served at BARE paths: when `defaultLocale` is given, the
- * optional `{lang:?}` segment is also skipped for it (so `{ lang: defaultLocale }`
- * resolves to `/…` while every other locale keeps its `/{locale}/…` prefix).
+ * Substitute a pattern's placeholders one `/`-segment at a time (no backtracking
+ * regex), passing each value through `encodeValue` — percent-encoding for
+ * {@link buildUrl}, identity for {@link buildFilePath}. An absent optional segment
+ * collapses (no double slash), as does `{lang:?}` for the bare `defaultLocale`.
  *
  * @param pattern - The route pattern.
  * @param params - Param values to substitute.
  * @param defaultLocale - The locale served bare (its `{lang:?}` segment is omitted).
- * @returns The resolved relative URL string.
+ * @param encodeValue - Encoder applied to each substituted param value.
+ * @returns The resolved relative path string.
  * @example
  * ```ts
- * buildUrl("/{slug}/", { slug: "hello" }); // "/hello/"
- * buildUrl("/{lang:?}/", { lang: "en" }, "en"); // "/"
- * buildUrl("/{lang:?}/", { lang: "ru" }, "en"); // "/ru/"
+ * substitutePattern("/{slug}/", { slug: "a b" }, undefined, encodeURIComponent); // "/a%20b/"
  * ```
  */
-export function buildUrl(
+function substitutePattern(
   pattern: string,
   params: Record<string, string>,
-  defaultLocale?: string
+  defaultLocale: string | undefined,
+  encodeValue: (value: string) => string
 ): string {
   const out: string[] = [];
   for (const segment of pattern.split("/")) {
@@ -223,21 +219,50 @@ export function buildUrl(
     // Skip the optional {lang:?} segment for the default locale — it is served bare.
     if (placeholder.name === "lang" && placeholder.optional && value === defaultLocale) continue;
 
-    out.push(value);
+    out.push(encodeValue(value));
   }
   return out.join("/");
 }
 
 /**
- * Build an output file path from a pattern and params (always `…/index.html`).
+ * Build a URL from a pattern and params (substitutes `{param}` / `{param:?}`;
+ * segment walk in {@link substitutePattern}). Substituted values are
+ * percent-encoded so reserved characters (`#`, `?`, `&`, spaces, …) cannot
+ * truncate the path or break the sitemap XML, and the URL round-trips through
+ * the matchers (`extractGroups` decodes captures back).
  *
  * @param pattern - The route pattern.
  * @param params - Param values to substitute.
- * @param defaultLocale - The locale served bare (forwarded to {@link buildUrl}).
+ * @param defaultLocale - The locale served bare (its `{lang:?}` segment is omitted).
+ * @returns The resolved relative URL string.
+ * @example
+ * ```ts
+ * buildUrl("/{slug}/", { slug: "a & b" }); // "/a%20%26%20b/"
+ * buildUrl("/{lang:?}/", { lang: "en" }, "en"); // "/"
+ * buildUrl("/{lang:?}/", { lang: "ru" }, "en"); // "/ru/"
+ * ```
+ */
+export function buildUrl(
+  pattern: string,
+  params: Record<string, string>,
+  defaultLocale?: string
+): string {
+  return substitutePattern(pattern, params, defaultLocale, encodeURIComponent);
+}
+
+/**
+ * Build an output file path from a pattern and params (always `…/index.html`).
+ * Param values stay LITERAL: servers decode the encoded request path before
+ * filesystem lookup, so on-disk names carry the decoded text.
+ *
+ * @param pattern - The route pattern.
+ * @param params - Param values to substitute.
+ * @param defaultLocale - The locale served bare (its `{lang:?}` segment is omitted).
  * @returns The output file path, e.g. `hello/index.html`.
  * @example
  * ```ts
- * buildFilePath("/{slug}/", { slug: "hello" });
+ * buildFilePath("/{slug}/", { slug: "hello" }); // "hello/index.html"
+ * buildFilePath("/{tag}/", { tag: "a & b" }); // "a & b/index.html"
  * ```
  */
 export function buildFilePath(
@@ -245,8 +270,8 @@ export function buildFilePath(
   params: Record<string, string>,
   defaultLocale?: string
 ): string {
-  const url = buildUrl(pattern, params, defaultLocale);
-  const cleanPath = url.replace(/^\//, "").replace(/\/$/, "");
+  const literal = substitutePattern(pattern, params, defaultLocale, value => value);
+  const cleanPath = literal.replace(/^\//, "").replace(/\/$/, "");
   return cleanPath === "" ? "index.html" : `${cleanPath}/index.html`;
 }
 
