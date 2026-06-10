@@ -114,16 +114,22 @@ export function createSpaKernel(
    * Apply the in-flight navigation's scroll intent — the swap's `beforeCapture` hook.
    * For a forward nav it scrolls to top BEFORE the snapshot is captured, so the old and
    * new states share scrollY=0 (no delta → the sticky header never un-pins) and there is
-   * no pre-fetch scroll pause. `behavior: "instant"` defeats a page-level
-   * `scroll-behavior: smooth` that would otherwise animate the reset and re-create the
-   * delta. Traverse (back/forward) sets `pendingScrollToTop = false` and restores its
-   * saved position after the swap instead.
+   * no pre-fetch scroll pause. Traverse (back/forward) sets `pendingScrollToTop = false`
+   * and restores its saved position after the swap instead.
+   *
+   * Scroll behaviour: `"instant"` ONLY when view transitions are enabled — that is what
+   * keeps scrollY=0 in the captured snapshot (a `scroll-behavior: smooth` would otherwise
+   * animate the reset and re-create the delta → sticky-header flicker). With view
+   * transitions OFF there is no snapshot to protect, so it honours the page's
+   * `scroll-behavior` (`"auto"` = use the CSS value, e.g. a smooth scroll-to-top on nav).
    *
    * @example
    * runSwap(renderAndMount, viewTransitions, applyPendingScroll);
    */
   const applyPendingScroll = (): void => {
-    if (pendingScrollToTop) window.scrollTo({ top: 0, behavior: "instant" });
+    if (!pendingScrollToTop) return;
+    const behavior: ScrollBehavior = resolved.viewTransitions ? "instant" : "auto";
+    window.scrollTo({ top: 0, behavior });
   };
 
   /**
