@@ -185,18 +185,29 @@ async function withPhase<T>(
 
 /**
  * Reset the per-run state (manifest, buildCache, runId) and assign a fresh runId.
+ * A clean run (no `skipClean`) also drops the OG image hash cache: the outDir wipe
+ * deletes every `og/<slug>.png` the cache indexes, so honoring those warm entries
+ * would skip rendering files that no longer exist. A `skipClean` (dev) run keeps
+ * the cache — its PNGs survive on disk.
  *
  * @param ctx - The phase context whose `state` is reset.
+ * @param options - The run options (only `skipClean` is consulted).
  * @example
  * ```ts
- * resetRun(ctx);
+ * resetRun(ctx, options);
  * ```
  */
-function resetRun(ctx: Pick<PhaseContext, "state">): void {
+export function resetRun(
+  ctx: Pick<PhaseContext, "state">,
+  options?: Pick<RunOptions, "skipClean">
+): void {
   // eslint-disable-next-line unicorn/no-null -- `manifest` is `RouteDefinition[] | null` until the pages phase populates it
   ctx.state.manifest = null;
   ctx.state.buildCache = new Map<string, unknown>();
   ctx.state.runId = `${Date.now()}-${randomUUID()}`;
+
+  // The clean run below rm -rf's the outDir — the hash cache must not outlive its PNGs.
+  if (!options?.skipClean) ctx.state.ogImageHashCache.clear();
 }
 
 /**
@@ -275,7 +286,7 @@ async function runOutputs(ctx: PhaseContext): Promise<void> {
  */
 export async function runPipeline(ctx: PhaseContext, options?: RunOptions): Promise<BuildResult> {
   const started = Date.now();
-  resetRun(ctx);
+  resetRun(ctx, options);
   const outDir = options?.outDir ?? ctx.config.outDir;
 
   // Merge any per-run config overrides (dev rebuilds disable feeds/sitemap/minify/etc.)

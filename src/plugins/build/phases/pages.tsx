@@ -250,19 +250,27 @@ async function generateParameterSets(
  * locale). The generate context is the spec `{ locale, require, has }`, so a
  * `.generate()` handler pulls sibling APIs the spec way.
  *
+ * Instances are deduplicated by resolved output file: a route whose pattern has no
+ * lang placeholder (or whose `generate()` params omit `lang`) resolves to the SAME
+ * `toFile` path for EVERY locale — without the guard each locale's render races on
+ * one output file and the shipped HTML's locale is nondeterministic. The default
+ * locale is expanded FIRST, so a collapsed route keeps its default-locale instance.
+ *
  * @param definition - The route definition from the manifest.
  * @param locales - Active locale codes from i18n.
+ * @param defaultLocale - The i18n default locale (kept when locales collapse to one file).
  * @param byPattern - Pattern→compiled-`TypedRoute` map (see {@link makeEntryMap}).
  * @param ctx - Plugin context (provides `require`/`has` for the generate context).
- * @returns The flattened list of page instances for this route.
+ * @returns The flattened, file-deduplicated list of page instances for this route.
  * @example
  * ```ts
- * await expandRoute(def, ["en"], byPattern, ctx);
+ * await expandRoute(def, ["en"], "en", byPattern, ctx);
  * ```
  */
 async function expandRoute(
   definition: RouteDefinition,
   locales: readonly string[],
+  defaultLocale: string,
   byPattern: Map<string, TypedRoute>,
   ctx: Pick<PhaseContext, "require" | "has">
 ): Promise<PageInstance[]> {
@@ -270,20 +278,24 @@ async function expandRoute(
   const entry = resolveEntry(byPattern, definition);
   const { name } = entry;
 
-  // Fan out across locales, expanding each route+locale into its generated param sets.
+  // Fan out across locales — default locale first, so when instances collapse to one
+  // output file below, the surviving (first-claiming) instance is the default-locale one.
+  const orderedLocales = [defaultLocale, ...locales.filter(locale => locale !== defaultLocale)];
+
+  // Expand each route+locale into its generated param sets.
   const instances: PageInstance[] = [];
-  for (const locale of locales) {
+  const claimedFiles = new Set<string>();
+  for (const locale of orderedLocales) {
     const parameterSets = await generateParameterSets(definition, locale, ctx);
 
-    // Materialize one page instance per generated param set.
+    // Materialize one page instance per generated param set — skipping any instance
+    // whose resolved output file is already claimed (the locale fan-out collapsed).
     for (const raw of parameterSets) {
-      instances.push({
-        definition,
-        entry,
-        name,
-        params: (raw ?? {}) as Record<string, string>,
-        locale
-      });
+      const params = (raw ?? {}) as Record<string, string>;
+      const file = entry.toFile(params);
+      if (claimedFiles.has(file)) continue;
+      claimedFiles.add(file);
+      instances.push({ definition, entry, name, params, locale });
     }
   }
   return instances;
@@ -660,26 +672,29 @@ async function prepareShell(
 
 /**
  * Expand every manifest route into its concrete page instances across all locales
- * (delegating per-route expansion to {@link expandRoute}) and flatten the result.
+ * (delegating per-route expansion — and per-route output-file deduplication — to
+ * {@link expandRoute}) and flatten the result.
  *
  * @param manifest - The route definitions from `router.manifest()`.
  * @param locales - Active locale codes from i18n.
+ * @param defaultLocale - The i18n default locale (kept when a route's locales collapse).
  * @param byPattern - Pattern→compiled-`TypedRoute` map (see {@link makeEntryMap}).
  * @param ctx - Plugin context (provides `require`/`has` for generate contexts).
  * @returns The flattened list of page instances to render.
  * @example
  * ```ts
- * const instances = await expandAllInstances(manifest, ["en"], byPattern, ctx);
+ * const instances = await expandAllInstances(manifest, ["en"], "en", byPattern, ctx);
  * ```
  */
 async function expandAllInstances(
   manifest: readonly RouteDefinition[],
   locales: readonly string[],
+  defaultLocale: string,
   byPattern: Map<string, TypedRoute>,
   ctx: Pick<PhaseContext, "require" | "has">
 ): Promise<PageInstance[]> {
   const lists = await Promise.all(
-    manifest.map(definition => expandRoute(definition, locales, byPattern, ctx))
+    manifest.map(definition => expandRoute(definition, locales, defaultLocale, byPattern, ctx))
   );
   return lists.flat();
 }
@@ -823,7 +838,13 @@ export async function renderPages(
   // in bounded batches with a macrotask yield between them so a watching dev server's
   // spinner keeps animating instead of freezing for the whole (large) phase.
   const shell = await prepareShell(ctx);
-  const instances = await expandAllInstances(manifest, locales, byPattern, ctx);
+  const instances = await expandAllInstances(
+    manifest,
+    locales,
+    shell.defaultLocale,
+    byPattern,
+    ctx
+  );
   const batchSize = reuse ? INCREMENTAL_BATCH_SIZE : RENDER_BATCH_SIZE;
   // Each instance yields one canonical page plus, for the default locale, its bare
   // `/{defaultLocale}/` alias — flatten so both feed sidecar writing + root capture.

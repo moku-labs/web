@@ -17,6 +17,10 @@
  * and throw under a non-Bun runtime, and vitest workers have no `Bun` global. vitest only
  * globs `__tests__/unit|integration`, so this `e2e` file is invisible to it; run it with
  * `bun run test:cli-e2e`.
+ *
+ * The script passes `--timeout 30000`: whichever scenario builds first pays the one-time
+ * cold Shiki highlighter init, which can exceed bun test's 5 s default on slow CI runners
+ * (observed 5.2 s on a 2-core ubuntu runner; warm builds take ~10 ms).
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
