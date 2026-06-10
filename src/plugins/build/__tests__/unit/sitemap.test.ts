@@ -81,6 +81,32 @@ describe("build/phases/sitemap", () => {
     expect(robots).toContain("Sitemap: https://blog.dev/sitemap.xml");
   });
 
+  it("XML-escapes special characters in <loc> values", async () => {
+    const article = makeRoute("/{slug}/", {
+      generate: () => [{ slug: "cats&dogs" }, { slug: `<'quoted">` }]
+    });
+    const ctx = makeCtx({
+      config: { outDir: tmp, sitemap: true },
+      requireMap: {
+        site: { url: () => "https://blog.dev", canonical: (p: string) => `https://blog.dev${p}` },
+        i18n: { locales: () => ["en"] },
+        router: {
+          manifest: () => [article],
+          entries: makeEntries([{ name: "article", pattern: "/{slug}/" }])
+        }
+      }
+    });
+
+    const result = await generateSitemap(ctx);
+
+    // The URL set stays raw — only the serialized XML is escaped.
+    expect(result?.urls).toEqual(["https://blog.dev/cats&dogs/", `https://blog.dev/<'quoted">/`]);
+    const xml = readFileSync(path.join(tmp, "sitemap.xml"), "utf8");
+    expect(xml).toContain("<loc>https://blog.dev/cats&amp;dogs/</loc>");
+    expect(xml).toContain("<loc>https://blog.dev/&lt;&apos;quoted&quot;&gt;/</loc>");
+    expect(xml).not.toContain("cats&dogs");
+  });
+
   it("is a no-op when config.sitemap is false", async () => {
     const ctx = makeCtx({ config: { outDir: tmp, sitemap: false } });
     expect(await generateSitemap(ctx)).toBeNull();

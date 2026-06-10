@@ -5,6 +5,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { bundle } from "./phases/bundle";
 import { loadContent } from "./phases/content";
@@ -18,6 +19,9 @@ import { renderPages } from "./phases/pages";
 import { copyPublic, DEFAULT_PUBLIC_DIR } from "./phases/public";
 import { generateSitemap } from "./phases/sitemap";
 import type { BuildResult, PhaseContext, PhaseName, RunOptions } from "./types";
+
+/** Error prefix for build pipeline runtime failures (spec/11 Part-3). */
+const ERROR_PREFIX = "[web] build";
 
 /** Matches a Markdown source path (a content edit). */
 const MARKDOWN_PATH = /\.md$/;
@@ -75,6 +79,61 @@ export function planIncrementalRebuild(changed: readonly string[] | undefined): 
   const contentChanged = changed.filter(file => MARKDOWN_PATH.test(file));
   const codeChanged = changed.some(file => CODE_PATH.test(file));
   return { contentChanged, contentReuse: true, renderReuse: !codeChanged };
+}
+
+/**
+ * Test whether a resolved path sits STRICTLY inside a resolved base directory —
+ * equality does not count (the base itself is never "inside" itself).
+ *
+ * @param resolved - The resolved absolute candidate path.
+ * @param baseResolved - The resolved absolute base directory.
+ * @returns `true` when `resolved` is nested beneath `baseResolved`.
+ * @example
+ * ```ts
+ * isStrictlyInside("/app/dist", "/app"); // true — but isStrictlyInside("/app", "/app") is false
+ * ```
+ */
+function isStrictlyInside(resolved: string, baseResolved: string): boolean {
+  return resolved !== baseResolved && resolved.startsWith(baseResolved + path.sep);
+}
+
+/**
+ * Assert that `outDir` is a SAFE target for the clean phase's recursive force-delete,
+ * defending against a misconfiguration (`outDir: "/"`, `"."`, `"~"`, a `..` escape)
+ * that would otherwise wipe the filesystem root, the home directory, or the project
+ * itself. Mirrors the deploy plugin's `assertWithinRoot` posture, tightened for
+ * deletion: a target is safe only when it sits STRICTLY inside the project root
+ * (never the root itself) or strictly inside the OS temp directory (a disposable
+ * area, used by preview/test builds) — and is never the home directory.
+ *
+ * @param outDir - The configured output directory (relative or absolute).
+ * @param root - The absolute project root relative paths resolve against.
+ * @returns The resolved absolute output directory.
+ * @throws {Error} `[web] build.outDir` when the resolved target is unsafe to delete.
+ * @example
+ * ```ts
+ * assertSafeCleanTarget("./dist", process.cwd()); // "<cwd>/dist"
+ * ```
+ */
+export function assertSafeCleanTarget(outDir: string, root: string): string {
+  const resolved = path.isAbsolute(outDir) ? path.resolve(outDir) : path.resolve(root, outDir);
+  const rootResolved = path.resolve(root);
+
+  // The home directory is never a clean target, even when the build (unusually)
+  // runs from an ancestor of it — deleting it loses far more than a stale build.
+  const isHome = resolved === path.resolve(homedir());
+
+  // Safe targets sit strictly inside the project (the usual `./dist`) or strictly
+  // inside the OS temp area (preview/test builds); the bases themselves never qualify.
+  const isSafe =
+    isStrictlyInside(resolved, rootResolved) || isStrictlyInside(resolved, path.resolve(tmpdir()));
+  if (isSafe && !isHome) return resolved;
+
+  throw new Error(
+    `${ERROR_PREFIX}.outDir: ${JSON.stringify(outDir)} (resolves to ${JSON.stringify(resolved)}) is not a safe clean target.\n` +
+      `  The clean phase force-deletes outDir recursively, so it must sit strictly inside the project root ${JSON.stringify(rootResolved)} (or the OS temp directory) — never the filesystem root, your home directory, or the project root itself.\n` +
+      `  Point build.outDir at a directory inside the project, e.g. "./dist".`
+  );
 }
 
 /**
@@ -232,7 +291,10 @@ export async function runPipeline(ctx: PhaseContext, options?: RunOptions): Prom
   // Phase 0 — clean (setup only, not a build:phase boundary). A dev rebuild passes
   // `skipClean` so the prior assets + on-disk caches survive (and so an in-flight dev
   // request never hits a momentarily-empty outDir); `mkdir` still ensures outDir exists.
+  // The recursive force-delete only ever runs against an asserted-safe target — a
+  // misconfigured outDir ("/", ".", home, a ".." escape) throws instead of deleting.
   if (!options?.skipClean) {
+    assertSafeCleanTarget(outDir, process.cwd());
     await rm(outDir, { recursive: true, force: true });
   }
   await mkdir(outDir, { recursive: true });
