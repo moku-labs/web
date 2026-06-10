@@ -271,17 +271,26 @@ export function createSpaKernel(
    *
    * @param pathname - The destination pathname (recorded as the new current URL).
    * @param resolvedRender - The inputs produced by {@link resolveDataRender}.
+   * @param signal - Aborts when this navigation is superseded (`navEvent.signal`).
    * @example
    * await commitDataRender("/en/world/", resolved);
    */
   const commitDataRender = async (
     pathname: string,
-    resolvedRender: ResolvedDataRender
+    resolvedRender: ResolvedDataRender,
+    signal?: AbortSignal
   ): Promise<void> => {
+    // A superseded navigation must never apply its swap: the abort can land while
+    // resolveDataRender awaited the data fetch — bail before any side effect.
+    if (signal?.aborted) return;
+
     // Begin the navigation, then lazy-load the Preact render layer on demand.
     const { route, vnode, routeContext, region } = resolvedRender;
     handleStart(pathname);
     const { renderVNode } = await import("./render");
+
+    // Re-check after the async import: the abort can also land while it loads.
+    if (signal?.aborted) return;
 
     // Sync the document head and tear down the outgoing page-specific islands.
     syncDataHead(route, routeContext);
@@ -322,15 +331,16 @@ export function createSpaKernel(
    * to HTML-over-fetch.
    *
    * @param pathname - The destination pathname (search stripped for matching).
+   * @param signal - Aborts when this navigation is superseded (`navEvent.signal`).
    * @returns `true` if the route was rendered from its data, else `false`.
    * @example
    * if (await tryDataRender("/en/world/")) return;
    */
-  const tryDataRender = async (pathname: string): Promise<boolean> => {
+  const tryDataRender = async (pathname: string, signal?: AbortSignal): Promise<boolean> => {
     try {
       const resolvedRender = await resolveDataRender(pathname);
       if (resolvedRender === false) return false;
-      await commitDataRender(pathname, resolvedRender);
+      await commitDataRender(pathname, resolvedRender, signal);
       return true;
     } catch {
       // commitDataRender may have started the progress bar (handleStart) before throwing;
@@ -349,19 +359,24 @@ export function createSpaKernel(
    * @param pathname - The destination pathname.
    * @param scrollToTop - Whether the swap should scroll to top before its snapshot
    *   (default `true`; forward navs). Traverse passes `false` to keep its restored scroll.
+   * @param signal - Aborts when this navigation is superseded (`navEvent.signal`);
+   *   a superseded navigation never applies its swap (no stale last-write-wins).
    * @returns A promise resolving once the swap (or fallback) is dispatched.
    * @example
    * await navigate("/en/world/");
    */
   const navigate: NavigateFunction = async (
     pathname: string,
-    scrollToTop = true
+    scrollToTop = true,
+    signal?: AbortSignal
   ): Promise<void> => {
     // Record the scroll intent for this navigation's swap (read by `applyPendingScroll`,
     // run just before the snapshot). Forward navs scroll to top; traverse keeps its scroll.
     pendingScrollToTop = scrollToTop;
-    if (deps.router.mode() !== "ssg" && (await tryDataRender(pathname))) return;
-    await performNavigation(pathname, handlers);
+    if (deps.router.mode() !== "ssg" && (await tryDataRender(pathname, signal))) return;
+    // Superseded while the DATA path resolved — never start the HTML fallback.
+    if (signal?.aborted) return;
+    await performNavigation(pathname, handlers, signal);
   };
 
   return {
