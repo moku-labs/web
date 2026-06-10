@@ -67,6 +67,10 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - run: bun install --frozen-lockfile
       - run: bun run test
+      # The cli e2e suite runs under `bun test` (NOT vitest) — it needs the real
+      # Bun.serve/Bun.file/Bun.build/Bun.spawn runtime, so vitest never globs it.
+      # It must be invoked explicitly or it runs nowhere.
+      - run: bun run test:cli-e2e
 
   build:
     runs-on: ubuntu-latest

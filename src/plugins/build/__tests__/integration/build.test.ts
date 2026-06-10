@@ -275,6 +275,15 @@ describe("build integration", () => {
     expect(existsSync(path.join(out, "_redirects"))).toBe(false);
   });
 
+  it("a clean run refuses a catastrophic outDir — the guard throws before anything is deleted", async () => {
+    const out = path.join(tmp, "dist");
+    const app = buildApp(out, bySlug);
+    // A per-run override pointing the clean at the filesystem root must throw,
+    // and nothing may be built (the guard fires before the pipeline's first phase).
+    await expect(app.build.run({ outDir: path.sep })).rejects.toThrow(/not a safe clean target/);
+    expect(existsSync(path.join(out, "index.html"))).toBe(false);
+  });
+
   it("skipClean preserves prior outDir contents; a clean run wipes them", async () => {
     const out = path.join(tmp, "dist");
     const app = buildApp(out, bySlug);

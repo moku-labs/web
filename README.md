@@ -15,7 +15,7 @@ Built on the [@moku-labs/core](https://github.com/moku-labs/core) micro-kernel �
 [![CI](https://github.com/moku-labs/web/actions/workflows/ci.yml/badge.svg)](https://github.com/moku-labs/web/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@moku-labs/web?logo=npm&color=cb3837&label=npm)](https://www.npmjs.com/package/@moku-labs/web)
 [![types](https://img.shields.io/badge/types-included-3178c6?logo=typescript&logoColor=white)](#requirements)
-[![browser bundle](https://img.shields.io/badge/browser%20entry-~45%20kB%20gzip-2da44e)](#the-browser-entry-is-guaranteed-node-free)
+[![browser bundle](https://img.shields.io/badge/browser%20entry-~50%20kB%20gzip-2da44e)](#the-browser-entry-is-guaranteed-node-free)
 [![node](https://img.shields.io/badge/node-%3E%3D24-339933?logo=node.js&logoColor=white)](#requirements)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
@@ -34,8 +34,11 @@ Built on the [@moku-labs/core](https://github.com/moku-labs/core) micro-kernel �
 ---
 
 ```sh
-bun add @moku-labs/web
+bun add @moku-labs/web preact preact-render-to-string
 ```
+
+> [!NOTE]
+> `preact` (and `preact-render-to-string`, used by the SSG build) are **peer dependencies** — your app compiles its JSX against the same single `preact` instance the framework renders with. Most package managers install peers automatically, but declare them explicitly so *you* own the version: a second nested copy of preact silently breaks hooks and island hydration.
 
 > [!NOTE]
 > **Status: `0.x` — pre-1.0.** The architecture is stable; the public API is settling but not yet frozen. Pin the version — the npm badge above tracks the current release.
@@ -45,7 +48,7 @@ bun add @moku-labs/web
 - **SSG first, SPA when you want it.** Render [Preact](https://preactjs.com) pages to static HTML for SEO and instant first paint, then progressively enhance with island hydration and client-side navigation — opt in per project with a single switch.
 - **The route is the contract.** One typed `route()` builder owns `load` → `render` → `head`. The build and the client run the *same* `render`, so there's no second code path to keep in sync. [Jump to the example ↓](#the-route-is-the-contract)
 - **SEO complete out of the box.** Title templates, canonical + `hreflang`, Open Graph / Twitter cards, JSON-LD, RSS / Atom / JSON feeds, `sitemap.xml`, and generated OG images.
-- **The `/browser` entry is guaranteed node-free.** A dedicated client entry whose static import graph references *zero* node modules — native code can never leak into your bundle, no matter your bundler or tree-shaking. A CI gate keeps it under budget (~45 kB gzip today). [Why this matters ↓](#the-browser-entry-is-guaranteed-node-free)
+- **The `/browser` entry is guaranteed node-free.** A dedicated client entry whose static import graph references *zero* node modules — native code can never leak into your bundle, no matter your bundler or tree-shaking. A CI gate keeps it under budget (~50 kB gzip today, 60 kB budget). [Why this matters ↓](#the-browser-entry-is-guaranteed-node-free)
 - **Plugins all the way down.** A tiny isomorphic core (`site`, `i18n`, `router`, `head`, `spa`) plus opt-in node-only plugins (`content`, `build`, `deploy`, `cli`), each [independently documented](#plugins) and composed in one `createApp` call.
 - **Types do the heavy lifting.** `ctx.data` is inferred from your `.load()`, path params from the route pattern, plugin APIs from their specs — no codegen, no `as`.
 - **i18n is built in.** Locale-aware routes, default-locale fallback, `hreflang` / `og:locale` maps.
