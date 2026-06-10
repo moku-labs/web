@@ -169,6 +169,73 @@ describe("kernel.processNav", () => {
     kernel.processNav("/broken");
     await vi.waitFor(() => expect(hrefSetter).toHaveBeenCalledWith("/broken"));
   });
+
+  it("falls back to a full browser navigation when the fetched page lacks the swap region", async () => {
+    const { state, emit, kernel } = setup();
+    kernel.init();
+    const initialUrl = state.currentUrl;
+    // A 200 page whose markup has no `main > section` — the region cannot be swapped.
+    const html = `<html><head><title>Bare</title></head><body><div>no region here</div></body></html>`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(new Response(html, { status: 200 })))
+    );
+    const hrefSetter = vi.fn();
+    Object.defineProperty(globalThis, "location", {
+      value: {
+        pathname: "/",
+        search: "",
+        get href() {
+          return "";
+        },
+        set href(v: string) {
+          hrefSetter(v);
+        }
+      },
+      configurable: true
+    });
+
+    kernel.processNav("/bare");
+    await vi.waitFor(() => expect(hrefSetter).toHaveBeenCalledWith("/bare"));
+
+    // The old body is still rendered — the nav must NOT be reported as completed.
+    expect(document.querySelector("#page")?.textContent).toBe("old");
+    expect(state.currentUrl).toBe(initialUrl);
+    expect(emit).not.toHaveBeenCalledWith("spa:navigated", expect.anything());
+  });
+
+  it("falls back to a full browser navigation when the live document lacks the swap region", async () => {
+    const { state, emit, kernel } = setup();
+    kernel.init();
+    const initialUrl = state.currentUrl;
+    // The live document has no `main > section` (e.g. the selector never matched this page).
+    document.body.innerHTML = `<div>no region in the live document</div>`;
+    const html = `<html><head><title>Next</title></head><body><main><section id="page">new</section></main></body></html>`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(new Response(html, { status: 200 })))
+    );
+    const hrefSetter = vi.fn();
+    Object.defineProperty(globalThis, "location", {
+      value: {
+        pathname: "/",
+        search: "",
+        get href() {
+          return "";
+        },
+        set href(v: string) {
+          hrefSetter(v);
+        }
+      },
+      configurable: true
+    });
+
+    kernel.processNav("/next");
+    await vi.waitFor(() => expect(hrefSetter).toHaveBeenCalledWith("/next"));
+
+    expect(state.currentUrl).toBe(initialUrl);
+    expect(emit).not.toHaveBeenCalledWith("spa:navigated", expect.anything());
+  });
 });
 
 describe("kernel.processNav — swap-time scroll (scroll-before-snapshot)", () => {

@@ -242,12 +242,17 @@ export function runSwap(
  * inside the same transition frame (after the DOM mutation) so component
  * re-mounting is captured by the transition snapshot.
  *
+ * Returns whether the swap was dispatched: `false` when either document lacks
+ * the `swapSelector` region, so the caller can fall back to a full navigation
+ * instead of finishing the SPA nav against an un-swapped body.
+ *
  * @param doc - The fetched document (DOMParser-parsed) holding the new region.
  * @param swapSelector - CSS selector for the region to replace.
  * @param viewTransitions - Whether to wrap the swap in `startViewTransition`.
  * @param onSwapped - Callback run after the DOM mutation (mount/notify/scroll).
  * @param beforeCapture - Optional hook run synchronously just before the swap/capture
  *   (forwarded to {@link runSwap} — e.g. scroll to the destination position).
+ * @returns `true` when the swap was dispatched, `false` when either document lacks the region.
  * @example
  * swapRegion(doc, "main > section", false, () => mountNew());
  */
@@ -257,10 +262,10 @@ export function swapRegion(
   viewTransitions: boolean,
   onSwapped: () => void,
   beforeCapture?: () => void
-): void {
+): boolean {
   const newContent = doc.querySelector(swapSelector);
   const currentContent = document.querySelector(swapSelector);
-  if (!newContent || !currentContent) return;
+  if (!newContent || !currentContent) return false;
   runSwap(
     () => {
       currentContent.replaceWith(newContent);
@@ -269,6 +274,7 @@ export function swapRegion(
     viewTransitions,
     beforeCapture
   );
+  return true;
 }
 
 /**
