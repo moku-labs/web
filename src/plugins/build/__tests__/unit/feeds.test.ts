@@ -67,6 +67,35 @@ describe("build/phases/feeds", () => {
     expect(readFileSync(path.join(tmp, "feed.json"), "utf8")).toContain("https://jsonfeed.org");
   });
 
+  it("absolutizes root-relative src/href URLs in item content", async () => {
+    const article = makeArticle({
+      html:
+        '<p><img src="/hello-world/images/dj-1.webp" alt="">' +
+        '<a href="/en/second/">next</a>' +
+        '<img src="//cdn.example.com/pixel.gif" alt="">' +
+        '<a href="https://example.com/x">out</a></p>'
+    });
+    const ctx = feedCtx(tmp, [article]);
+
+    const result = await generateFeeds(ctx);
+
+    // Root-relative URLs become absolute against site.url() in every format.
+    expect(result?.rss).toContain('src="https://blog.dev/hello-world/images/dj-1.webp"');
+    expect(result?.rss).toContain('href="https://blog.dev/en/second/"');
+    expect(result?.atom).toContain("https://blog.dev/hello-world/images/dj-1.webp");
+    const json = JSON.parse(result?.json ?? "{}") as { items: { content_html: string }[] };
+    expect(json.items[0]?.content_html).toContain(
+      'src="https://blog.dev/hello-world/images/dj-1.webp"'
+    );
+    expect(json.items[0]?.content_html).toContain('href="https://blog.dev/en/second/"');
+    // No root-relative URL leaks into the embedded content.
+    expect(json.items[0]?.content_html).not.toMatch(/(?:src|href)="\/(?!\/)/);
+    expect(result?.rss).not.toContain('src="/hello-world/');
+    // Protocol-relative and absolute URLs are left untouched.
+    expect(json.items[0]?.content_html).toContain('src="//cdn.example.com/pixel.gif"');
+    expect(json.items[0]?.content_html).toContain('href="https://example.com/x"');
+  });
+
   it("excludes drafts and is a no-op when config.feeds is false", async () => {
     const ctx = makeCtx({ config: { outDir: tmp, feeds: false } });
     expect(await generateFeeds(ctx)).toBeNull();
