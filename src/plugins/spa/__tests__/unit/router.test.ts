@@ -160,6 +160,58 @@ describe("attachHistoryFallback (fetch error → full browser navigation)", () =
     dispose();
   });
 
+  it("same-page hash link is NOT intercepted (native anchor jump)", () => {
+    Object.defineProperty(globalThis, "location", {
+      value: { origin: "http://localhost:3000", pathname: "/here" },
+      configurable: true
+    });
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const pushState = vi.spyOn(history, "pushState");
+    const dispose = attachHistoryFallback({ onStart() {}, onEnd() {}, onError() {} });
+
+    document.body.innerHTML = `<a id="a" href="#section">x</a>`;
+    const anchor = document.querySelector("#a") as HTMLAnchorElement;
+    Object.defineProperty(anchor, "href", { value: "http://localhost:3000/here#section" });
+    const notPrevented = anchor.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true })
+    );
+
+    // No preventDefault → the browser performs the native jump-to-anchor + hash update.
+    expect(notPrevented).toBe(true);
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(pushState).not.toHaveBeenCalled();
+    dispose();
+  });
+
+  it("hash link to a DIFFERENT page is still intercepted and navigated", async () => {
+    Object.defineProperty(globalThis, "location", {
+      value: { origin: "http://localhost:3000", pathname: "/here" },
+      configurable: true
+    });
+    vi.stubGlobal("scrollTo", vi.fn());
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(new Response("<p>ok</p>", { status: 200 })))
+    );
+    const onEnd = vi.fn();
+    const dispose = attachHistoryFallback({ onStart() {}, onEnd, onError() {} });
+
+    document.body.innerHTML = `<a id="a" href="/next#section">x</a>`;
+    const anchor = document.querySelector("#a") as HTMLAnchorElement;
+    Object.defineProperty(anchor, "href", { value: "http://localhost:3000/next#section" });
+    const notPrevented = anchor.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true })
+    );
+
+    expect(notPrevented).toBe(false); // intercepted: preventDefault was called
+    await vi.waitFor(() => expect(onEnd).toHaveBeenCalledWith("<p>ok</p>", "/next"));
+    dispose();
+  });
+
   it("cross-page click pushes history and hands off to navigate WITHOUT scrolling", async () => {
     Object.defineProperty(globalThis, "location", {
       value: { origin: "http://localhost:3000", pathname: "/", search: "" },
