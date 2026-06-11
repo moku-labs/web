@@ -19,10 +19,18 @@ function makeRouter(
   } as unknown as RouterApi;
 }
 
+/** Minimal head API stub: `composeTitle` is a pass-through (no template), spy-able per test. */
+function makeHead(composeTitle?: (head?: { title?: string }) => string): HeadApi {
+  return {
+    render: () => "",
+    composeTitle: composeTitle ?? (head => head?.title ?? "")
+  } as unknown as HeadApi;
+}
+
 /** Minimal stub deps — HTML-over-fetch only (no data reader). */
 const deps: SpaKernelDeps = {
   router: makeRouter("hybrid"),
-  head: { render: () => "" } as unknown as HeadApi
+  head: makeHead()
 };
 
 /** A fresh kernel over fresh state with a spy emit. */
@@ -38,6 +46,7 @@ interface DataSetup {
   route?: RouteDefinition | undefined;
   raw?: unknown;
   mode?: "ssg" | "spa" | "hybrid";
+  composeTitle?: (head?: { title?: string }) => string;
 }
 
 /** A kernel wired with the data reader enabled + the given matched route + raw payload. */
@@ -48,7 +57,7 @@ function setupData(options: DataSetup = {}) {
   const dataAt = vi.fn(() => Promise.resolve(raw));
   const deps: SpaKernelDeps = {
     router: makeRouter(options.mode ?? "hybrid", options.route),
-    head: { render: () => "" } as unknown as HeadApi,
+    head: makeHead(options.composeTitle),
     dataAt
   };
   const kernel = createSpaKernel(state, {}, emit, deps);
@@ -398,6 +407,26 @@ describe("kernel.processNav — client DATA path (data plugin composed)", () => 
     expect(fetchSpy).not.toHaveBeenCalled(); // DATA path, not HTML-over-fetch
   });
 
+  it("DATA path resolves document.title through head.composeTitle (titleTemplate applied)", async () => {
+    // The raw route title must NOT land in document.title — composeTitle owns the final value
+    // (template applied; a route-pinned title element wins), matching the SSG <title> output.
+    const composeTitle = vi.fn((head?: { title?: string }) => `${head?.title} — Site`);
+    const { emit, kernel } = setupData({
+      route: makeDataRoute(),
+      raw: { title: "Page 2" },
+      composeTitle
+    });
+    kernel.init();
+
+    kernel.processNav("/en/page/");
+    await vi.waitFor(() =>
+      expect(emit).toHaveBeenCalledWith("spa:navigated", { url: "/en/page/" })
+    );
+
+    expect(composeTitle).toHaveBeenCalledWith({ title: "Page 2" });
+    expect(document.title).toBe("Page 2 — Site");
+  });
+
   it("falls back to HTML-over-fetch when route.render throws (no partial swap)", async () => {
     const { kernel } = setupData({
       route: makeDataRoute({
@@ -489,7 +518,7 @@ describe("kernel navigation — superseded navigation (navEvent.signal)", () => 
     const emit = vi.fn();
     const dataDeps: SpaKernelDeps = {
       router: makeRouter("hybrid", makeDataRoute()),
-      head: { render: () => "" } as unknown as HeadApi,
+      head: makeHead(),
       dataAt: vi.fn(
         () =>
           new Promise(resolve => {

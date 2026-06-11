@@ -238,6 +238,34 @@ export function composeHead(input: ComposeInput): HeadElement[] {
 }
 
 /**
+ * Resolve the FINAL document title for a route's head config — the same value
+ * {@link composeHead} emits in its `<title>` element. A route-supplied `title`-keyed
+ * element wins the keyed last-wins de-dupe over the templated base title (how a route
+ * pins a bare title past `titleTemplate`), so it must win here too; otherwise the
+ * template is applied to `head.title ?? site.name()`. Reused by `spa` for the client
+ * DATA-path `document.title` sync, so client-side navigation matches the SSG output.
+ *
+ * @param head - The route's head config (may be `undefined` for head-less routes).
+ * @param defaults - The normalized head defaults (provides `titleTemplate`).
+ * @param site - The site slice (title fallback).
+ * @returns The final document title string.
+ * @example composeTitle({ title: "Page 2" }, defaults, site) // "Page 2 — Site"
+ */
+export function composeTitle(
+  head: HeadConfig | undefined,
+  defaults: HeadDefaults,
+  site: SiteSlice
+): string {
+  const config = head ?? {};
+
+  // A route-pinned `title` element overrides the templated base title (last-wins de-dupe).
+  const pinned = config.elements?.findLast(element => element.key === "title");
+  if (pinned?.children !== undefined) return pinned.children;
+
+  return applyTemplate(config.title ?? site.name(), defaults.titleTemplate);
+}
+
+/**
  * Compose the SITE-LEVEL Open Graph / Twitter block for a bare-path redirect or landing
  * page that has no per-route head of its own. Returns `[]` UNLESS a `defaultOgImage` is
  * configured — so apps that opt out keep a bare redirect (no behavior change). The site
