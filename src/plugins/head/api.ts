@@ -8,7 +8,7 @@
 import { i18nPlugin } from "../i18n";
 import { routerPlugin } from "../router";
 import { sitePlugin } from "../site";
-import { composeHead, composeSiteHead, serializeHead } from "./compose";
+import { composeHead, composeSiteHead, composeTitle, serializeHead } from "./compose";
 import type { Api, HeadDefaults, State } from "./types";
 
 /** Error prefix for head API invariant failures. */
@@ -144,6 +144,22 @@ export function createApi(ctx: ApiContext): Api {
         ...(ogLocale === undefined ? {} : { ogLocale })
       });
       return serializeHead(elements);
+    },
+
+    /**
+     * Resolve the FINAL document title for a route's head config — the same value `render`
+     * emits in its `<title>` element. Pulled by `spa` on the client DATA path so a
+     * client-side navigation's `document.title` matches the SSG output.
+     *
+     * @param head - The route's head config (may be `undefined` for head-less routes).
+     * @returns The final document title string.
+     * @example
+     * ```ts
+     * api.composeTitle({ title: "Page 2" }); // "Page 2 — Site"
+     * ```
+     */
+    composeTitle(head) {
+      return composeTitle(head, readDefaults(ctx.state), ctx.require(sitePlugin));
     }
   };
 }

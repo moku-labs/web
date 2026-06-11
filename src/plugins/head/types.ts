@@ -192,4 +192,17 @@ export type Api = {
    * ```
    */
   siteHead(input: { url: string; locale?: string }): string;
+  /**
+   * Resolve the FINAL document title for a route's head config — the same value `render`
+   * emits in its `<title>` element (`titleTemplate` applied; a route-pinned `title`-keyed
+   * element wins). Used by `spa` to sync `document.title` on client DATA-path navigation.
+   *
+   * @param head - The route's head config (may be `undefined` for head-less routes).
+   * @returns The final document title string.
+   * @example
+   * ```ts
+   * api.composeTitle({ title: "Page 2" }); // "Page 2 — Site"
+   * ```
+   */
+  composeTitle(head: HeadConfig | undefined): string;
 };

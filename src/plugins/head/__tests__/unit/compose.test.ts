@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ComposeInput, SiteHeadInput } from "../../compose";
-import { composeHead, composeSiteHead, serializeHead } from "../../compose";
+import { composeHead, composeSiteHead, composeTitle, serializeHead } from "../../compose";
 import { meta } from "../../primitives";
 import type { HeadDefaults, HeadElement, ResolvedRoute } from "../../types";
 
@@ -220,6 +220,40 @@ describe("head compose", () => {
     it("emits og:locale for the active locale", () => {
       const els = composeHead(input());
       expect(els.find(e => e.key === "meta:og:locale")?.attrs?.content).toBe("en_US");
+    });
+  });
+
+  describe("composeTitle()", () => {
+    it("applies the titleTemplate to the route title (matches composeHead's <title>)", () => {
+      expect(composeTitle({ title: "Page 2" }, DEFAULTS, makeSite())).toBe("Page 2 — My Site");
+    });
+
+    it("falls back to the site name for an undefined head config", () => {
+      expect(composeTitle(undefined, DEFAULTS, makeSite())).toBe("My Site — My Site");
+    });
+
+    it("returns the title verbatim when no titleTemplate is configured", () => {
+      const defaults: HeadDefaults = {
+        defaultOgImage: "/default-og.png",
+        twitterCard: "summary_large_image",
+        twitterHandle: "@moku_labs"
+      };
+      expect(composeTitle({ title: "Page 2" }, defaults, makeSite())).toBe("Page 2");
+    });
+
+    it("lets a route-pinned `title` element win over the template (last-wins de-dupe)", () => {
+      const head = {
+        title: "My Site",
+        elements: [{ tag: "title", children: "My Site", key: "title" } as HeadElement]
+      };
+      expect(composeTitle(head, DEFAULTS, makeSite())).toBe("My Site");
+    });
+
+    it("agrees with composeHead's emitted <title> element", () => {
+      const composeInput = input();
+      const fromHead = composeHead(composeInput).find(e => e.key === "title")?.children;
+      const fromTitle = composeTitle(composeInput.route.head, DEFAULTS, makeSite());
+      expect(fromTitle).toBe(fromHead);
     });
   });
 
