@@ -8,6 +8,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { bundle } from "./phases/bundle";
+import { generateCacheHeaders } from "./phases/cache-headers";
 import { loadContent } from "./phases/content";
 import { copyContentImages } from "./phases/content-images";
 import { generateFeeds } from "./phases/feeds";
@@ -156,6 +157,7 @@ export const PHASE_ORDER: readonly PhaseName[] = [
   "public",
   "not-found",
   "locale-redirects",
+  "cache-headers",
   "root-index"
 ] as const;
 
@@ -272,7 +274,7 @@ async function runOutputs(ctx: PhaseContext): Promise<void> {
 
 /**
  * Executes the full SSG pipeline for one run: clean → bundle → content/images →
- * pages → feeds/sitemap/og-images → root-index. Orchestrates `ctx.require` pulls
+ * pages → feeds/sitemap/og-images → cache-headers → root-index. Orchestrates `ctx.require` pulls
  * and `Promise.all` only — never inlines dependency domain logic. Emits a
  * `build:phase` boundary per phase and `build:complete` once at the end.
  *
@@ -333,6 +335,13 @@ export async function runPipeline(ctx: PhaseContext, options?: RunOptions): Prom
 
   // Phase 4 — feeds + sitemap + og-images (gated; allSettled).
   await runOutputs(phaseContext);
+
+  // Phase 4.5 — cache headers (gated; default on). Runs strictly AFTER the outputs
+  // group: the public phase copies `<publicDir>/_headers` into outDir verbatim, and
+  // this phase overwrites it with the merged (generated + app) rule file.
+  if (phaseContext.config.cacheHeaders !== false) {
+    await withPhase(phaseContext, "cache-headers", () => generateCacheHeaders(phaseContext));
+  }
 
   // Phase 5 — root-index (write the captured default-page HTML when present).
   await withPhase(phaseContext, "root-index", async () => {
