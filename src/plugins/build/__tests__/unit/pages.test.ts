@@ -315,6 +315,39 @@ describe("build/phases/pages", () => {
     expect(html).not.toContain("<!--moku:");
   });
 
+  it("fills the split <!--moku:assets:css/js--> placeholders with one asset kind each", async () => {
+    // A shell may link stylesheets in <head> but place scripts at the end of
+    // <body> — the split placeholders inject exactly one kind at each site.
+    const templatePath = path.join(tmp, "shell.html");
+    writeFileSync(
+      templatePath,
+      "<!doctype html><html><head><!--moku:assets:css--></head><body><!--moku:body--><!--moku:assets:js--></body></html>"
+    );
+    const home = makeRoute("/", { render: () => h("h1", {}, "Home") });
+    const ctx = makeCtx({
+      config: { outDir: tmp, template: templatePath },
+      requireMap: {
+        router: {
+          mode: () => "ssg",
+          manifest: () => [home],
+          entries: makeEntries([{ name: "home", pattern: "/" }])
+        },
+        i18n: { locales: () => ["en"], defaultLocale: () => "en" },
+        head: { render: () => "" }
+      }
+    });
+    ctx.state.buildCache.set("css", { "main.css": "assets/main-abc.css" });
+    ctx.state.buildCache.set("js", { "spa.js": "assets/spa-def.js" });
+
+    await renderPages(ctx);
+
+    const html = readFileSync(path.join(tmp, "index.html"), "utf8");
+    expect(html).toContain('<head><link rel="stylesheet" href="/assets/main-abc.css"></head>');
+    expect(html).toContain('<script type="module" src="/assets/spa-def.js"></script></body>');
+    // No kind leaked into the other placeholder's site.
+    expect(html).not.toContain("<!--moku:");
+  });
+
   it("substitutes <!--moku:lang--> with the page locale in a custom template", async () => {
     const templatePath = path.join(tmp, "shell.html");
     writeFileSync(

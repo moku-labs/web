@@ -112,6 +112,21 @@ describe("build integration", () => {
     expect(existsSync(path.join(out, "index.html"))).toBe(true);
   });
 
+  it("emits dist/_headers with the catch-all revalidation rule (cache-headers wired, default on)", async () => {
+    const out = path.join(tmp, "dist");
+    const app = buildApp(out, bySlug);
+    await app.build.run();
+    const headers = readFileSync(path.join(out, "_headers"), "utf8");
+    expect(headers).toContain("/*\n  Cache-Control: public, max-age=0, must-revalidate");
+  });
+
+  it("cacheHeaders:false (per-run override) skips the _headers emission", async () => {
+    const out = path.join(tmp, "dist");
+    const app = buildApp(out, bySlug);
+    await app.build.run({ overrides: { cacheHeaders: false } });
+    expect(existsSync(path.join(out, "_headers"))).toBe(false);
+  });
+
   it("emits build:phase (per phase, start/done) then build:complete in order", async () => {
     const out = path.join(tmp, "dist");
     const events: string[] = [];

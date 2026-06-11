@@ -34,14 +34,18 @@ import type {
   RouteState,
   TypedRoute
 } from "../../router/types";
-import type { BuildCacheEntry, PhaseContext } from "../types";
+import type { PhaseContext } from "../types";
+import {
+  ASSETS_PLACEHOLDER,
+  buildAssetTags,
+  CSS_ASSETS_PLACEHOLDER,
+  JS_ASSETS_PLACEHOLDER
+} from "./asset-tags";
 
 /** Template placeholder for the composed `<head>` inner HTML. */
 const HEAD_PLACEHOLDER = "<!--moku:head-->";
 /** Template placeholder for the SSR-rendered body HTML. */
 const BODY_PLACEHOLDER = "<!--moku:body-->";
-/** Template placeholder for the injected asset `<link>`/`<script>` tags. */
-const ASSETS_PLACEHOLDER = "<!--moku:assets-->";
 /** Template placeholder for the page's locale (`<html lang>`). */
 const LANG_PLACEHOLDER = "<!--moku:lang-->";
 
@@ -92,6 +96,10 @@ type DocumentParts = {
   body: string;
   /** Injected asset `<link>`/`<script>` tags (empty when injection is off). */
   assets: string;
+  /** The stylesheet `<link>` tags ONLY (the split `<!--moku:assets:css-->` placeholder). */
+  assetsCss: string;
+  /** The `<script>` tags ONLY (the split `<!--moku:assets:js-->` placeholder). */
+  assetsJs: string;
   /** Page locale for the `<html lang>` attribute / shell. */
   locale: string;
 };
@@ -100,6 +108,10 @@ type DocumentParts = {
 type RenderShell = {
   /** The injected asset `<link>`/`<script>` tags (computed once). */
   readonly assets: string;
+  /** The stylesheet `<link>` tags ONLY (computed once, for the split placeholder). */
+  readonly assetsCss: string;
+  /** The `<script>` tags ONLY (computed once, for the split placeholder). */
+  readonly assetsJs: string;
   /** The shell template HTML, or `null` to use the in-code shell. */
   readonly template: string | null;
   /**
@@ -110,46 +122,6 @@ type RenderShell = {
    */
   readonly defaultLocale: string;
 };
-
-/**
- * Read the bundle phase's hashed asset manifest for one kind from `state.buildCache`
- * as a typed {@link BuildCacheEntry} (no `Map<string, unknown>` reads).
- *
- * @param ctx - Plugin context (provides `state`).
- * @param kind - The asset kind key (`"css"` / `"js"`).
- * @returns The hashed-path manifest entry, or an empty object when absent.
- * @example
- * ```ts
- * readManifest(ctx, "css");
- * ```
- */
-function readManifest(ctx: Pick<PhaseContext, "state">, kind: "css" | "js"): BuildCacheEntry {
-  const entry = ctx.state.buildCache.get(kind);
-  return entry && typeof entry === "object" ? (entry as BuildCacheEntry) : {};
-}
-
-/**
- * Build the asset `<link>`/`<script>` tag block from the hashed manifests. Returns
- * an empty string when `config.injectAssets === false`. Asset paths are emitted as
- * absolute (`/`-rooted) URLs.
- *
- * @param ctx - Plugin context (provides `state`, `config`).
- * @returns The injected asset tags, or `""` when injection is disabled.
- * @example
- * ```ts
- * buildAssetTags(ctx);
- * ```
- */
-function buildAssetTags(ctx: Pick<PhaseContext, "state" | "config">): string {
-  if (ctx.config.injectAssets === false) return "";
-  const css = Object.values(readManifest(ctx, "css")).map(
-    href => `<link rel="stylesheet" href="/${href}">`
-  );
-  const js = Object.values(readManifest(ctx, "js")).map(
-    src => `<script type="module" src="/${src}"></script>`
-  );
-  return [...css, ...js].join("");
-}
 
 /**
  * Compose the full static HTML document with the in-code shell, injecting the
@@ -176,14 +148,17 @@ function renderDocument(parts: DocumentParts): string {
  * Fill a shell template's `<!--moku:lang-->` / `<!--moku:head-->` /
  * `<!--moku:body-->` / `<!--moku:assets-->` placeholders deterministically at build
  * time. `<!--moku:lang-->` carries the page locale (for `<html lang>`), so a single
- * shared template stays locale-correct across every locale.
+ * shared template stays locale-correct across every locale. The split
+ * `<!--moku:assets:css-->` / `<!--moku:assets:js-->` placeholders inject one asset
+ * kind each — for shells that, e.g., link stylesheets in `<head>` but place
+ * scripts at the end of `<body>`.
  *
  * @param template - The raw shell template HTML.
  * @param parts - The composed head/body/assets/locale pieces.
  * @returns The filled document string.
  * @example
  * ```ts
- * fillTemplate(shell, { head, body, assets, locale: "en" });
+ * fillTemplate(shell, { head, body, assets, assetsCss, assetsJs, locale: "en" });
  * ```
  */
 function fillTemplate(template: string, parts: DocumentParts): string {
@@ -191,7 +166,9 @@ function fillTemplate(template: string, parts: DocumentParts): string {
     .replaceAll(LANG_PLACEHOLDER, parts.locale)
     .replaceAll(HEAD_PLACEHOLDER, parts.head)
     .replaceAll(BODY_PLACEHOLDER, parts.body)
-    .replaceAll(ASSETS_PLACEHOLDER, parts.assets);
+    .replaceAll(ASSETS_PLACEHOLDER, parts.assets)
+    .replaceAll(CSS_ASSETS_PLACEHOLDER, parts.assetsCss)
+    .replaceAll(JS_ASSETS_PLACEHOLDER, parts.assetsJs);
 }
 
 /**
@@ -614,6 +591,8 @@ async function renderInstance(
     head: composeHeadHtml(ctx, instance, url, routeContext, data),
     body: renderBodyCached(ctx, instance, routeContext, data, reuse),
     assets: shell.assets,
+    assetsCss: shell.assetsCss,
+    assetsJs: shell.assetsJs,
     locale
   };
 
@@ -665,6 +644,8 @@ async function prepareShell(
         null;
   return {
     assets: buildAssetTags(ctx),
+    assetsCss: buildAssetTags(ctx, "css"),
+    assetsJs: buildAssetTags(ctx, "js"),
     template,
     defaultLocale: ctx.require(i18nPlugin).defaultLocale()
   };

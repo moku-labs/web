@@ -1,10 +1,14 @@
 /**
  * @file build phase — not-found. Emits `outDir/404.html` from configured route
- * content or a built-in default. Gated by `config.notFound` (false/unset disables).
+ * content or a built-in default, substituting the `<!--moku:assets-->` family of
+ * placeholders (the bundles are fingerprint-named, so an app-owned 404 page can
+ * no longer hardcode a bundle URL). Gated by `config.notFound` (false/unset
+ * disables).
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { PhaseContext } from "../types";
+import { substituteAssetPlaceholders } from "./asset-tags";
 
 /** The built-in default 404 page body when no custom route content is supplied. */
 const DEFAULT_BODY = "<h1>404</h1><p>The page you requested could not be found.</p>";
@@ -68,11 +72,13 @@ async function resolveHtml(notFound: true | { body?: string; path?: string }): P
 /**
  * Emits `outDir/404.html`. When `config.notFound` is `true`, writes the built-in
  * default page; `{ body }` writes the supplied HTML body content inside the
- * minimal document shell; `{ path }` writes the referenced HTML page file
- * verbatim (the app owns the whole document). No-op (returns `null`) when
- * `notFound` is false/unset.
+ * minimal document shell; `{ path }` writes the referenced HTML page file (the
+ * app owns the whole document). In every variant the `<!--moku:assets-->` /
+ * `<!--moku:assets:css-->` / `<!--moku:assets:js-->` placeholders are substituted
+ * with the fingerprinted bundle tags — a page without placeholders passes through
+ * byte-for-byte. No-op (returns `null`) when `notFound` is false/unset.
  *
- * @param ctx - Plugin context (provides `config`, `log`).
+ * @param ctx - Plugin context (provides `state`, `config`, `log`).
  * @returns The written file path, or `null` when disabled.
  * @example
  * ```ts
@@ -80,7 +86,7 @@ async function resolveHtml(notFound: true | { body?: string; path?: string }): P
  * ```
  */
 export async function generateNotFound(
-  ctx: Pick<PhaseContext, "config" | "log">
+  ctx: Pick<PhaseContext, "state" | "config" | "log">
 ): Promise<NotFoundResult | null> {
   const { notFound, outDir } = ctx.config;
   if (!notFound) {
@@ -88,7 +94,7 @@ export async function generateNotFound(
     // eslint-disable-next-line unicorn/no-null -- `null` signals a disabled phase
     return null;
   }
-  const html = await resolveHtml(notFound);
+  const html = substituteAssetPlaceholders(ctx, await resolveHtml(notFound));
   await mkdir(outDir, { recursive: true });
   const file = path.join(outDir, "404.html");
   await writeFile(file, html, "utf8");

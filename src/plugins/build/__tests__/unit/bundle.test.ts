@@ -89,6 +89,45 @@ describe("build/phases/bundle", () => {
     expect(js).toEqual({ "main.js": "assets/main.js" });
   });
 
+  it("requests content-hashed naming for EVERY output kind (entry points included)", async () => {
+    // Bun's default naming only hashes chunks/assets — entry points keep stable
+    // names ("main.css"), which a CDN/browser can cache stale across deploys.
+    // Fingerprinted entry names are what make the immutable cache rules safe.
+    const runner = vi.fn(async (_opts: Parameters<BundleRunner>[0]) => ({
+      success: true,
+      outputs: []
+    }));
+    const ctx = makeCtx({ config: { outDir: "./dist", minify: true } });
+    await bundle(ctx, { runner, cssEntrypoints: ["styles.css"], jsEntrypoints: ["main.ts"] });
+    expect(runner).toHaveBeenCalledTimes(2);
+    for (const call of runner.mock.calls) {
+      expect(call[0].naming).toEqual({
+        entry: "[dir]/[name]-[hash].[ext]",
+        chunk: "chunk-[hash].[ext]",
+        asset: "[name]-[hash].[ext]"
+      });
+    }
+  });
+
+  it("records the COMPLETE per-kind output list (chunks included) under `<kind>:outputs`", async () => {
+    // The embeddable manifest excludes chunks, but the cache-headers phase needs
+    // EVERY fingerprinted file to emit its per-file immutable rule.
+    const runner = vi.fn(async () => ({
+      success: true,
+      outputs: [
+        { path: "dist/assets/spa-abc1.js", kind: "entry-point" },
+        { path: "dist/assets/chunk-def2.js", kind: "chunk" }
+      ]
+    }));
+    const ctx = makeCtx({ config: { outDir: "./dist", minify: true } });
+    await bundle(ctx, { runner, cssEntrypoints: [], jsEntrypoints: ["main.ts"] });
+    expect(ctx.state.buildCache.get("js:outputs")).toEqual([
+      "assets/spa-abc1.js",
+      "assets/chunk-def2.js"
+    ]);
+    expect(ctx.state.buildCache.get("js")).toEqual({ "spa-abc1.js": "assets/spa-abc1.js" });
+  });
+
   it("runs the CSS + JS passes concurrently (both in flight before either resolves)", async () => {
     let active = 0;
     let peak = 0;
