@@ -73,16 +73,23 @@ function currentLocationUrl(): string {
 /**
  * Apply the matched route's `head` config to the live document (minimal client
  * head-sync for the DATA path: title only — the full meta sync runs on the
- * HTML-over-fetch path from the fetched `<head>`).
+ * HTML-over-fetch path from the fetched `<head>`). The title is resolved through
+ * `head.composeTitle` — the SAME composition `render` uses (`titleTemplate` applied;
+ * a route-pinned `title` element wins) — so a client-side navigation's
+ * `document.title` matches the SSG output instead of the raw route title.
  *
+ * @param head - The head plugin API (resolves the final templated title).
  * @param route - The matched route definition.
  * @param routeContext - The render context (params/data/locale).
  * @example
- * syncDataHead(hit.route, { params, data, locale });
+ * syncDataHead(deps.head, hit.route, { params, data, locale });
  */
-function syncDataHead(route: RouteDefinition, routeContext: RouteContext<RouteState>): void {
-  const title = route._handlers.head?.(routeContext)?.title;
-  if (title !== undefined && title !== "") document.title = title;
+function syncDataHead(
+  head: SpaKernelDeps["head"],
+  route: RouteDefinition,
+  routeContext: RouteContext<RouteState>
+): void {
+  document.title = head.composeTitle(route._handlers.head?.(routeContext));
 }
 
 /**
@@ -293,7 +300,7 @@ export function createSpaKernel(
     if (signal?.aborted) return;
 
     // Sync the document head and tear down the outgoing page-specific islands.
-    syncDataHead(route, routeContext);
+    syncDataHead(deps.head, route, routeContext);
     unmountPageSpecific(state, emit);
 
     /**
