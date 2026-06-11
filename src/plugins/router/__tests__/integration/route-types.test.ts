@@ -1,5 +1,6 @@
 /* eslint-disable unicorn/no-null -- render handler stubs return `null` (valid VNode) */
 import { describe, expectTypeOf, it } from "vitest";
+import { envPlugin } from "../../../env";
 import { createUrls, defineRoutes, route } from "../../index";
 import type {
   ClientRoute,
@@ -63,6 +64,15 @@ describe("#7 consumer-facing type exports from router/types.ts", () => {
   it("RouteState is exported and carries params + data", () => {
     expectTypeOf<RouteState>().toHaveProperty("params");
     expectTypeOf<RouteState>().toHaveProperty("data");
+  });
+
+  it("loader require resolves a core-plugin instance (typed, no cast)", () => {
+    route("/{slug}/").load(ctx => {
+      const env = ctx.require(envPlugin);
+      expectTypeOf(env.get("ANY")).toEqualTypeOf<string | undefined>();
+      expectTypeOf(env.require("ANY")).toBeString();
+      return {};
+    });
   });
 
   it("HeadConfig is exported and is the route-handler head return", () => {

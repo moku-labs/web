@@ -59,7 +59,11 @@ export type BuildEvents = {
 /** Strictly-typed emit closure for the build events (kernel overload form). */
 export type PhaseEmit = EmitFn<BuildEvents>;
 
-/** Generic `require` closure for pulling dependency plugin APIs at run time. */
+/**
+ * Generic `require` closure for pulling dependency plugin APIs at run time.
+ * `events` is optional in the constraint so core-plugin instances (env/log)
+ * resolve too — mirrors the kernel's `PluginLike` and the router's `RouteRequire`.
+ */
 export type PhaseRequire = <
   PluginCandidate extends {
     readonly name: string;
@@ -68,7 +72,7 @@ export type PhaseRequire = <
       readonly config: unknown;
       readonly state: unknown;
       readonly api: unknown;
-      readonly events: Record<string, unknown>;
+      readonly events?: Record<string, unknown>;
     };
   }
 >(

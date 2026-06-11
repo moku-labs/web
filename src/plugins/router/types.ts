@@ -89,6 +89,8 @@ export type ExtractApi<PluginCandidate> = PluginCandidate extends {
  * `PhaseRequire`, so the build forwards its own `ctx.require` straight through.
  * Resolves a plugin INSTANCE to its public API; the consumer supplies the instance
  * (e.g. `ctx.require(contentPlugin)`), so the router never names a sibling plugin.
+ * `events` is optional in the constraint so core-plugin instances (env/log — no
+ * events phantom) resolve too, e.g. `ctx.require(envPlugin)` for build-time env.
  *
  * @example
  * const content = ctx.require(contentPlugin); // ContentApi
@@ -101,7 +103,7 @@ export type RouteRequire = <
       readonly config: unknown;
       readonly state: unknown;
       readonly api: unknown;
-      readonly events: Record<string, unknown>;
+      readonly events?: Record<string, unknown>;
     };
   }
 >(
