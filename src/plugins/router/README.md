@@ -37,7 +37,7 @@ await app.build.run();    // or: await app.start(); — routes compiled at init 
 ```
 
 > [!NOTE]
-> `ctx.data` in `.render`/`.head` is typed from **`.load()`'s return**; `.load` is OPTIONAL. `.load`/`.generate` run **build-only** and receive `{ params, locale, require, has }`, so a loader pulls sibling plugin APIs the canonical way — `ctx.require(contentPlugin)` — with no module global and no router→content coupling. `.render`/`.head` receive **`ctx.url(name, params)`** — a link builder (backed by `router.toUrl`) the framework delivers, so links need no `app` reference.
+> `ctx.data` in `.render`/`.head` is typed from **`.load()`'s return**; `.load` is OPTIONAL. `.load`/`.generate` run **build-only** and receive `{ params, locale, require, has, env, log }`, so a loader pulls sibling plugin APIs the canonical way — `ctx.require(contentPlugin)` — and reads build-time env via the flat-injected core APIs (spec/08 §2b) — `ctx.env.get("MY_VAR")` — with no module global and no router→content coupling. `.render`/`.head` receive **`ctx.url(name, params)`** — a link builder (backed by `router.toUrl`) the framework delivers, so links need no `app` reference.
 
 ## API
 Reachable via `app.router` and `ctx.require(routerPlugin)`.

@@ -25,6 +25,26 @@ export function makeLog() {
 }
 
 /**
+ * A mock core `env` API over a plain record. `vars` seeds the resolved
+ * variables tests read via `ctx.env.get(...)`; public-prefixed keys
+ * (`PUBLIC_*`) surface through `getPublic`/`getPublicMap`.
+ */
+export function makeEnv(vars: Record<string, string> = {}): PhaseContext["env"] {
+  const publicEntries = Object.entries(vars).filter(([key]) => key.startsWith("PUBLIC_"));
+  return {
+    get: (key: string) => vars[key],
+    require: (key: string) => {
+      const value = vars[key];
+      if (value === undefined) throw new Error(`env: required variable "${key}" is not defined.`);
+      return value;
+    },
+    has: (key: string) => vars[key] !== undefined,
+    getPublic: () => Object.freeze(Object.fromEntries(publicEntries)),
+    getPublicMap: () => new Map(publicEntries)
+  };
+}
+
+/**
  * Build a mock PhaseContext. `requireMap` maps a plugin's `name` to its fake API;
  * `emit` and `log` are spies so tests can assert emissions/logging.
  */
@@ -32,6 +52,7 @@ export function makeCtx(options: {
   config?: Partial<Config>;
   requireMap?: Record<string, unknown>;
   runId?: string;
+  envVars?: Record<string, string>;
 }): PhaseContext & { emit: ReturnType<typeof vi.fn> } {
   const config = makeConfig(options.config);
   const requireMap = options.requireMap ?? {};
@@ -51,7 +72,8 @@ export function makeCtx(options: {
     require: ((plugin: { name: string }) => requireMap[plugin.name]) as PhaseContext["require"],
     has: (name: string) => name in requireMap,
     emit: emit as unknown as PhaseContext["emit"],
-    log: makeLog()
+    log: makeLog(),
+    env: makeEnv(options.envVars)
   } satisfies PhaseContext;
   return Object.assign(ctx, { emit });
 }

@@ -3,6 +3,7 @@
  */
 import type { EmitFn } from "@moku-labs/core";
 import type { Stage } from "../../config";
+import type { EnvApi } from "../env/types";
 import type { RouteDefinition } from "../router/types";
 
 /**
@@ -77,13 +78,15 @@ export type PhaseRequire = <
 
 /**
  * The plugin-context slice the pipeline driver and every phase consume: the
- * mutable `state`, the resolved `config`/`global`, plus `require`/`emit`/`log`.
+ * mutable `state`, the resolved `config`/`global`, plus `require`/`emit`/`log`/`env`.
  * Typed to match the kernel's generic context so the framework execution
- * context is structurally assignable.
+ * context is structurally assignable (`log`/`env` are the core APIs the kernel
+ * injects flat, spec/08 §2b — the pages/sitemap/locale-redirects phases forward
+ * them onto the route `LoadContext`/`GenerateContext`).
  *
  * @example
  * ```ts
- * const ctx: PhaseContext = { state, config, global, require, emit, log };
+ * const ctx: PhaseContext = { state, config, global, require, emit, log, env };
  * ```
  */
 export type PhaseContext = {
@@ -101,7 +104,20 @@ export type PhaseContext = {
   emit: PhaseEmit;
   /** Structured logger (core `log` API). */
   readonly log: PhaseLog;
+  /** Resolved environment variables (core `env` API) — forwarded onto loader/generate contexts. */
+  readonly env: EnvApi;
 };
+
+/**
+ * The {@link PhaseContext} slice forwarded into the route `LoadContext`/`GenerateContext`:
+ * the spec `require`/`has` plus the flat-injected core `env`/`log` APIs (spec/08 §2b).
+ *
+ * @example
+ * ```ts
+ * const slice: HandlerContextSlice = { require, has, env, log };
+ * ```
+ */
+export type HandlerContextSlice = Pick<PhaseContext, "require" | "has" | "env" | "log">;
 
 /**
  * Rich input handed to a custom OG `render` hook for a single article card. Carries

@@ -458,6 +458,39 @@ describe("build/phases/pages", () => {
     expect(html).toContain("<h1>X</h1>");
   });
 
+  it("loaders and generators receive the core env/log APIs flat (spec/08 §2b)", async () => {
+    // `.generate()` enumerates from env; `.load()` reads env + logs — both through the
+    // flat-injected core APIs, with the values flowing into the rendered output.
+    const route = makeRoute("/{slug}/", {
+      generate: gctx => [{ slug: gctx.env.get("BUILD_SLUG") ?? "missing" }],
+      load: async lctx => {
+        lctx.log.debug("test:load", { slug: (lctx.params as Record<string, string>).slug });
+        return { stamp: lctx.env.get("BUILD_STAMP") ?? "missing" };
+      },
+      render: rctx => h("h1", {}, (rctx.data as { stamp: string }).stamp)
+    });
+    const ctx = makeCtx({
+      config: { outDir: tmp },
+      envVars: { BUILD_SLUG: "from-env", BUILD_STAMP: "2026-06-11T12:00:00Z" },
+      requireMap: {
+        router: {
+          mode: () => "ssg",
+          manifest: () => [route],
+          entries: makeEntries([{ name: "post", pattern: "/{slug}/" }])
+        },
+        i18n: { locales: () => ["en"], defaultLocale: () => "en" },
+        head: { render: () => "" }
+      }
+    });
+
+    const result = await renderPages(ctx);
+
+    expect(result.pageCount).toBe(1);
+    const html = readFileSync(path.join(tmp, "from-env", "index.html"), "utf8");
+    expect(html).toContain("<h1>2026-06-11T12:00:00Z</h1>");
+    expect(ctx.log.debug).toHaveBeenCalledWith("test:load", { slug: "from-env" });
+  });
+
   it("reuse skips re-rendering a page whose data is unchanged (render cache hit)", async () => {
     const render = vi.fn((rctx: { data: unknown }) =>
       h("h1", {}, String((rctx.data as { n: number }).n))

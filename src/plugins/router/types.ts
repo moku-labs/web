@@ -7,7 +7,28 @@
  * (`CompiledRoute`, `MatcherTable`). All signatures are concrete per spec/05 §2–§4.
  */
 import type { ComponentChildren, VNode } from "preact";
+import type { EnvApi } from "../env/types";
 import type { PathMatcher } from "./iso-match";
+
+/**
+ * The logging slice of the core `log` API available on loader/generate contexts —
+ * the four record methods, structurally (mirrors the build's `PhaseLog`, so the
+ * build forwards its own `ctx.log` straight through; the full `LogApi` satisfies
+ * it too).
+ *
+ * @example
+ * const log: RouteLog = { info: () => {}, debug: () => {}, warn: () => {}, error: () => {} };
+ */
+export type RouteLog = {
+  /** Record an informational event. */
+  info(event: string, data?: unknown): void;
+  /** Record a debug event. */
+  debug(event: string, data?: unknown): void;
+  /** Record a warning event. */
+  warn(event: string, data?: unknown): void;
+  /** Record an error event. */
+  error(event: string, data?: unknown): void;
+};
 
 /**
  * Param contribution of a single path segment. `{name:?}` / `:name?` → optional;
@@ -112,9 +133,12 @@ export type RouteRequire = <
  * Build-time context handed to a route's `.load()`. Carries the resolved path
  * `params` and active `locale`, plus the spec's `require`/`has` so a loader pulls
  * sibling plugin APIs the canonical way — `ctx.require(contentPlugin)` — with no
- * module global and no router→content coupling. Loaders run ONLY at build time
- * (never on the client), inside the build plugin's context, so `require`/`has` are
- * always live here.
+ * module global and no router→content coupling. The core `env`/`log` APIs are
+ * injected flat (spec/08 §2b core-API injection, same as plugin contexts), so a
+ * loader reads build-time env — `ctx.env.get("MY_VAR")` — without reaching for a
+ * plugin instance (`require` is spec'd PluginInstance-only; core plugins are not
+ * requireable). Loaders run ONLY at build time (never on the client), inside the
+ * build plugin's context, so everything here is always live.
  *
  * @example
  * route("/{slug}/").load((ctx) => ctx.require(contentPlugin).load(ctx.params.slug, ctx.locale));
@@ -128,12 +152,17 @@ export interface LoadContext<S extends RouteState> {
   readonly require: RouteRequire;
   /** Whether a plugin is registered (by name) — branch on OPTIONAL plugins. */
   readonly has: (name: string) => boolean;
+  /** Core `env` API, injected flat (spec/08 §2b) — read build-time env, e.g. `ctx.env.get("MY_VAR")`. */
+  readonly env: EnvApi;
+  /** Core `log` API (recording slice), injected flat (spec/08 §2b) — structured logging from loaders. */
+  readonly log: RouteLog;
 }
 
 /**
  * Build-time context handed to a route's `.generate()` — the static-param producer.
  * Carries the active `locale` plus `require`/`has` (no `params` yet — `.generate()`
- * PRODUCES the param sets). Same build-only guarantee as {@link LoadContext}.
+ * PRODUCES the param sets), with the core `env`/`log` APIs injected flat
+ * (spec/08 §2b) exactly as on {@link LoadContext}. Same build-only guarantee.
  *
  * @example
  * route("/{slug}/").generate(async (ctx) =>
@@ -146,6 +175,10 @@ export interface GenerateContext {
   readonly require: RouteRequire;
   /** Whether a plugin is registered (by name). */
   readonly has: (name: string) => boolean;
+  /** Core `env` API, injected flat (spec/08 §2b) — read build-time env. */
+  readonly env: EnvApi;
+  /** Core `log` API (recording slice), injected flat (spec/08 §2b). */
+  readonly log: RouteLog;
 }
 
 /**

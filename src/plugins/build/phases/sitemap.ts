@@ -14,7 +14,7 @@ import type {
 } from "../../router/types";
 import { sitePlugin } from "../../site";
 import type { Api as SiteApi } from "../../site/types";
-import type { PhaseContext } from "../types";
+import type { HandlerContextSlice, PhaseContext } from "../types";
 
 /** Result of the sitemap phase — the canonical URL set + serialized documents. */
 export type SitemapResult = {
@@ -46,11 +46,17 @@ async function expandUrls(
   definition: RouteDefinition,
   entry: TypedRoute,
   locales: readonly string[],
-  ctx: Pick<PhaseContext, "require" | "has">
+  ctx: HandlerContextSlice
 ): Promise<string[]> {
   const urls: string[] = [];
   for (const locale of locales) {
-    const generateContext: GenerateContext = { locale, require: ctx.require, has: ctx.has };
+    const generateContext: GenerateContext = {
+      locale,
+      require: ctx.require,
+      has: ctx.has,
+      env: ctx.env,
+      log: ctx.log
+    };
     const generated = definition._handlers.generate
       ? await definition._handlers.generate(generateContext)
       : [{}];
@@ -161,7 +167,7 @@ async function collectRelativeUrls(
   manifest: readonly RouteDefinition[],
   byPattern: Map<string, TypedRoute>,
   locales: readonly string[],
-  ctx: Pick<PhaseContext, "require" | "has">
+  ctx: HandlerContextSlice
 ): Promise<string[]> {
   const lists = await Promise.all(
     manifest.map(definition => {
@@ -220,7 +226,7 @@ async function writeSitemapFiles(outDir: string, xml: string, robots: string): P
  * ```
  */
 export async function generateSitemap(
-  ctx: Pick<PhaseContext, "require" | "config" | "log" | "has">
+  ctx: Pick<PhaseContext, "require" | "config" | "log" | "has" | "env">
 ): Promise<SitemapResult | null> {
   // Sitemap is opt-in — a disabled build skips the phase entirely.
   if (!ctx.config.sitemap) {

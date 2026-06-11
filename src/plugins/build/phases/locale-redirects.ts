@@ -20,7 +20,7 @@ import { headPlugin } from "../../head";
 import { i18nPlugin } from "../../i18n";
 import { routerPlugin } from "../../router";
 import type { GenerateContext, RouteDefinition, TypedRoute } from "../../router/types";
-import type { PhaseContext } from "../types";
+import type { HandlerContextSlice, PhaseContext } from "../types";
 
 /** Result of the locale-redirects phase — the number of redirect pages written. */
 export type LocaleRedirectsResult = {
@@ -149,13 +149,15 @@ async function expandRedirects(
   definition: RouteDefinition,
   entry: TypedRoute,
   defaultLocale: string,
-  ctx: Pick<PhaseContext, "require" | "has">
+  ctx: HandlerContextSlice
 ): Promise<Array<{ file: string; target: string }>> {
   // Build the ctx forwarded into `generate()` for the default-locale pass.
   const generateContext: GenerateContext = {
     locale: defaultLocale,
     require: ctx.require,
-    has: ctx.has
+    has: ctx.has,
+    env: ctx.env,
+    log: ctx.log
   };
 
   // Fetch the parameter sets to expand (or a single empty-params instance).
@@ -211,7 +213,7 @@ async function writeRedirectFile(
  * ```
  */
 export async function generateLocaleRedirects(
-  ctx: Pick<PhaseContext, "require" | "config" | "log" | "has">
+  ctx: Pick<PhaseContext, "require" | "config" | "log" | "has" | "env">
 ): Promise<LocaleRedirectsResult | null> {
   // Locale redirects are opt-in — a disabled build skips the phase entirely.
   if (!ctx.config.localeRedirects) {

@@ -60,7 +60,7 @@ import { route, defineRoutes, contentPlugin } from "@moku-labs/web";
 // Routes are plain values; register them via pluginConfigs.router.routes (the sole path).
 const routes = defineRoutes({
   home: route("/{lang:?}/")
-    .load((ctx) => listCards(ctx.require(contentPlugin), ctx.locale))  // ctx: { params, locale, require, has } → D
+    .load((ctx) => listCards(ctx.require(contentPlugin), ctx.locale))  // ctx: { params, locale, require, has, env, log } → D
     .render((ctx) => <Home cards={ctx.data} url={ctx.url} />)
     .head((ctx) => ({ title: "Home" })),
   post: route("/{lang:?}/{slug}/")
@@ -77,7 +77,7 @@ const routes = defineRoutes({
 ```
 
 Builder methods (each returns the builder; `.load` widens the data generic `D`):
-- `.load((ctx) => D | Promise<D>)` — OPTIONAL data loader. `ctx` is a `LoadContext` `{ params, locale, require, has }`; pull sibling plugin APIs the spec way — `ctx.require(contentPlugin)` (instance-only, no module global). Runs at BUILD only. Omit it for a static page — `ctx.data` is then `unknown`.
+- `.load((ctx) => D | Promise<D>)` — OPTIONAL data loader. `ctx` is a `LoadContext` `{ params, locale, require, has, env, log }`; pull sibling plugin APIs the spec way — `ctx.require(contentPlugin)` (instance-only, no module global) — and read build-time env via the flat core APIs (spec/08 §2b): `ctx.env.get("MY_VAR")`. Runs at BUILD only. Omit it for a static page — `ctx.data` is then `unknown`.
 - `.render((ctx: { params, data: D, locale, url }) => VNode)` — Preact render. `ctx.url(name, params)` builds links (backed by `router.toUrl`). Runs at build (→ `renderToString`) AND on the client (→ Preact `render`). On a client nav `ctx.data` is the fetched JSON (which the build wrote from `load()`) used directly — no validation step; a malformed/missing file falls back to HTML-over-fetch.
 - `.head((ctx) => HeadConfig)` — SEO head.
 - `.generate((ctx) => params[])` — OPTIONAL SSG param producer. `ctx` is a `GenerateContext` `{ locale, require, has }`.

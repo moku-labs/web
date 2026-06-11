@@ -65,6 +65,23 @@ describe("#7 consumer-facing type exports from router/types.ts", () => {
     expectTypeOf<RouteState>().toHaveProperty("data");
   });
 
+  it("load/generate contexts expose the flat core env/log APIs (spec/08 §2b)", () => {
+    route("/{slug}/")
+      .generate(gctx => {
+        expectTypeOf(gctx.env.get).parameter(0).toBeString();
+        expectTypeOf(gctx.env.get("ANY")).toEqualTypeOf<string | undefined>();
+        expectTypeOf(gctx.env.require("ANY")).toBeString();
+        expectTypeOf(gctx.log.info).toBeFunction();
+        return [{ slug: "x" }];
+      })
+      .load(lctx => {
+        expectTypeOf(lctx.env.get("ANY")).toEqualTypeOf<string | undefined>();
+        expectTypeOf(lctx.env.has("ANY")).toBeBoolean();
+        expectTypeOf(lctx.log.debug).toBeFunction();
+        return { ok: true };
+      });
+  });
+
   it("HeadConfig is exported and is the route-handler head return", () => {
     expectTypeOf<HeadConfig["title"]>().toEqualTypeOf<string | undefined>();
     expectTypeOf<HeadConfig["description"]>().toEqualTypeOf<string | undefined>();

@@ -34,7 +34,7 @@ import type {
   RouteState,
   TypedRoute
 } from "../../router/types";
-import type { BuildCacheEntry, PhaseContext } from "../types";
+import type { BuildCacheEntry, HandlerContextSlice, PhaseContext } from "../types";
 
 /** Template placeholder for the composed `<head>` inner HTML. */
 const HEAD_PLACEHOLDER = "<!--moku:head-->";
@@ -236,9 +236,15 @@ function resolveEntry(byPattern: Map<string, TypedRoute>, definition: RouteDefin
 async function generateParameterSets(
   definition: RouteDefinition,
   locale: string,
-  ctx: Pick<PhaseContext, "require" | "has">
+  ctx: HandlerContextSlice
 ): Promise<unknown[]> {
-  const generateContext: GenerateContext = { locale, require: ctx.require, has: ctx.has };
+  const generateContext: GenerateContext = {
+    locale,
+    require: ctx.require,
+    has: ctx.has,
+    env: ctx.env,
+    log: ctx.log
+  };
   return definition._handlers.generate
     ? await definition._handlers.generate(generateContext)
     : [{}];
@@ -272,7 +278,7 @@ async function expandRoute(
   locales: readonly string[],
   defaultLocale: string,
   byPattern: Map<string, TypedRoute>,
-  ctx: Pick<PhaseContext, "require" | "has">
+  ctx: HandlerContextSlice
 ): Promise<PageInstance[]> {
   // Correlate the definition to its compiled entry (the URL/file-path source of truth).
   const entry = resolveEntry(byPattern, definition);
@@ -354,14 +360,16 @@ function adaptHeadConfig(config: HeadConfig): ComposedHeadConfig {
 
 /**
  * Run a route's optional, build-only `.load(ctx)` for one instance. The loader
- * receives a {@link LoadContext} (`params` + `locale` + `require`/`has`) so it pulls
- * sibling plugin APIs the spec way (`ctx.require(contentPlugin)`) with no module
- * global. Returns `{}` when the route declares no `.load()`. Never runs on the client.
+ * receives a {@link LoadContext} (`params` + `locale` + `require`/`has`, plus the
+ * core `env`/`log` APIs injected flat per spec/08 §2b) so it pulls sibling plugin
+ * APIs the spec way (`ctx.require(contentPlugin)`) and reads build-time env
+ * (`ctx.env.get(...)`) with no module global. Returns `{}` when the route declares
+ * no `.load()`. Never runs on the client.
  *
  * @param definition - The route definition for this instance.
  * @param params - The resolved params for this instance.
  * @param locale - The active locale for this instance.
- * @param ctx - Plugin context (provides `require`/`has` for the load context).
+ * @param ctx - Plugin context (provides `require`/`has` + core `env`/`log` for the load context).
  * @returns The loaded data, or `{}` when the route has no loader.
  * @example
  * ```ts
@@ -372,14 +380,16 @@ async function loadRouteData(
   definition: RouteDefinition,
   params: Record<string, string>,
   locale: string,
-  ctx: Pick<PhaseContext, "require" | "has">
+  ctx: HandlerContextSlice
 ): Promise<unknown> {
   if (!definition._handlers.load) return {};
   const loadContext: LoadContext<RouteState> = {
     params,
     locale,
     require: ctx.require,
-    has: ctx.has
+    has: ctx.has,
+    env: ctx.env,
+    log: ctx.log
   };
   return definition._handlers.load(loadContext);
 }
@@ -589,7 +599,7 @@ async function writeDocumentAt(outDir: string, relativeFile: string, html: strin
  * ```
  */
 async function renderInstance(
-  ctx: Pick<PhaseContext, "require" | "state" | "config" | "has">,
+  ctx: Pick<PhaseContext, "require" | "state" | "config" | "has" | "env" | "log">,
   instance: PageInstance,
   shell: RenderShell,
   reuse: boolean
@@ -691,7 +701,7 @@ async function expandAllInstances(
   locales: readonly string[],
   defaultLocale: string,
   byPattern: Map<string, TypedRoute>,
-  ctx: Pick<PhaseContext, "require" | "has">
+  ctx: HandlerContextSlice
 ): Promise<PageInstance[]> {
   const lists = await Promise.all(
     manifest.map(definition => expandRoute(definition, locales, defaultLocale, byPattern, ctx))
@@ -819,7 +829,7 @@ async function renderInBatches<Item, Out>(
  * ```
  */
 export async function renderPages(
-  ctx: Pick<PhaseContext, "require" | "state" | "config" | "log" | "has">,
+  ctx: Pick<PhaseContext, "require" | "state" | "config" | "log" | "has" | "env">,
   options?: { reuse?: boolean }
 ): Promise<PagesResult> {
   // Resolve dependencies + snapshot the manifest into state for later phases.
