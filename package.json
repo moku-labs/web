@@ -117,6 +117,5 @@
     "test:cli-e2e": "bun test --timeout 30000 src/plugins/cli/__tests__/e2e/",
     "test:build-e2e": "bun test src/plugins/build/__tests__/e2e/",
     "test:coverage": "vitest run --project unit --project integration --coverage"
-  },
-  "version": "1.7.0"
+  }
 }
