@@ -67,4 +67,29 @@ describe("build/phases/not-found", () => {
     });
     await expect(generateNotFound(ctx)).rejects.toThrow(/could not read notFound\.path/);
   });
+
+  it("substitutes the asset placeholders in a notFound.path page (bundle names are fingerprinted)", async () => {
+    // A standalone 404 page cannot hardcode "/assets/main.css" anymore — the
+    // bundle filename embeds a content hash. The placeholders are its way in.
+    const page = path.join(tmp, "src-404.html");
+    writeFileSync(
+      page,
+      "<html><head><!--moku:assets:css--></head><body><!--moku:assets:js--><!--moku:assets--></body></html>",
+      "utf8"
+    );
+    const ctx = makeCtx({ config: { outDir: tmp, notFound: { path: page } } });
+    ctx.state.buildCache.set("css", { "main.css": "assets/main-abc123.css" });
+    ctx.state.buildCache.set("js", { "spa.js": "assets/spa-def456.js" });
+
+    await generateNotFound(ctx);
+
+    const html = readFileSync(path.join(tmp, "404.html"), "utf8");
+    expect(html).toContain('<head><link rel="stylesheet" href="/assets/main-abc123.css"></head>');
+    expect(html).toContain('<script type="module" src="/assets/spa-def456.js"></script>');
+    // The combined placeholder carries both kinds.
+    expect(html).toContain(
+      '<link rel="stylesheet" href="/assets/main-abc123.css"><script type="module" src="/assets/spa-def456.js"></script></body>'
+    );
+    expect(html).not.toContain("moku:assets");
+  });
 });

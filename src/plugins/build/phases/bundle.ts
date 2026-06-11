@@ -1,6 +1,8 @@
 /**
  * @file build phase 1 — bundle. Runs `Bun.build` for CSS and JS separately into
- * outDir (honoring `config.minify`); caches hashed asset paths for the pages phase.
+ * outDir (honoring `config.minify`) with content-hashed output naming; caches the
+ * fingerprinted asset paths for the pages phase and the complete output list for
+ * the cache-headers phase.
  */
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -10,6 +12,23 @@ import type { BuildCacheEntry, PhaseContext } from "../types";
 const CSS_ENTRY_CANDIDATES = ["src/client/styles.css", "src/styles/main.css"] as const;
 /** Conventional JS entry candidates (project-relative). */
 const JS_ENTRY_CANDIDATES = ["src/client/main.ts", "src/client/main.tsx", "src/main.ts"] as const;
+
+/**
+ * `Bun.build` output naming with a content hash in EVERY filename (entry points
+ * included — Bun's default only hashes chunks/assets). A bundle's URL therefore
+ * changes whenever its bytes change, which is what lets the cache-headers phase
+ * mark each bundle immutable: a CDN/browser may cache it forever, and a deploy
+ * that changes the code ships a NEW URL instead of fighting a stale cached copy.
+ * Pages always embed bundle URLs via the `state.buildCache` manifest, so hashed
+ * names flow through with no app-side changes (hardcoded asset URLs must move to
+ * the `<!--moku:assets-->` placeholders). Chunk naming keeps Bun's default
+ * `chunk-` prefix (chunks were already hash-only named).
+ */
+const FINGERPRINT_NAMING = {
+  entry: "[dir]/[name]-[hash].[ext]",
+  chunk: "chunk-[hash].[ext]",
+  asset: "[name]-[hash].[ext]"
+} as const;
 
 /**
  * Minimal structural view of a single `Bun.build` artifact (only the fields the
@@ -63,6 +82,8 @@ export type BundleRunner = (options: {
   splitting: boolean;
   /** The bundling target platform. */
   target: "browser";
+  /** Output naming templates (content-hashed; see {@link FINGERPRINT_NAMING}). */
+  naming: { entry: string; chunk: string; asset: string };
 }) => Promise<BuildRunnerResult>;
 
 /**
@@ -85,16 +106,20 @@ export type BundleOptions = {
 /**
  * The default bundler runner — adapts the built-in `Bun.build`.
  *
- * @param options - Entry/outdir/minify/splitting/target settings forwarded to `Bun.build`.
+ * @param options - Entry/outdir/minify/splitting/target/naming settings forwarded to `Bun.build`.
  * @param options.entrypoints - Entry files for this build.
  * @param options.outdir - Output directory.
  * @param options.minify - Whether to minify.
  * @param options.splitting - Whether to split dynamic imports into lazy chunks.
  * @param options.target - The bundling target platform.
+ * @param options.naming - Output naming templates (content-hashed filenames).
+ * @param options.naming.entry - Naming template for entry-point outputs.
+ * @param options.naming.chunk - Naming template for lazy split chunks.
+ * @param options.naming.asset - Naming template for additional emitted assets.
  * @returns The structural build result.
  * @example
  * ```ts
- * await defaultRunner({ entrypoints: ["a.css"], outdir: "dist", minify: true, splitting: true, target: "browser" });
+ * await defaultRunner({ entrypoints: ["a.css"], outdir: "dist", minify: true, splitting: true, target: "browser", naming: FINGERPRINT_NAMING });
  * ```
  */
 async function defaultRunner(options: {
@@ -103,6 +128,7 @@ async function defaultRunner(options: {
   minify: boolean;
   splitting: boolean;
   target: "browser";
+  naming: { entry: string; chunk: string; asset: string };
 }): Promise<BuildRunnerResult> {
   const bun = (globalThis as { Bun?: { build: BundleRunner } }).Bun;
   if (!bun) {
@@ -208,8 +234,16 @@ async function runOne(
   // plugin's node-only writer (with a silent node:fs shim) would ship in every
   // client bundle. With splitting on, dynamic imports become separate chunks
   // fetched only when actually reached. `target: "browser"` is explicit because
-  // these passes only ever produce client assets.
-  const result = await runner({ entrypoints, outdir, minify, splitting: true, target: "browser" });
+  // these passes only ever produce client assets. `naming` content-hashes every
+  // output filename so each bundle URL is unique per content (cache busting).
+  const result = await runner({
+    entrypoints,
+    outdir,
+    minify,
+    splitting: true,
+    target: "browser",
+    naming: FINGERPRINT_NAMING
+  });
   if (!result.success) {
     throw new Error(`[web] build.bundle ${kind} build failed`);
   }
@@ -225,8 +259,15 @@ async function runOne(
     hashed[path.basename(output.path)] = normalizeAssetPath(output.path, outDir);
   }
 
-  // Publish the kind's asset map for downstream phases and record the count.
+  // Publish the kind's asset map for downstream phases and record the count. The
+  // COMPLETE output list (entries AND chunks, all content-hash named) is published
+  // separately under `<kind>:outputs` — the cache-headers phase emits a per-file
+  // immutable rule for every fingerprinted file, chunks included.
   ctx.state.buildCache.set(kind, hashed);
+  ctx.state.buildCache.set(
+    `${kind}:outputs`,
+    result.outputs.map(output => normalizeAssetPath(output.path, outDir))
+  );
   ctx.log.debug("build:bundle", { kind, count: result.outputs.length });
 }
 

@@ -222,8 +222,13 @@ export type Config = {
    * - `true` — the built-in default page.
    * - `{ body }` — literal HTML body content, wrapped in a minimal document shell.
    * - `{ path }` — path to a complete HTML page file (resolved from the project
-   *   root), written out VERBATIM so the app owns the whole document (its own
-   *   `<head>`, asset links, and body).
+   *   root) so the app owns the whole document (its own `<head>`, asset links,
+   *   and body).
+   *
+   * In every variant the `<!--moku:assets-->` / `<!--moku:assets:css-->` /
+   * `<!--moku:assets:js-->` placeholders are substituted with the fingerprinted
+   * bundle tags (bundle filenames embed a content hash, so a 404 page cannot
+   * hardcode them); a page without placeholders is written byte-for-byte.
    *
    * `path` takes precedence over `body` when both are set. Default `false`.
    */
@@ -239,10 +244,29 @@ export type Config = {
    * `<!--moku:lang-->` (page locale for `<html lang>`),
    * `<!--moku:head-->` (composed `<head>` inner HTML),
    * `<!--moku:assets-->` (injected `<link>`/`<script>` tags),
+   * `<!--moku:assets:css-->` / `<!--moku:assets:js-->` (one asset kind each, for
+   * shells that link stylesheets in `<head>` but script tags elsewhere),
    * `<!--moku:body-->` (SSR body HTML).
    * When unset, the built-in shell is used (it emits charset + viewport by default).
    */
   template?: string;
+
+  /**
+   * Emit `outDir/_headers` (Cloudflare Pages header rules) for CDN/browser cache
+   * protection. Generated rules: every fingerprinted bundle output gets a
+   * per-file `Cache-Control: <assets>` rule (default immutable, 1 year — its URL
+   * embeds a content hash, so the bytes behind it can never change), and every
+   * other URL — pages, content images, feeds, data sidecars: stable URLs whose
+   * bytes MAY change between deploys — gets the catch-all
+   * `Cache-Control: <pages>` rule (default always-revalidate: unchanged files
+   * still answer `304 Not Modified` from their ETag, changed files are picked up
+   * immediately). The app's own `<publicDir>/_headers` content is appended AFTER
+   * the generated rules so the app can override them (detach a generated header
+   * first with `! Cache-Control` — Cloudflare comma-joins duplicate headers).
+   * `false` disables the phase; an object overrides one or both values.
+   * Default `true`.
+   */
+  cacheHeaders?: boolean | { assets?: string; pages?: string };
 };
 
 /**
@@ -327,6 +351,7 @@ export type PhaseName =
   | "public"
   | "not-found"
   | "locale-redirects"
+  | "cache-headers"
   | "root-index";
 
 /**
@@ -362,7 +387,14 @@ export type BuildRunOverrides = Readonly<
   Partial<
     Pick<
       Config,
-      "minify" | "feeds" | "sitemap" | "ogImage" | "images" | "localeRedirects" | "notFound"
+      | "minify"
+      | "feeds"
+      | "sitemap"
+      | "ogImage"
+      | "images"
+      | "localeRedirects"
+      | "notFound"
+      | "cacheHeaders"
     >
   >
 >;

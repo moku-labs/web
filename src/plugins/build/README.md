@@ -53,10 +53,11 @@ The surface mounted on `app.build` (and reachable via `ctx.require(buildPlugin)`
 | `ogImage` | `OgImageConfig \| false` | `false` | OG-image generation. An object enables + configures it (and requires a `fontDir`); `false` disables it. |
 | `injectAssets` | `boolean?` | `true` | Auto-inject bundled `main.{css,js}` into rendered pages. |
 | `publicDir` | `string?` | `"public"` | Directory copied verbatim into `outDir` (skipped silently if absent). |
-| `notFound` | `boolean \| { body?: string; path?: string }?` | `false` | Emit `outDir/404.html`. `true` = built-in default; `{ body }` = HTML body fragment wrapped in a minimal shell; `{ path }` = complete HTML page file, written verbatim (`path` wins over `body`). |
+| `notFound` | `boolean \| { body?: string; path?: string }?` | `false` | Emit `outDir/404.html`. `true` = built-in default; `{ body }` = HTML body fragment wrapped in a minimal shell; `{ path }` = complete HTML page file (`path` wins over `body`). In every variant the `<!--moku:assets-->` family of placeholders is substituted with the fingerprinted bundle tags (a 404 page cannot hardcode a hashed bundle URL); a page without placeholders is written byte-for-byte. |
 | `localeRedirects` | `boolean?` | `false` | Emit per-path i18n bare-path redirect HTML pages. |
 | `clientEntry` | `string?` | — | Authoritative client bundle entry path (overrides the conventional scan). |
-| `template` | `string?` | — | HTML shell template with `<!--moku:head-->` / `<!--moku:body-->` / `<!--moku:assets-->` placeholders. |
+| `template` | `string?` | — | HTML shell template with `<!--moku:head-->` / `<!--moku:body-->` / `<!--moku:assets-->` placeholders (plus split `<!--moku:assets:css-->` / `<!--moku:assets:js-->` for shells that place stylesheets and scripts at different sites). |
+| `cacheHeaders` | `boolean \| { assets?: string; pages?: string }?` | `true` | Emit `outDir/_headers` (Cloudflare Pages rules): a per-file `Cache-Control` rule per fingerprinted bundle (default `public, max-age=31536000, immutable` — safe because the URL embeds a content hash) plus a catch-all rule for every other URL (default `public, max-age=0, must-revalidate` — unchanged files still answer `304` from their ETag). The app's `<publicDir>/_headers` content is appended after the generated rules (the app can override; detach first with `! Cache-Control` — Cloudflare comma-joins duplicates). `false` disables. |
 
 `ogImage` is a nested object, so an override shallow-replaces it wholesale. When enabled, `onInit` validates that `fontDir` exists and contains at least one `.ttf`/`.otf`/`.woff` font, throwing an actionable `[web] build.<field>` error otherwise. `publicDir`, `template`, and `clientEntry` are also validated as strings-when-set in `onInit`.
 
@@ -110,6 +111,7 @@ Written into `outDir` (default `dist/`) — the directory is removed and recreat
 | `sitemap.xml`, `robots.txt` | sitemap | `sitemap` |
 | `og/<slug>.png` + `.cache/og-images.json` | og-images | `ogImage` |
 | (verbatim copy of `publicDir`) | public | `publicDir` exists on disk |
+| `_headers` (cache rules + app rules) | cache-headers | `cacheHeaders` (default on) |
 | `404.html` | not-found | `notFound` |
 | per-path redirect HTML | locale-redirects | `localeRedirects` |
 
@@ -118,11 +120,12 @@ Written into `outDir` (default `dist/`) — the directory is removed and recreat
 **The pipeline (in order).** Each phase emits `build:phase` (`"start"`, then `"done"` with `durationMs`). Intra-phase parallelism uses `Promise.all`; all cross-plugin data is a synchronous PULL via `ctx.require`.
 
 - **Phase 0 — clean.** Remove + recreate `outDir` (setup, not a boundary).
-- **Phase 1 — bundle.** `Bun.build` runs CSS and JS as **separate** passes (dodging the Bun mixed-entrypoint segfault), honoring `config.minify`; hashed asset paths are cached in `state.buildCache`. The bundler runner is injectable for tests.
+- **Phase 1 — bundle.** `Bun.build` runs CSS and JS as **separate** passes (dodging the Bun mixed-entrypoint segfault), honoring `config.minify`, with content-hashed output naming (entry points included — a bundle's URL changes with its bytes, which is what makes the immutable cache rules safe); fingerprinted asset paths are cached in `state.buildCache` (plus the complete per-kind output lists under `css:outputs`/`js:outputs` for cache-headers). The bundler runner is injectable for tests.
 - **Phase 2 — content + images** (parallel). `content` delegates to `content.loadAll()`; `images` copies static image directories. Gated by `config.images`.
 - **Phase 3 — pages.** Pull `router.manifest()`; expand instances via `route.generate?.(genCtx)`, load data via `route.load?.(loadCtx)`, pull `head.render(route, data)`, render the body with `preact-render-to-string`, inject the build-id meta tag, and write `outDir/<path>/index.html` — concurrently, in bounded batches with a macrotask (`setImmediate`) yield between them so a watching dev server's progress spinner keeps animating (a single un-yielded `Promise.all` over hundreds of synchronous renders would starve the event loop) and peak page concurrency stays bounded. Write paths and canonical URLs come from the router's compiled `toFile`/`toUrl` (single source of truth), so a route's `.toFile()` override takes effect. Captures the default (`/`) page for the root index, and writes client-data sidecars when applicable.
 - **Phase 3.5 — content-images.** Runs after `pages` so the article tree exists before each article's co-located `images/` dir is copied into the shared `<outDir>/<slug>/images/` (reused by every locale).
 - **Phase 4 — feeds + sitemap + og-images + public + not-found + locale-redirects** (concurrent, `Promise.allSettled`). Each is gated by its config flag (or, for `public`, the source dir's presence), so one failure is reported via `log.error` without losing the others. A disabled output emits NO `build:phase` boundary.
+- **Phase 4.5 — cache-headers.** Compose `outDir/_headers` from the generated cache rules + the app's `<publicDir>/_headers` source content. Runs strictly AFTER the outputs group so it overwrites the public phase's verbatim copy.
 - **Phase 5 — root-index.** Write the captured default-page HTML to `outDir/index.html`.
 
 After Phase 5, `build:complete` is emitted with `{ outDir, pageCount, durationMs }`.
