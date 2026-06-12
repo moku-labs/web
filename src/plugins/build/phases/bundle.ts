@@ -31,6 +31,18 @@ const FINGERPRINT_NAMING = {
 } as const;
 
 /**
+ * Font url() references the CSS pass leaves EXTERNAL instead of bundling.
+ * Bun's CSS bundler cannot emit url() assets as files — every resolvable
+ * font reference is inlined as a base64 data URI, ballooning the stylesheet
+ * (a site vendoring a font family ships every weight/subset render-blocking
+ * on every page). Marking font extensions external passes the URL through
+ * verbatim, so apps reference fonts root-relative (e.g. `/fonts/x.woff2`)
+ * and serve the files statically via `publicDir`. CSS-only: a font import
+ * left external in JS would be an unresolvable module at runtime.
+ */
+const CSS_EXTERNAL_FONT_GLOBS = ["*.woff2", "*.woff", "*.ttf", "*.otf", "*.eot"] as const;
+
+/**
  * Minimal structural view of a single `Bun.build` artifact (only the fields the
  * bundle phase records). Kept narrow so the runner is easy to fake in tests.
  *
@@ -84,6 +96,8 @@ export type BundleRunner = (options: {
   target: "browser";
   /** Output naming templates (content-hashed; see {@link FINGERPRINT_NAMING}). */
   naming: { entry: string; chunk: string; asset: string };
+  /** Import/url() globs left unresolved (see {@link CSS_EXTERNAL_FONT_GLOBS}). */
+  external: string[];
 }) => Promise<BuildRunnerResult>;
 
 /**
@@ -116,10 +130,11 @@ export type BundleOptions = {
  * @param options.naming.entry - Naming template for entry-point outputs.
  * @param options.naming.chunk - Naming template for lazy split chunks.
  * @param options.naming.asset - Naming template for additional emitted assets.
+ * @param options.external - Import/url() globs left unresolved in the output.
  * @returns The structural build result.
  * @example
  * ```ts
- * await defaultRunner({ entrypoints: ["a.css"], outdir: "dist", minify: true, splitting: true, target: "browser", naming: FINGERPRINT_NAMING });
+ * await defaultRunner({ entrypoints: ["a.css"], outdir: "dist", minify: true, splitting: true, target: "browser", naming: FINGERPRINT_NAMING, external: [] });
  * ```
  */
 async function defaultRunner(options: {
@@ -129,6 +144,7 @@ async function defaultRunner(options: {
   splitting: boolean;
   target: "browser";
   naming: { entry: string; chunk: string; asset: string };
+  external: string[];
 }): Promise<BuildRunnerResult> {
   const bun = (globalThis as { Bun?: { build: BundleRunner } }).Bun;
   if (!bun) {
@@ -236,13 +252,16 @@ async function runOne(
   // fetched only when actually reached. `target: "browser"` is explicit because
   // these passes only ever produce client assets. `naming` content-hashes every
   // output filename so each bundle URL is unique per content (cache busting).
+  // The CSS pass leaves font url()s external — Bun would otherwise inline every
+  // font file as a base64 data URI in the stylesheet (CSS_EXTERNAL_FONT_GLOBS).
   const result = await runner({
     entrypoints,
     outdir,
     minify,
     splitting: true,
     target: "browser",
-    naming: FINGERPRINT_NAMING
+    naming: FINGERPRINT_NAMING,
+    external: kind === "css" ? [...CSS_EXTERNAL_FONT_GLOBS] : []
   });
   if (!result.success) {
     throw new Error(`[web] build.bundle ${kind} build failed`);

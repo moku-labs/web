@@ -109,6 +109,30 @@ describe("build/phases/bundle", () => {
     }
   });
 
+  it("marks font url() globs external on the CSS pass only (JS pass bundles everything)", async () => {
+    // Regression: Bun's CSS bundler cannot emit url() assets as files — every
+    // resolvable font reference was inlined as a base64 data URI, shipping a
+    // site's whole vendored font set (every weight + subset) render-blocking in
+    // the stylesheet. External font globs pass the URLs through verbatim; the
+    // JS pass keeps an empty list because an external import in a JS bundle
+    // would be an unresolvable module at runtime.
+    const runner = vi.fn(async (_opts: Parameters<BundleRunner>[0]) => ({
+      success: true,
+      outputs: []
+    }));
+    const ctx = makeCtx({ config: { outDir: "./dist", minify: true } });
+    await bundle(ctx, { runner, cssEntrypoints: ["styles.css"], jsEntrypoints: ["main.ts"] });
+    expect(runner).toHaveBeenCalledTimes(2);
+    expect(runner.mock.calls[0]?.[0].external).toEqual([
+      "*.woff2",
+      "*.woff",
+      "*.ttf",
+      "*.otf",
+      "*.eot"
+    ]);
+    expect(runner.mock.calls[1]?.[0].external).toEqual([]);
+  });
+
   it("records the COMPLETE per-kind output list (chunks included) under `<kind>:outputs`", async () => {
     // The embeddable manifest excludes chunks, but the cache-headers phase needs
     // EVERY fingerprinted file to emit its per-file immutable rule.
