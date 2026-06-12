@@ -20,6 +20,7 @@ import type {
   ContentProviderState,
   FileSystemContentOptions
 } from "./types";
+import { validateFileSystemContentOptions } from "./validate";
 
 /** Matches an `<img>` `src` that points at the co-located `images/` dir (relative or root-relative). */
 const RELATIVE_IMAGE_SRC = /(<img\b[^>]*?\bsrc=")(?:\.?\/)?images\//g;
@@ -89,6 +90,9 @@ async function discoverSlugs(dir: string): Promise<string[]> {
  * ```
  */
 export function fileSystemContent(options: FileSystemContentOptions): ContentProvider {
+  // Fail fast on impossible option combinations (e.g. mermaid without trustedContent).
+  validateFileSystemContentOptions(options);
+
   const state: ContentProviderState = {
     // eslint-disable-next-line unicorn/no-null -- `processor` is `Processor | null` until first build
     processor: null,

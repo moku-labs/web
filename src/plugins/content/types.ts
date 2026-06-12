@@ -160,6 +160,40 @@ export interface ContentProvider {
 }
 
 /**
+ * Options for build-time Mermaid diagram rendering (the `mermaid` key of
+ * {@link FileSystemContentOptions}). Rendering is delegated to the OPTIONAL
+ * peer dependency `mermaid-isomorphic`, so the config stays loosely typed —
+ * its types are never imported here.
+ *
+ * @example
+ * ```ts
+ * fileSystemContent({ contentDir: "./content", trustedContent: true, mermaid: { mermaidConfig: { theme: "dark" } } });
+ * ```
+ */
+export type MermaidDiagramOptions = {
+  /**
+   * Mermaid configuration passed straight through to mermaid-isomorphic's
+   * render call (e.g. `{ theme: "dark" }`). Loosely typed as a plain record
+   * because the dependency is optional.
+   */
+  mermaidConfig?: Record<string, unknown>;
+  /**
+   * TEST-ONLY seam: replaces the real mermaid-isomorphic batch renderer so
+   * unit tests stay deterministic with no headless browser. Receives every
+   * mermaid fence source of one document in order and must resolve to exactly
+   * one SVG string per source. Never set this in an app.
+   *
+   * @param sources - Every mermaid fence source of one document, in order.
+   * @param mermaidConfig - The configured mermaid pass-through config, if any.
+   * @returns One SVG string per source, in order.
+   */
+  renderDiagrams?: (
+    sources: readonly string[],
+    mermaidConfig?: Record<string, unknown>
+  ) => Promise<readonly string[]>;
+};
+
+/**
  * Options for the node filesystem provider {@link ContentProvider} `fileSystemContent`.
  * These are the markdown-pipeline + source concerns that used to live on the content
  * plugin config; they now belong to the provider you compose.
@@ -188,6 +222,15 @@ export type FileSystemContentOptions = {
   shikiTheme?: BundledTheme | ThemeRegistrationAny;
   /** Author applied to articles whose frontmatter omits author. Defaults to undefined. */
   defaultAuthor?: string;
+  /**
+   * Build-time Mermaid diagrams: render fenced `mermaid` code blocks to static
+   * inline SVG during the build (zero client-side JS). `true` enables with
+   * defaults; an object passes {@link MermaidDiagramOptions}. Requires
+   * `trustedContent: true` (the raw inline SVG would be stripped by the
+   * sanitize pass) and the OPTIONAL peer dependency `mermaid-isomorphic`
+   * (plus playwright with an installed browser). Defaults to disabled.
+   */
+  mermaid?: boolean | MermaidDiagramOptions;
 };
 
 /**

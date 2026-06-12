@@ -68,6 +68,31 @@ Per-source options live on the provider, not here. The Node `fileSystemContent(o
 | `defaultAuthor` | `string` | `undefined` | Applied to articles whose frontmatter omits `author`. |
 | `extraRemarkPlugins` | `readonly Pluggable[]` | `[]` | Concatenated **after** the framework remark defaults (additive — never replaces them). |
 | `extraRehypePlugins` | `readonly Pluggable[]` | `[]` | Concatenated after the custom transforms, before Shiki + sanitize (additive). |
+| `mermaid` | `boolean \| MermaidDiagramOptions` | disabled | Build-time [Mermaid diagrams](#mermaid-diagrams): render ```` ```mermaid ```` fences to static inline SVG. **Requires `trustedContent: true`** and the optional peer `mermaid-isomorphic`. |
+
+## Mermaid diagrams
+
+Opt-in, **build-time** rendering of ```` ```mermaid ```` fenced code blocks to static inline SVG — the published page ships zero client-side Mermaid JS. Rendering is delegated to the **optional** peer dependency [`mermaid-isomorphic`](https://github.com/remcohaszing/mermaid-isomorphic) (a headless browser under the hood), which is imported **lazily and only when a document actually contains a mermaid fence** — consumers who never write diagrams pay nothing.
+
+```ts
+fileSystemContent({
+  contentDir: "./content",
+  trustedContent: true, // REQUIRED — see below
+  mermaid: true // or: { mermaidConfig: { theme: "dark" } }
+});
+```
+
+Install the optional dependencies (only apps that enable `mermaid` need this):
+
+```sh
+bun add -d mermaid-isomorphic playwright && bunx playwright install chromium
+```
+
+- **`trustedContent: true` is required.** Mermaid output is raw inline SVG, which the sanitize pass (the untrusted-content XSS boundary) would strip — `fileSystemContent` rejects the combination at construction. Enable it only for fully author-controlled Markdown.
+- Each diagram renders into `<figure class="mermaid-diagram">…<svg …></figure>` — style the wrapper via that class.
+- The transform runs at the **mdast** stage, before the remark-rehype bridge, so Shiki never claims the fence; all fences of a document are rendered in **one** batched renderer call, and the renderer (browser) is created once per process.
+- A diagram that fails to render **fails the build** with its first line quoted — a broken diagram never ships silently.
+- `mermaidConfig` is passed straight through to mermaid-isomorphic's render call (loosely typed `Record<string, unknown>` because the dependency is optional).
 
 ## Dependencies
 
@@ -125,10 +150,10 @@ The Shiki/unified processor is a **lazy singleton stored on the provider's priva
 | File | Responsibility |
 |---|---|
 | `index.ts` | Wiring harness only (`depends`, `events`, `config`, `createState`, `onInit`, `api`). |
-| `types.ts` | `Config`, `State`, `Api`, `Article`, `ArticleCard`, `Frontmatter`, `ComputedFields`, `ContentProvider`, `FileSystemContentOptions`, `ContentEvents`, `ContentApiContext`. |
+| `types.ts` | `Config`, `State`, `Api`, `Article`, `ArticleCard`, `Frontmatter`, `ComputedFields`, `ContentProvider`, `FileSystemContentOptions`, `MermaidDiagramOptions`, `ContentEvents`, `ContentApiContext`. |
 | `config.ts` | `defaultContentConfig` — `{ providers: [] }`. |
 | `events.ts` | `contentEvents` register callback. |
-| `validate.ts` | `validateContentConfig` — `onInit` fail-fast when no provider is composed. |
+| `validate.ts` | `validateContentConfig` — `onInit` fail-fast when no provider is composed — + `validateFileSystemContentOptions` (mermaid ⇒ trustedContent). |
 | `state.ts` | `createContentState` — the empty locale-keyed article cache. |
 | `api.ts` | `contentApi` (kernel-facing) + `createContentApi` (kernel-free) + `mergeProviders`. All orchestration: fallback, draft filtering, sort, cache, events. Imports zero node code. |
 | `providers.ts` | `fileSystemContent` — the Node provider (`node:fs` + pipeline). Root export only, never `/browser`. |
@@ -137,6 +162,7 @@ The Shiki/unified processor is a **lazy singleton stored on the provider's priva
 | `pipeline/frontmatter.ts` | `parseFrontmatter` (gray-matter, `Date`→ISO, required-field + default handling). |
 | `pipeline/reading-time.ts` | `calculateReadingTime`. |
 | `pipeline/sanitize.ts` | `buildSanitizeSchema` — the extended rehype-sanitize schema. |
+| `pipeline/mermaid.ts` | `remarkMermaidDiagrams` — opt-in build-time mermaid fences → inline SVG (lazy optional dep). |
 
 > [!NOTE]
 > The shell (`contentPlugin`) is re-exported from `@moku-labs/web/browser` so build-only loaders can `ctx.require(contentPlugin)` on either side, while `fileSystemContent` is exported **only** from the package root — mirroring the node `env` providers (`dotenv`/`processEnv`).

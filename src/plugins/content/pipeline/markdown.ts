@@ -39,7 +39,8 @@ function applyPluggable(processor: ReturnType<typeof unified>, plugin: unknown):
  * replacing, the defaults).
  *
  * @param processor - The unified processor under construction (mutated in place).
- * @param config - Resolved plugin configuration (provides `extraRemarkPlugins`).
+ * @param config - Resolved plugin configuration (provides `extraRemarkPlugins`,
+ * and `mermaid` which the defaults read to enable the mdast mermaid transform).
  * @example
  * ```ts
  * applyRemarkPlugins(processor, config);
@@ -49,7 +50,7 @@ function applyRemarkPlugins(
   processor: ReturnType<typeof unified>,
   config: FileSystemContentOptions
 ): void {
-  for (const plugin of defaultRemarkPlugins()) {
+  for (const plugin of defaultRemarkPlugins(config)) {
     applyPluggable(processor, plugin);
   }
   for (const plugin of config.extraRemarkPlugins ?? []) {

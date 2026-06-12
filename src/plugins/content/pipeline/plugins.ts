@@ -17,6 +17,8 @@ import remarkRehype from "remark-rehype";
 import type { Pluggable } from "unified";
 import type { Node } from "unist";
 import { visit } from "unist-util-visit";
+import type { FileSystemContentOptions } from "../types";
+import { normalizeMermaidOptions, remarkMermaidDiagrams } from "./mermaid";
 
 /** Directive node shape from remark-directive (not in `@types/mdast`). */
 type DirectiveNode = Node & {
@@ -175,25 +177,36 @@ export function sectionDividerPlugin(): (tree: HastRoot) => void {
 
 /**
  * The hardcoded framework default remark (Markdown-AST) plugins, in order:
- * parse, frontmatter, gfm, directive, pull-quote, then the mdast→hast bridge
- * (`remark-rehype` with `allowDangerousHtml`). Pull-quote runs on the mdast
- * before the bridge so the directive carries its `hName`/`hProperties`.
+ * parse, frontmatter, gfm, directive, pull-quote, the OPT-IN mermaid transform,
+ * then the mdast→hast bridge (`remark-rehype` with `allowDangerousHtml`).
+ * Pull-quote and mermaid run on the mdast before the bridge — pull-quote so the
+ * directive carries its `hName`/`hProperties`, mermaid so the fence is replaced
+ * with raw SVG HTML before Shiki could ever claim the code block.
  *
+ * @param config - Optional provider configuration; only `mermaid` is read here
+ * (truthy enables the mermaid transform at its fixed mdast position).
  * @returns The ordered default remark pluggables.
  * @example
  * ```ts
  * const remark = defaultRemarkPlugins();
  * ```
  */
-export function defaultRemarkPlugins(): readonly Pluggable[] {
-  return [
+export function defaultRemarkPlugins(config?: FileSystemContentOptions): readonly Pluggable[] {
+  const plugins: Pluggable[] = [
     remarkParse,
     remarkFrontmatter,
     remarkGfm,
     remarkDirective,
-    pullQuotePlugin,
-    [remarkRehype, { allowDangerousHtml: true }]
+    pullQuotePlugin
   ];
+
+  // Mermaid is opt-in and must run at the mdast stage, BEFORE the bridge.
+  if (config?.mermaid) {
+    plugins.push([remarkMermaidDiagrams, normalizeMermaidOptions(config.mermaid)]);
+  }
+
+  plugins.push([remarkRehype, { allowDangerousHtml: true }]);
+  return plugins;
 }
 
 /**
