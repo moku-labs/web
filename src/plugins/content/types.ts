@@ -231,6 +231,15 @@ export type FileSystemContentOptions = {
    * (plus playwright with an installed browser). Defaults to disabled.
    */
   mermaid?: boolean | MermaidDiagramOptions;
+  /**
+   * Lazy iframe embeds: rewrite `::embed{src="…" title="…"}` leaf directives
+   * into static click-to-activate facades (no iframe — and none of the target's
+   * network/JS cost — until the reader clicks). Pair with the `lazyEmbed` SPA
+   * island, which swaps the facade for the real `<iframe loading="lazy">`.
+   * Requires `trustedContent: true` (the facade is raw HTML the sanitize pass
+   * would strip). Defaults to disabled.
+   */
+  embed?: boolean;
 };
 
 /**

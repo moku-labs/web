@@ -51,3 +51,4 @@ export const spaPlugin = createPlugin("spa", {
 });
 
 export { createComponent } from "./components";
+export { lazyEmbed } from "./lazy-embed";

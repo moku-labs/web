@@ -69,6 +69,29 @@ Per-source options live on the provider, not here. The Node `fileSystemContent(o
 | `extraRemarkPlugins` | `readonly Pluggable[]` | `[]` | Concatenated **after** the framework remark defaults (additive — never replaces them). |
 | `extraRehypePlugins` | `readonly Pluggable[]` | `[]` | Concatenated after the custom transforms, before Shiki + sanitize (additive). |
 | `mermaid` | `boolean \| MermaidDiagramOptions` | disabled | Build-time [Mermaid diagrams](#mermaid-diagrams): render ```` ```mermaid ```` fences to static inline SVG. **Requires `trustedContent: true`** and the optional peer `mermaid-isomorphic`. |
+| `embed` | `boolean` | disabled | [Lazy iframe embeds](#lazy-iframe-embeds): rewrite `::embed{src="…" title="…"}` directives to click-to-activate facades. **Requires `trustedContent: true`**. |
+
+## Lazy iframe embeds
+
+Opt-in rewriting of `::embed` leaf directives into **static click-to-activate facades** — the article never loads the embedded document (no request, no third-party JS, no scroll-jacking) until the reader clicks. The build emits only a `<figure class="lazy-embed">` carrying the target in data attributes plus an activation `<button>`; the companion **`lazyEmbed` SPA island** (exported from both entries, register it in `pluginConfigs.spa.components`) swaps the facade for the real `<iframe loading="lazy">` on click.
+
+```md
+::embed{src="https://game.example.com/" title="My Game"}
+```
+
+```ts
+// SSG side — enable the directive:
+fileSystemContent({ contentDir: "./content", trustedContent: true, embed: true });
+
+// Client side — register the activator island:
+import { lazyEmbed } from "@moku-labs/web/browser";
+createApp({ pluginConfigs: { spa: { components: [lazyEmbed] } } });
+```
+
+- **`trustedContent: true` is required.** The facade is raw HTML the sanitize pass would strip — and embedding third-party iframes is never safe for untrusted Markdown. `fileSystemContent` rejects the combination at construction.
+- `src` and `title` are both **required**; a missing attribute fails the build. `src` must be an http(s) URL or a root-relative path — `javascript:`/`data:`/scheme-relative URLs fail the build.
+- Facade markup: `<figure class="lazy-embed" data-component="lazy-embed" data-embed-src="…" data-embed-title="…"><button type="button" class="lazy-embed-button"><span class="lazy-embed-title">…</span></button></figure>`. On activation the island injects `<iframe class="lazy-embed-frame" loading="lazy" allowfullscreen>` and sets `data-embed-active` on the figure. All visual chrome (`.lazy-embed*`, the activated state) is **consumer CSS** — the framework ships none.
+- Attribute values are HTML-escaped; the iframe is granted `fullscreen; autoplay; gamepad`.
 
 ## Mermaid diagrams
 
