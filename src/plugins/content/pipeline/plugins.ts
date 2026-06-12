@@ -18,6 +18,7 @@ import type { Pluggable } from "unified";
 import type { Node } from "unist";
 import { visit } from "unist-util-visit";
 import type { FileSystemContentOptions } from "../types";
+import { embedPlugin } from "./embed";
 import { normalizeMermaidOptions, remarkMermaidDiagrams } from "./mermaid";
 
 /** Directive node shape from remark-directive (not in `@types/mdast`). */
@@ -177,14 +178,17 @@ export function sectionDividerPlugin(): (tree: HastRoot) => void {
 
 /**
  * The hardcoded framework default remark (Markdown-AST) plugins, in order:
- * parse, frontmatter, gfm, directive, pull-quote, the OPT-IN mermaid transform,
- * then the mdast→hast bridge (`remark-rehype` with `allowDangerousHtml`).
- * Pull-quote and mermaid run on the mdast before the bridge — pull-quote so the
- * directive carries its `hName`/`hProperties`, mermaid so the fence is replaced
- * with raw SVG HTML before Shiki could ever claim the code block.
+ * parse, frontmatter, gfm, directive, pull-quote, the OPT-IN embed + mermaid
+ * transforms, then the mdast→hast bridge (`remark-rehype` with
+ * `allowDangerousHtml`). Pull-quote, embed and mermaid run on the mdast before
+ * the bridge — pull-quote so the directive carries its `hName`/`hProperties`,
+ * embed so the directive is replaced with its raw facade HTML, mermaid so the
+ * fence is replaced with raw SVG HTML before Shiki could ever claim the code
+ * block.
  *
- * @param config - Optional provider configuration; only `mermaid` is read here
- * (truthy enables the mermaid transform at its fixed mdast position).
+ * @param config - Optional provider configuration; only the opt-in flags are
+ * read here: `mermaid` and `embed` (each truthy value enables its transform at
+ * a fixed mdast position).
  * @returns The ordered default remark pluggables.
  * @example
  * ```ts
@@ -199,6 +203,11 @@ export function defaultRemarkPlugins(config?: FileSystemContentOptions): readonl
     remarkDirective,
     pullQuotePlugin
   ];
+
+  // Embed facades are opt-in and must run at the mdast stage, BEFORE the bridge.
+  if (config?.embed) {
+    plugins.push(embedPlugin);
+  }
 
   // Mermaid is opt-in and must run at the mdast stage, BEFORE the bridge.
   if (config?.mermaid) {

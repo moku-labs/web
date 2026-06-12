@@ -47,7 +47,7 @@ export { browserEnv } from "./plugins/env/providers.browser";
 
 // ─── Consumer helpers: route DSL, SPA islands, SEO <head> primitives ──────────
 export { createUrls, defineRoutes, route } from "./plugins/router";
-export { createComponent } from "./plugins/spa";
+export { createComponent, lazyEmbed } from "./plugins/spa";
 export {
   buildArticleHead,
   canonical,

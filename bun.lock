@@ -49,9 +49,13 @@
         "vitest": "4.0.18",
       },
       "peerDependencies": {
+        "mermaid-isomorphic": "^3.0.0",
         "preact": "^10.29.2",
         "preact-render-to-string": "^6.6.0",
       },
+      "optionalPeers": [
+        "mermaid-isomorphic",
+      ],
     },
   },
   "packages": {

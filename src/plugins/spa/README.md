@@ -51,6 +51,10 @@ The surface mounted at `app.spa` is the **registration / control** side. The DOM
 
 `createComponent(name: string, hooks: ComponentHooks): ComponentDef` is exported from both the `.` and `./browser` entries (and re-exported here from `index.ts`). It builds a validated component definition fail-fast at registration: an empty `name`, an unknown hook key (e.g. `onMout`, checked against `COMPONENT_HOOK_NAMES`), or a non-function hook value throws an actionable `[web] …` error immediately. Pass the result to `app.spa.register(...)` or to `pluginConfigs.spa.components`.
 
+### Exported island: `lazyEmbed`
+
+The companion of the content pipeline's `::embed` directive (see the content plugin's "Lazy iframe embeds"): a ready-made component, exported from both entries, that mounts on the emitted `[data-component="lazy-embed"]` facades and swaps them for a real `<iframe loading="lazy">` on click. Add it to `pluginConfigs.spa.components` (or `app.spa.register(lazyEmbed)`); style the `.lazy-embed*` classes yourself.
+
 ### Navigation: HTML-over-fetch, or client DATA render
 
 Every navigation entry point (Navigation API, History fallback, `navigate()`) funnels through one strategy in the kernel:
