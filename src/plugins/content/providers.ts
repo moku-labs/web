@@ -11,6 +11,7 @@
  */
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import { VFile } from "vfile";
 import { parseFrontmatter } from "./pipeline/frontmatter";
 import { ensureProcessor } from "./pipeline/markdown";
 import { calculateReadingTime } from "./pipeline/reading-time";
@@ -212,7 +213,10 @@ export function fileSystemContent(options: FileSystemContentOptions): ContentPro
       // Parse frontmatter and render the Markdown body through the pipeline.
       const { frontmatter, body } = parseFrontmatter(raw, options);
       const processor = ensureProcessor(state, options);
-      const rendered = String(await processor.process(body));
+      // Pass `slug` on the VFile data so the `::gallery` transform can resolve a
+      // co-located folder against `<contentDir>/<slug>/…` (the processor is shared,
+      // so per-article context cannot ride the pipeline build — it rides the file).
+      const rendered = String(await processor.process(new VFile({ value: body, data: { slug } })));
       const html = rewriteEmbedUrls(rewriteImageUrls(rendered, slug), slug);
 
       // Derive computed metadata and assemble the Article.

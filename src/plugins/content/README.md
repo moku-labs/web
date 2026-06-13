@@ -69,7 +69,8 @@ Per-source options live on the provider, not here. The Node `fileSystemContent(o
 | `extraRemarkPlugins` | `readonly Pluggable[]` | `[]` | Concatenated **after** the framework remark defaults (additive — never replaces them). |
 | `extraRehypePlugins` | `readonly Pluggable[]` | `[]` | Concatenated after the custom transforms, before Shiki + sanitize (additive). |
 | `mermaid` | `boolean \| MermaidDiagramOptions` | disabled | Build-time [Mermaid diagrams](#mermaid-diagrams): render ```` ```mermaid ```` fences to static inline SVG. **Requires `trustedContent: true`** and the optional peer `mermaid-isomorphic`. |
-| `embed` | `boolean` | disabled | [Lazy iframe embeds](#lazy-iframe-embeds): rewrite `::embed{src="…" title="…"}` directives to click-to-activate facades. **Requires `trustedContent: true`**. |
+| `embed` | `boolean \| EmbedOptions` | disabled | [Lazy iframe embeds](#lazy-iframe-embeds): rewrite `::embed{src="…" title="…"}` directives to click-to-activate facades. **Requires `trustedContent: true`**. |
+| `gallery` | `boolean \| GalleryOptions` | disabled | [Folder galleries](#folder-galleries): rewrite `::gallery{src="./images/dir/" caption="…"}` directives to a swipeable image set rendered by a consumer component. **Requires `trustedContent: true`**. |
 
 ## Lazy iframe embeds
 
@@ -126,6 +127,46 @@ fileSystemContent({ contentDir: "./content", trustedContent: true, embed: { faca
 - `EmbedFacadeButton` is the **default** inner content, exported so you can compose it (wrap it, or place it alongside your own markup) instead of reimplementing.
 - The island activates on a click **anywhere** in the facade, so custom markup needs no wiring; include a focusable control (the default `<button>`) for keyboard users.
 - The facade is build-time SSR only — it is never hydrated. Keep it presentational (no event handlers, no client state); interactivity arrives with the activated iframe.
+
+## Folder galleries
+
+Opt-in rewriting of `::gallery` leaf directives into a **swipeable image set built from a co-located folder**. The framework reads the directive's `src` folder (relative to the article, like its `images/` dir), sorts the images, rewrites each to its shared `/<slug>/…` URL (identical from every locale page), and renders them through a **consumer Preact component** — SSR'd to static markup at build time inside a framework-owned `<div class="gallery" data-component="gallery">`. Pair it with a gallery SPA island for paging / keyboard / lightbox; with no island and no CSS the default component is already a plain scrollable strip.
+
+```md
+::gallery{src="./images/mage-knight/" caption="Our Mage Knight session"}
+```
+
+```ts
+fileSystemContent({ contentDir: "./content", trustedContent: true, gallery: true });
+```
+
+- **`trustedContent: true` is required.** The gallery markup is raw HTML the sanitize pass would strip. `fileSystemContent` rejects the combination at construction.
+- **The `src` is a co-located folder**, resolved like the article's `images/` dir; the build copies the folder to `dist/<slug>/<dir>/` (see [content-images](../build/phases/content-images.ts), generalized in v1.11.0). A missing or image-less folder fails the build with the offending path quoted.
+- Folder order = filename sort, so name slides `01-…`, `02-…` to control order.
+- Wrapper markup: `<div class="gallery" data-component="gallery">…component inner…</div>`. All visual chrome (`.gallery*` / `data-*` hooks, the swipe/dot/lightbox behavior) is **consumer CSS + island** — the framework ships none.
+
+### Customizing the gallery (a Preact component)
+
+The framework owns the `<div>` wrapper (island hook) and resolves the slides; the **inner content** is a Preact component you replace via `gallery.component`. It is rendered to **static markup at build time** (no client JS, no hydration), receives the resolved slides + caption + the raw directive attribute bag as props:
+
+```tsx
+import { createApp, GalleryTrack, type GalleryProps } from "@moku-labs/web";
+
+function MyGallery(props: GalleryProps) {
+  return (
+    <figure>
+      <GalleryTrack {...props} />
+      <figcaption>{props.caption}</figcaption>
+    </figure>
+  );
+}
+
+fileSystemContent({ contentDir: "./content", trustedContent: true, gallery: { component: MyGallery } });
+```
+
+- `GalleryProps` = `{ slides, caption, attributes }` — `slides` is the resolved `{ src, alt }[]` (URLs rewritten, alt = `caption · N`), `attributes` is the full raw directive bag (your custom options, e.g. `::gallery{… layout="dots"}`, live there). Exported type.
+- `GalleryTrack` is the **default** inner content (a plain slide track), exported so you can compose it instead of reimplementing.
+- The component is build-time SSR only — never hydrated. Keep it presentational; interactivity arrives from your gallery island (mount it on `[data-component="gallery"]`).
 
 ## Mermaid diagrams
 
