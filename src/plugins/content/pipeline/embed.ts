@@ -3,12 +3,15 @@
  *
  * Rewrites `::embed{src="…" title="…"}` leaf directives into a static
  * click-to-activate facade at the mdast stage (BEFORE the remark-rehype
- * bridge): a `<figure class="lazy-embed">` carrying the target URL in data
- * attributes plus an activation `<button>`. NO iframe is emitted at build time
- * — the page never loads the embedded document until the reader asks for it,
- * so an embed costs the article nothing (no network, no scroll-jacking, no
- * third-party JS). The companion `lazyEmbed` SPA island (plugins/spa/lazy-embed.ts)
- * swaps the facade for a real `<iframe loading="lazy">` on click.
+ * bridge): a framework-owned `<figure class="lazy-embed">` carrying the target
+ * URL + island hooks in data attributes, wrapping inner content rendered (at
+ * build time, to static markup) by a Preact facade component — the built-in
+ * {@link EmbedFacadeButton} by default, or a consumer component via
+ * `embed.facade`. NO iframe is emitted at build time — the page never loads the
+ * embedded document until the reader clicks, so an embed costs the article
+ * nothing (no network, no scroll-jacking, no third-party JS). The companion
+ * `lazyEmbed` SPA island (plugins/spa/lazy-embed.ts) swaps the facade for a real
+ * `<iframe loading="lazy">` on click.
  *
  * The `src` may be an http(s) URL, a root-relative path, OR a co-located
  * relative path (`./game/index.html`) pointing at a pre-built static bundle
@@ -19,20 +22,18 @@
  * ratio so the embed never causes layout shift (e.g. a portrait game frame).
  */
 import type { Html, Parent as MdastParent, Root as MdastRoot } from "mdast";
+import { h } from "preact";
+import { renderToString } from "preact-render-to-string";
 import type { Node } from "unist";
 import { visit } from "unist-util-visit";
+import type { EmbedFacade, EmbedFacadeProps, EmbedOptions } from "../types";
+import { EmbedFacadeButton } from "./embed-facade";
 
 /** CSS class on the `<figure>` facade wrapping each embed. */
 const EMBED_FIGURE_CLASS = "lazy-embed";
 
 /** `data-component` name binding the facade to the `lazyEmbed` SPA island. */
 const EMBED_COMPONENT_NAME = "lazy-embed";
-
-/** CSS class on the facade's activation button. */
-const EMBED_BUTTON_CLASS = "lazy-embed-button";
-
-/** CSS class on the title span inside the activation button. */
-const EMBED_TITLE_CLASS = "lazy-embed-title";
 
 /** Optional facade dimensions (integer pixels) used to reserve the box. */
 type EmbedDimensions = { width: number; height: number };
@@ -139,36 +140,76 @@ function parseDimensions(
 }
 
 /**
- * Build the static facade HTML for one embed: the `<figure>` carrying the
- * target in data attributes plus the activation `<button>` (the button label
- * is the embed's title; visual chrome is consumer CSS). When dimensions are
- * given, the figure also carries `data-embed-width`/`-height` plus an inline
- * `aspect-ratio`/`max-width` so the box is reserved before activation (no
- * layout shift) and survives because embeds require `trustedContent`.
+ * Collect the directive's raw attribute bag into a plain string record, dropping
+ * `null`/`undefined` values (so a custom facade can read arbitrary extra options).
  *
- * @param src - The validated embed URL/path.
- * @param title - The human-readable embed title (button label, iframe title).
+ * @param attributes - The raw directive attributes (or undefined).
+ * @returns A string-valued attribute record.
+ * @example
+ * ```ts
+ * collectAttributes({ src: "x", poster: "/p.jpg", flag: null }); // { src: "x", poster: "/p.jpg" }
+ * ```
+ */
+function collectAttributes(
+  attributes: Record<string, string | null | undefined> | undefined
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(attributes ?? {})) {
+    if (typeof value === "string") out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * Build the static facade HTML for one embed: the framework-owned `<figure>`
+ * (island hooks in data attributes; optional reserved-box `aspect-ratio`/`max-width`
+ * inline style when dimensions are given) wrapping the facade component's inner
+ * content, SSR'd to static markup. The wrapper carries `data-embed-src` (raw —
+ * the provider resolves a relative src) so neither the island contract nor the
+ * URL rewrite depend on the consumer's markup.
+ *
+ * @param facade - The facade component (default {@link EmbedFacadeButton}).
+ * @param props - The facade props (`src`, `title`, optional `width`/`height`, raw `attributes`).
  * @param dimensions - Optional reserved-box pixel dimensions.
  * @returns The facade HTML string.
  * @example
  * ```ts
- * embedFacadeHtml("https://game.example.com/", "My Game", { width: 400, height: 711 });
+ * embedFacadeHtml(EmbedFacadeButton, { src: "https://g/", title: "G", attributes: {} });
  * ```
  */
-function embedFacadeHtml(src: string, title: string, dimensions?: EmbedDimensions): string {
-  const safeSource = escapeAttribute(src);
-  const safeTitle = escapeAttribute(title);
+function embedFacadeHtml(
+  facade: EmbedFacade,
+  props: EmbedFacadeProps,
+  dimensions?: EmbedDimensions
+): string {
+  const safeSource = escapeAttribute(props.src);
+  const safeTitle = escapeAttribute(props.title);
   const sizing = dimensions
     ? ` data-embed-width="${dimensions.width}" data-embed-height="${dimensions.height}"` +
       ` style="aspect-ratio: ${dimensions.width} / ${dimensions.height}; max-width: ${dimensions.width}px;"`
     : "";
+  const inner = renderToString(h(facade, props));
   return (
     `<figure class="${EMBED_FIGURE_CLASS}" data-component="${EMBED_COMPONENT_NAME}"` +
     ` data-embed-src="${safeSource}" data-embed-title="${safeTitle}"${sizing}>` +
-    `<button type="button" class="${EMBED_BUTTON_CLASS}" aria-label="Load embed: ${safeTitle}">` +
-    `<span class="${EMBED_TITLE_CLASS}">${safeTitle}</span>` +
-    `</button></figure>`
+    `${inner}</figure>`
   );
+}
+
+/**
+ * Normalize the provider's `embed` config value (`boolean | options`) to a plain
+ * {@link EmbedOptions} object for the transform factory.
+ *
+ * @param embed - The raw `FileSystemContentOptions.embed` value (truthy).
+ * @returns The options object (`{}` for the bare `true` form).
+ * @example
+ * ```ts
+ * normalizeEmbedOptions(true); // {}
+ * normalizeEmbedOptions({ facade: MyFacade });
+ * ```
+ */
+export function normalizeEmbedOptions(embed: boolean | EmbedOptions): EmbedOptions {
+  return typeof embed === "boolean" ? {} : embed;
 }
 
 /**
@@ -177,15 +218,16 @@ function embedFacadeHtml(src: string, title: string, dimensions?: EmbedDimension
  * or carrying invalid `width`/`height`, fails the build with the offending
  * value quoted.
  *
+ * @param facade - The facade component to render the inner content with.
  * @param tree - The mdast tree to mutate.
  * @throws {Error} When an `::embed` directive is missing `src` or `title`, its
  * `src` is not embeddable, or its dimensions are invalid.
  * @example
  * ```ts
- * embedTransform(tree);
+ * embedTransform(EmbedFacadeButton, tree);
  * ```
  */
-function embedTransform(tree: MdastRoot): void {
+function embedTransform(facade: EmbedFacade, tree: MdastRoot): void {
   visit(tree, (node: Node, index, parent) => {
     if (!isEmbedDirective(node)) return;
     if (parent === undefined || index === undefined) return;
@@ -204,24 +246,33 @@ function embedTransform(tree: MdastRoot): void {
     }
 
     const dimensions = parseDimensions(node.attributes?.width, node.attributes?.height);
-    const html: Html = { type: "html", value: embedFacadeHtml(src, title, dimensions) };
+    const props: EmbedFacadeProps = {
+      src,
+      title,
+      ...(dimensions ? { width: dimensions.width, height: dimensions.height } : {}),
+      attributes: collectAttributes(node.attributes)
+    };
+    const html: Html = { type: "html", value: embedFacadeHtml(facade, props, dimensions) };
     (parent as MdastParent).children[index] = html;
   });
 }
 
 /**
- * Remark transform: rewrites `::embed{src="…" title="…"}` leaf directives into
- * static click-to-activate facades (no iframe until the reader clicks — see
+ * Remark transform factory: rewrites `::embed{src="…" title="…"}` leaf directives
+ * into static click-to-activate facades (no iframe until the reader clicks — see
  * the file header). Opt-in via the provider's `embed` option; requires
- * `trustedContent: true` because the facade is raw HTML the sanitize pass
- * would strip.
+ * `trustedContent: true` because the facade is raw HTML the sanitize pass would
+ * strip. The facade's inner content is rendered by `options.facade` (a consumer
+ * Preact component) or the built-in {@link EmbedFacadeButton}.
  *
+ * @param options - Embed options (the optional `facade` component).
  * @returns An mdast tree transformer.
  * @example
  * ```ts
- * unified().use(embedPlugin);
+ * unified().use(embedPlugin, { facade: MyFacade });
  * ```
  */
-export function embedPlugin(): (tree: MdastRoot) => void {
-  return embedTransform;
+export function embedPlugin(options: EmbedOptions = {}): (tree: MdastRoot) => void {
+  const facade = options.facade ?? EmbedFacadeButton;
+  return (tree: MdastRoot) => embedTransform(facade, tree);
 }

@@ -1,10 +1,13 @@
 import type { Html, Root as MdastRoot } from "mdast";
+import { h } from "preact";
 import remarkDirective from "remark-directive";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 import { visit } from "unist-util-visit";
 import { describe, expect, it } from "vitest";
 import { embedPlugin } from "../../pipeline/embed";
+import { EmbedFacadeButton } from "../../pipeline/embed-facade";
+import type { EmbedFacadeProps } from "../../types";
 import { validateFileSystemContentOptions } from "../../validate";
 
 /** Parse markdown (with directive syntax) into an mdast tree. */
@@ -21,10 +24,10 @@ function htmlValues(tree: MdastRoot): string[] {
   return values;
 }
 
-/** Run the embed transform over markdown and return the html node values. */
-function transform(md: string): string[] {
+/** Run the embed transform (optionally with custom options) and return the html node values. */
+function transform(md: string, options?: Parameters<typeof embedPlugin>[0]): string[] {
   const tree = parse(md);
-  embedPlugin()(tree);
+  embedPlugin(options)(tree);
   return htmlValues(tree);
 }
 
@@ -133,6 +136,43 @@ describe("content/pipeline/embed", () => {
 
   it("uses the [web] error prefix", () => {
     expect(() => transform('::embed{title="No Src"}')).toThrow(/^\[web\]/);
+  });
+});
+
+/** A custom facade reading props + a custom directive attribute (`poster`). */
+const posterFacade = (props: EmbedFacadeProps) =>
+  h(
+    "button",
+    { type: "button", class: "lazy-embed-button", "data-poster": props.attributes.poster },
+    h("span", { class: "lazy-embed-title" }, `${props.title} ${props.width}x${props.height}`)
+  );
+
+/** A facade delegating to the exported default (drift guard). */
+const delegatingFacade = (props: EmbedFacadeProps) => EmbedFacadeButton(props);
+
+describe("content/pipeline/embed — custom facade component", () => {
+  it("renders a consumer facade with the embed props, inside the framework figure", () => {
+    const [html] = transform(
+      '::embed{src="https://g.dev/" title="Game" width="400" height="711" poster="/p.jpg"}',
+      { facade: posterFacade }
+    );
+
+    // Consumer-controlled inner content (custom attribute + props interpolation):
+    expect(html).toContain('data-poster="/p.jpg"');
+    expect(html).toContain("Game 400x711");
+    // Framework still owns the figure wrapper, island hooks, and reserved-box sizing:
+    expect(html).toContain('<figure class="lazy-embed" data-component="lazy-embed"');
+    expect(html).toContain('data-embed-src="https://g.dev/"');
+    expect(html).toContain('style="aspect-ratio: 400 / 711; max-width: 400px;"');
+  });
+
+  it("the exported EmbedFacadeButton matches the default facade markup (drift guard)", () => {
+    const [explicit] = transform('::embed{src="https://g.dev/" title="My Game"}', {
+      facade: delegatingFacade
+    });
+    const [byDefault] = transform('::embed{src="https://g.dev/" title="My Game"}');
+
+    expect(explicit).toBe(byDefault);
   });
 });
 

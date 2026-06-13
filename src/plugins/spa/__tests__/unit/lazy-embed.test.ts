@@ -43,13 +43,29 @@ describe("spa/lazy-embed island", () => {
     expect(figure.querySelector("button")).toBeNull();
   });
 
-  it("ignores clicks that do not land on the activation button", () => {
+  it("activates on a click anywhere on the facade (so custom inner markup works)", () => {
+    // A consumer facade with NO .lazy-embed-button — just a div.
+    const figure = mountFacade(
+      '<figure class="lazy-embed" data-component="lazy-embed"' +
+        ' data-embed-src="https://game.example.com/" data-embed-title="My Game">' +
+        '<div class="poster">click me</div></figure>'
+    );
+
+    (figure.querySelector("div.poster") as HTMLElement).click();
+
+    expect(figure.querySelector("iframe")).not.toBeNull();
+    expect(figure.dataset.embedActive).toBe("");
+  });
+
+  it("does not re-activate once active (clicks fall through to the iframe)", () => {
     const figure = mountFacade();
+    (figure.querySelector("button") as HTMLButtonElement).click();
+    const first = figure.querySelector("iframe");
 
-    (figure as HTMLElement).click();
+    figure.click();
 
-    expect(figure.querySelector("iframe")).toBeNull();
-    expect(figure.querySelector("button")).not.toBeNull();
+    expect(figure.querySelectorAll("iframe")).toHaveLength(1);
+    expect(figure.querySelector("iframe")).toBe(first);
   });
 
   it("does nothing when the facade has no data-embed-src", () => {
