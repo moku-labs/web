@@ -119,24 +119,30 @@ export function createSpaKernel(
 
   /**
    * Apply the in-flight navigation's scroll intent — the swap's `beforeCapture` hook.
-   * For a forward nav it scrolls to top BEFORE the snapshot is captured, so the old and
-   * new states share scrollY=0 (no delta → the sticky header never un-pins) and there is
-   * no pre-fetch scroll pause. Traverse (back/forward) sets `pendingScrollToTop = false`
-   * and restores its saved position after the swap instead.
+   * For a forward nav it scrolls to top BEFORE the swap (and, with view transitions on,
+   * before the "old" snapshot is captured), so the old and new states share scrollY=0:
+   * no delta for a transition to animate → a `position: sticky` header never un-pins.
+   * Traverse (back/forward) sets `pendingScrollToTop = false` and restores its saved
+   * position after the swap instead.
    *
-   * Scroll behaviour: `"instant"` ONLY when view transitions are enabled — that is what
-   * keeps scrollY=0 in the captured snapshot (a `scroll-behavior: smooth` would otherwise
-   * animate the reset and re-create the delta → sticky-header flicker). With view
-   * transitions OFF there is no snapshot to protect, so it honours the page's
-   * `scroll-behavior` (`"auto"` = use the CSS value, e.g. a smooth scroll-to-top on nav).
+   * The reset is ALWAYS `"instant"`, never the CSS-driven `"auto"`. It runs synchronously
+   * immediately before the swap, and the swap mutates document height (the outgoing page is
+   * usually taller than the incoming one). A smooth scroll — from `behavior: "smooth"` or a
+   * page `scroll-behavior: smooth` that `"auto"` would inherit — is still animating when that
+   * height change lands; the browser clamps scrollY to the new, smaller maximum and cancels
+   * the in-flight animation there (worst on WebKit), stranding the page near the OLD position
+   * instead of the top. Instant lands scrollY=0 before the swap, every time. (A smooth
+   * scroll-to-top on the SAME page is unaffected — the router's same-page handler animates
+   * it, where there is no swap to race.)
    *
    * @example
    * runSwap(renderAndMount, viewTransitions, applyPendingScroll);
    */
   const applyPendingScroll = (): void => {
     if (!pendingScrollToTop) return;
-    const behavior: ScrollBehavior = resolved.viewTransitions ? "instant" : "auto";
-    window.scrollTo({ top: 0, behavior });
+    // ALWAYS instant — a smooth reset would race the synchronous, height-changing swap and
+    // get cancelled at the clamp point (see above). Never `"auto"`/CSS-driven here.
+    window.scrollTo({ top: 0, behavior: "instant" });
   };
 
   /**

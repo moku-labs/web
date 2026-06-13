@@ -248,7 +248,7 @@ describe("kernel.processNav", () => {
 });
 
 describe("kernel.processNav — swap-time scroll (scroll-before-snapshot)", () => {
-  it("forward nav scrolls to top as part of the swap; honours scroll-behavior when VT is OFF", async () => {
+  it("forward nav scrolls to top INSTANT as part of the swap (VT OFF — never CSS smooth)", async () => {
     const { kernel } = setup(); // default config → viewTransitions: false
     kernel.init();
     const scrollTo = vi.fn();
@@ -262,13 +262,14 @@ describe("kernel.processNav — swap-time scroll (scroll-before-snapshot)", () =
     kernel.processNav("/about");
     await vi.waitFor(() => expect(document.querySelector("#page")?.textContent).toBe("new"));
 
-    // Scroll happens in the swap (runSwap's beforeCapture), after the fetch, before any snapshot.
-    // With view transitions OFF there is no snapshot to protect, so `behavior: "auto"` defers to
-    // the page's `scroll-behavior` (e.g. a smooth scroll-to-top on navigation).
-    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "auto" });
+    // Scroll happens in the swap (runSwap's beforeCapture), after the fetch. It is ALWAYS
+    // `"instant"`, never CSS-driven `"auto"`: a smooth reset would still be animating when the
+    // synchronous swap changes document height and get cancelled at the clamp point (worst on
+    // WebKit), stranding the page near the old scroll position.
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "instant" });
   });
 
-  it("DATA-path forward nav also scrolls to top in the swap (auto when VT off)", async () => {
+  it("DATA-path forward nav also scrolls to top INSTANT in the swap", async () => {
     const { kernel } = setupData({ route: makeDataRoute(), raw: { title: "T" } });
     kernel.init();
     const scrollTo = vi.fn();
@@ -279,11 +280,11 @@ describe("kernel.processNav — swap-time scroll (scroll-before-snapshot)", () =
     kernel.processNav("/en/hello/");
     await vi.waitFor(() => expect(document.querySelector("#page")?.textContent).toBe("data:T"));
 
-    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "auto" });
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "instant" });
     expect(fetchSpy).not.toHaveBeenCalled(); // DATA path, not HTML-over-fetch
   });
 
-  it("forward nav scrolls INSTANT when view transitions are ON (keeps scrollY=0 in the snapshot)", async () => {
+  it("forward nav scrolls INSTANT with view transitions ON too (keeps scrollY=0 in the snapshot)", async () => {
     const { kernel } = setup({ viewTransitions: true });
     kernel.init();
     const scrollTo = vi.fn();
