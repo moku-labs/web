@@ -56,6 +56,53 @@ describe("content/pipeline/embed", () => {
     expect(html).toContain('data-embed-src="/games/screw-master/"');
   });
 
+  it("accepts a co-located relative src (kept raw — the provider resolves it per slug)", () => {
+    for (const src of ["./game/index.html", "../shared/game/", "game/index.html"]) {
+      const [html] = transform(`::embed{src="${src}" title="Local"}`);
+      expect(html).toContain(`data-embed-src="${src}"`);
+    }
+  });
+
+  it("reserves the box with data-embed-width/height + inline aspect-ratio when both are given", () => {
+    const [html] = transform(
+      '::embed{src="https://g.dev/" title="Portrait" width="400" height="711"}'
+    );
+
+    expect(html).toContain('data-embed-width="400"');
+    expect(html).toContain('data-embed-height="711"');
+    expect(html).toContain('style="aspect-ratio: 400 / 711; max-width: 400px;"');
+  });
+
+  it("omits sizing attributes when no width/height is given", () => {
+    const [html] = transform('::embed{src="https://g.dev/" title="No size"}');
+
+    expect(html).not.toContain("data-embed-width");
+    expect(html).not.toContain("aspect-ratio");
+    expect(html).not.toContain("style=");
+  });
+
+  it("fails the build when only one of width/height is given", () => {
+    expect(() => transform('::embed{src="https://g.dev/" title="x" width="400"}')).toThrow(
+      /width and height must be set together/
+    );
+    expect(() => transform('::embed{src="https://g.dev/" title="x" height="711"}')).toThrow(
+      /width and height must be set together/
+    );
+  });
+
+  it("fails the build on non-positive-integer dimensions", () => {
+    for (const [w, h] of [
+      ["400", "0"],
+      ["abc", "711"],
+      ["400.5", "711"],
+      ["-4", "711"]
+    ]) {
+      expect(() =>
+        transform(`::embed{src="https://g.dev/" title="x" width="${w}" height="${h}"}`)
+      ).toThrow(/must be positive integers in pixels/);
+    }
+  });
+
   it("escapes HTML metacharacters in attribute values", () => {
     const [html] = transform(
       '::embed{src="https://example.com/?a=1&b=2" title=\'He said "play" & <left>\'}'
@@ -79,7 +126,7 @@ describe("content/pipeline/embed", () => {
   it("fails the build on non-embeddable URLs", () => {
     for (const src of ["javascript:alert(1)", "data:text/html,hi", "//evil.example.com/"]) {
       expect(() => transform(`::embed{src="${src}" title="Nope"}`)).toThrow(
-        /must be an http\(s\) URL or a root-relative path/
+        /must be an http\(s\) URL, a root-relative path, or a co-located relative path/
       );
     }
   });
