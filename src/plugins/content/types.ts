@@ -7,6 +7,7 @@
  * {@link FileSystemContentOptions}-configured `fileSystemContent` provider for a build;
  * the shell itself imports zero node code, so `contentPlugin` is browser-safe.
  */
+import type { FunctionComponent } from "preact";
 import type { BundledTheme, ThemeRegistrationAny } from "shiki";
 import type { Pluggable, Processor } from "unified";
 import type { Stage } from "../../config";
@@ -194,6 +195,63 @@ export type MermaidDiagramOptions = {
 };
 
 /**
+ * Props handed to an `::embed` facade component (the click-to-activate placeholder
+ * the framework renders to static markup at build time). `width`/`height` are the
+ * parsed pixel dimensions when the directive set them; `attributes` is the full raw
+ * directive attribute bag, so a custom facade can read arbitrary extra options
+ * (e.g. `::embed{… poster="/p.jpg" label="Play"}`).
+ *
+ * @example
+ * ```tsx
+ * const Facade = ({ title, attributes }: EmbedFacadeProps) => (
+ *   <button type="button" class="lazy-embed-button">
+ *     {attributes.poster ? <img src={attributes.poster} alt="" /> : null}
+ *     <span class="lazy-embed-title">{title}</span>
+ *   </button>
+ * );
+ * ```
+ */
+export type EmbedFacadeProps = {
+  /** The embed target exactly as written in the directive (the provider resolves it later). */
+  src: string;
+  /** The human-readable embed title (default label + iframe title). */
+  title: string;
+  /** Reserved-box width in pixels, when the directive set `width`/`height`. */
+  width?: number;
+  /** Reserved-box height in pixels, when the directive set `width`/`height`. */
+  height?: number;
+  /** The full raw directive attribute bag (custom options live here). */
+  attributes: Readonly<Record<string, string>>;
+};
+
+/**
+ * A consumer-supplied facade component: a Preact function component over
+ * {@link EmbedFacadeProps}, rendered (at build time, to static markup) as the
+ * facade's inner content — inside the framework-owned `<figure>` that carries the
+ * island hooks + reserved-box sizing. Defaults to the built-in `EmbedFacadeButton`.
+ */
+export type EmbedFacade = FunctionComponent<EmbedFacadeProps>;
+
+/**
+ * Options for the `::embed` lazy-iframe feature (the `embed` key of
+ * {@link FileSystemContentOptions}). `embed: true` uses the default facade;
+ * `embed: { facade }` swaps in a consumer Preact component for the placeholder.
+ *
+ * @example
+ * ```ts
+ * fileSystemContent({ contentDir: "./content", trustedContent: true, embed: { facade: MyFacade } });
+ * ```
+ */
+export type EmbedOptions = {
+  /**
+   * Consumer Preact component rendering the facade's inner content (SSR'd to
+   * static markup at build — no client JS). Receives {@link EmbedFacadeProps}.
+   * Defaults to the built-in `EmbedFacadeButton`.
+   */
+  facade?: EmbedFacade;
+};
+
+/**
  * Options for the node filesystem provider {@link ContentProvider} `fileSystemContent`.
  * These are the markdown-pipeline + source concerns that used to live on the content
  * plugin config; they now belong to the provider you compose.
@@ -236,10 +294,11 @@ export type FileSystemContentOptions = {
    * into static click-to-activate facades (no iframe — and none of the target's
    * network/JS cost — until the reader clicks). Pair with the `lazyEmbed` SPA
    * island, which swaps the facade for the real `<iframe loading="lazy">`.
-   * Requires `trustedContent: true` (the facade is raw HTML the sanitize pass
-   * would strip). Defaults to disabled.
+   * `true` enables with the default facade; an object passes {@link EmbedOptions}
+   * (e.g. a consumer `facade` Preact component). Requires `trustedContent: true`
+   * (the facade is raw HTML the sanitize pass would strip). Defaults to disabled.
    */
-  embed?: boolean;
+  embed?: boolean | EmbedOptions;
 };
 
 /**

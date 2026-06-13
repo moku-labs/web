@@ -17,6 +17,18 @@ function seedImage(contentDir: string, slug: string, file: string, data: string)
   writeFileSync(path.join(contentDir, slug, "images", file), data);
 }
 
+/** Seed `<contentDir>/<slug>/<dir>/<file>` (any co-located asset dir) with `data`. */
+function seedAsset(
+  contentDir: string,
+  slug: string,
+  dir: string,
+  file: string,
+  data: string
+): void {
+  mkdirSync(path.join(contentDir, slug, dir), { recursive: true });
+  writeFileSync(path.join(contentDir, slug, dir, file), data);
+}
+
 describe("build/phases/content-images", () => {
   let tmp: string;
   beforeEach(() => {
@@ -59,7 +71,43 @@ describe("build/phases/content-images", () => {
     ).toBe("DEEP");
   });
 
-  it("skips article directories without an images/ subdir", async () => {
+  it("copies any co-located asset dir, not just images/ (e.g. a pre-built game/ embed bundle)", async () => {
+    const contentDir = path.join(tmp, "content");
+    seedImage(contentDir, "screw-master", "cover.webp", "IMG");
+    seedAsset(contentDir, "screw-master", "game", "index.html", "<html>GAME</html>");
+    seedAsset(contentDir, "screw-master", "game", "bundle.js", "JS");
+    const outDir = path.join(tmp, "dist");
+    const ctx = makeCtx({ config: { outDir, images: true }, requireMap: deps(contentDir) });
+
+    const copied = await copyContentImages(ctx);
+
+    expect(copied).toBe(1); // one article, multiple asset dirs → counted once
+    expect(readFileSync(path.join(outDir, "screw-master", "images", "cover.webp"), "utf8")).toBe(
+      "IMG"
+    );
+    expect(readFileSync(path.join(outDir, "screw-master", "game", "index.html"), "utf8")).toBe(
+      "<html>GAME</html>"
+    );
+    expect(readFileSync(path.join(outDir, "screw-master", "game", "bundle.js"), "utf8")).toBe("JS");
+  });
+
+  it("skips dot- and underscore-prefixed asset dirs (treated as private)", async () => {
+    const contentDir = path.join(tmp, "content");
+    seedAsset(contentDir, "post", "game", "index.html", "PUBLIC");
+    seedAsset(contentDir, "post", "_drafts", "secret.txt", "PRIVATE");
+    seedAsset(contentDir, "post", ".cache", "junk", "JUNK");
+    const outDir = path.join(tmp, "dist");
+    const ctx = makeCtx({ config: { outDir, images: true }, requireMap: deps(contentDir) });
+
+    const copied = await copyContentImages(ctx);
+
+    expect(copied).toBe(1);
+    expect(existsSync(path.join(outDir, "post", "game", "index.html"))).toBe(true);
+    expect(existsSync(path.join(outDir, "post", "_drafts"))).toBe(false);
+    expect(existsSync(path.join(outDir, "post", ".cache"))).toBe(false);
+  });
+
+  it("skips article directories without any asset subdir", async () => {
     const contentDir = path.join(tmp, "content");
     mkdirSync(path.join(contentDir, "no-images"), { recursive: true });
     writeFileSync(path.join(contentDir, "no-images", "en.md"), "# hi");

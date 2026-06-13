@@ -41,7 +41,11 @@ function activateEmbed(figure: HTMLElement): void {
 
 /**
  * Shared click handler (module-level so mount/unmount detach the same
- * reference): a click on the facade's button activates the embed.
+ * reference): any click on the not-yet-active facade activates the embed. It
+ * fires on the whole facade — not a specific button class — so a consumer's
+ * custom facade markup (see content `embed.facade`) works without re-wiring;
+ * the default facade's `<button>` keeps it keyboard-accessible. Once active
+ * (`data-embed-active`), clicks fall through to the live iframe.
  *
  * @param event - The click event from the facade figure.
  * @example
@@ -50,10 +54,10 @@ function activateEmbed(figure: HTMLElement): void {
  * ```
  */
 function onFacadeClick(event: Event): void {
-  const button = (event.target as Element).closest("button.lazy-embed-button");
-  if (!button) return;
   const figure = event.currentTarget;
-  if (figure instanceof HTMLElement) activateEmbed(figure);
+  if (!(figure instanceof HTMLElement)) return;
+  if (figure.dataset.embedActive !== undefined) return; // already activated
+  activateEmbed(figure);
 }
 
 /**

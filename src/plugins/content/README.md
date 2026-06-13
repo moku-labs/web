@@ -76,7 +76,11 @@ Per-source options live on the provider, not here. The Node `fileSystemContent(o
 Opt-in rewriting of `::embed` leaf directives into **static click-to-activate facades** — the article never loads the embedded document (no request, no third-party JS, no scroll-jacking) until the reader clicks. The build emits only a `<figure class="lazy-embed">` carrying the target in data attributes plus an activation `<button>`; the companion **`lazyEmbed` SPA island** (exported from both entries, register it in `pluginConfigs.spa.components`) swaps the facade for the real `<iframe loading="lazy">` on click.
 
 ```md
+<!-- External URL -->
 ::embed{src="https://game.example.com/" title="My Game"}
+
+<!-- Co-located pre-built bundle, with a reserved portrait box -->
+::embed{src="./game/index.html" title="My Game" width="400" height="711"}
 ```
 
 ```ts
@@ -89,9 +93,39 @@ createApp({ pluginConfigs: { spa: { components: [lazyEmbed] } } });
 ```
 
 - **`trustedContent: true` is required.** The facade is raw HTML the sanitize pass would strip — and embedding third-party iframes is never safe for untrusted Markdown. `fileSystemContent` rejects the combination at construction.
-- `src` and `title` are both **required**; a missing attribute fails the build. `src` must be an http(s) URL or a root-relative path — `javascript:`/`data:`/scheme-relative URLs fail the build.
-- Facade markup: `<figure class="lazy-embed" data-component="lazy-embed" data-embed-src="…" data-embed-title="…"><button type="button" class="lazy-embed-button"><span class="lazy-embed-title">…</span></button></figure>`. On activation the island injects `<iframe class="lazy-embed-frame" loading="lazy" allowfullscreen>` and sets `data-embed-active` on the figure. All visual chrome (`.lazy-embed*`, the activated state) is **consumer CSS** — the framework ships none.
-- Attribute values are HTML-escaped; the iframe is granted `fullscreen; autoplay; gamepad`.
+- `src` and `title` are both **required**; a missing attribute fails the build. `src` may be:
+  - an **http(s) URL** (`https://…`),
+  - a **root-relative path** (`/games/x/`), or
+  - a **co-located relative path** (`./game/index.html`, `../shared/game/`, `game/index.html`) pointing at a **pre-built** static bundle shipped next to the article — drop it at `content/<slug>/game/` exactly like the `images/` dir. The content-assets build phase copies **every** co-located subdirectory (not just `images/`; `.`/`_`-prefixed dirs are private and skipped) to `dist/<slug>/<dir>/`, and the relative `src` is resolved to the single shared `/<slug>/…` URL so it loads identically from every locale page. Nothing is bundled or transformed — the bundle ships as-is.
+  - `javascript:`/`data:`/protocol-relative (`//host`) URLs fail the build.
+- **Sizing (optional):** `width` and `height` (positive integers, **pixels**, set together) reserve the facade box at that aspect ratio via an inline `aspect-ratio` + `max-width` — so a portrait game frame holds its shape with **no layout shift** before activation. Omit both to let consumer CSS size the box.
+- Facade markup: `<figure class="lazy-embed" data-component="lazy-embed" data-embed-src="…" data-embed-title="…"[ data-embed-width="…" data-embed-height="…" style="aspect-ratio: … / …; max-width: …px;"]>…facade inner…</figure>`. On activation the island injects `<iframe class="lazy-embed-frame" loading="lazy" allowfullscreen>` and sets `data-embed-active` on the figure. All visual chrome (`.lazy-embed*`, the activated state) is **consumer CSS** — the framework ships none.
+- The `<figure>` data attributes are HTML-escaped; the iframe is granted `fullscreen; autoplay; gamepad`.
+
+### Customizing the facade (a Preact component)
+
+The framework owns the `<figure>` wrapper (island hooks + reserved-box sizing); the **inner content** is a Preact component you can replace via `embed.facade`. It is rendered to **static markup at build time** (no client JS, no hydration), receives the embed's options as props, and can read **any** extra directive attribute — so `::embed{… poster="/p.jpg" label="Play"}` flows straight into your component:
+
+```tsx
+import { createApp, EmbedFacadeButton, type EmbedFacadeProps } from "@moku-labs/web";
+
+// A richer facade: a poster thumbnail above the default button.
+function PosterFacade(props: EmbedFacadeProps) {
+  return (
+    <>
+      {props.attributes.poster ? <img class="lazy-embed-poster" src={props.attributes.poster} alt="" /> : null}
+      <EmbedFacadeButton {...props} />
+    </>
+  );
+}
+
+fileSystemContent({ contentDir: "./content", trustedContent: true, embed: { facade: PosterFacade } });
+```
+
+- `EmbedFacadeProps` = `{ src, title, width?, height?, attributes }` — `attributes` is the full raw directive bag (your custom options live there). Exported type.
+- `EmbedFacadeButton` is the **default** inner content, exported so you can compose it (wrap it, or place it alongside your own markup) instead of reimplementing.
+- The island activates on a click **anywhere** in the facade, so custom markup needs no wiring; include a focusable control (the default `<button>`) for keyboard users.
+- The facade is build-time SSR only — it is never hydrated. Keep it presentational (no event handlers, no client state); interactivity arrives with the activated iframe.
 
 ## Mermaid diagrams
 

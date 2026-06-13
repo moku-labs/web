@@ -18,7 +18,7 @@ import type { Pluggable } from "unified";
 import type { Node } from "unist";
 import { visit } from "unist-util-visit";
 import type { FileSystemContentOptions } from "../types";
-import { embedPlugin } from "./embed";
+import { embedPlugin, normalizeEmbedOptions } from "./embed";
 import { normalizeMermaidOptions, remarkMermaidDiagrams } from "./mermaid";
 
 /** Directive node shape from remark-directive (not in `@types/mdast`). */
@@ -206,7 +206,7 @@ export function defaultRemarkPlugins(config?: FileSystemContentOptions): readonl
 
   // Embed facades are opt-in and must run at the mdast stage, BEFORE the bridge.
   if (config?.embed) {
-    plugins.push(embedPlugin);
+    plugins.push([embedPlugin, normalizeEmbedOptions(config.embed)]);
   }
 
   // Mermaid is opt-in and must run at the mdast stage, BEFORE the bridge.

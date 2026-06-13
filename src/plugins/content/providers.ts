@@ -25,6 +25,9 @@ import { validateFileSystemContentOptions } from "./validate";
 /** Matches an `<img>` `src` that points at the co-located `images/` dir (relative or root-relative). */
 const RELATIVE_IMAGE_SRC = /(<img\b[^>]*?\bsrc=")(?:\.?\/)?images\//g;
 
+/** Matches the `data-embed-src` of an `::embed` facade (value captured for path resolution). */
+const EMBED_SRC_ATTR = /(\bdata-embed-src=")([^"]*)(")/g;
+
 /**
  * Build a canonical article URL for a locale + slug.
  *
@@ -54,6 +57,66 @@ function articleToUrl(locale: string, slug: string): string {
  */
 function rewriteImageUrls(html: string, slug: string): string {
   return html.replaceAll(RELATIVE_IMAGE_SRC, `$1/${slug}/images/`);
+}
+
+/**
+ * Resolve an `::embed` `src` to the URL the iframe should load. Absolute targets
+ * (`http(s)://…`, root-relative `/…`) pass through unchanged; a co-located
+ * relative path (`./game/index.html`, `../x`, `game/x`) is resolved against the
+ * article base `/<slug>/` into the single shared absolute path the content-assets
+ * build phase copies the bundle to — so it loads identically from every locale
+ * page (mirroring how co-located images resolve). Any `?query`/`#hash` is
+ * preserved verbatim.
+ *
+ * @param value - The raw `data-embed-src` value.
+ * @param slug - Article directory name.
+ * @returns The resolved embed URL.
+ * @example
+ * ```ts
+ * resolveEmbedSource("./game/index.html", "post"); // "/post/game/index.html"
+ * resolveEmbedSource("https://x.dev/", "post"); // "https://x.dev/"
+ * ```
+ */
+export function resolveEmbedSource(value: string, slug: string): string {
+  if (/^https?:\/\//i.test(value) || value.startsWith("/")) return value;
+
+  // Split the path from any ?query/#hash so the tail survives resolution verbatim.
+  const tailIndex = value.search(/[?#]/);
+  const rawPath = tailIndex === -1 ? value : value.slice(0, tailIndex);
+  const tail = tailIndex === -1 ? "" : value.slice(tailIndex);
+
+  // Resolve `.`/`..` segments of the relative path against `/<slug>/`.
+  const out: string[] = [];
+  for (const segment of `${slug}/${rawPath}`.split("/")) {
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") {
+      out.pop();
+      continue;
+    }
+    out.push(segment);
+  }
+  const trailingSlash = rawPath === "" || rawPath.endsWith("/") ? "/" : "";
+  return `/${out.join("/")}${trailingSlash}${tail}`;
+}
+
+/**
+ * Rewrite every `::embed` facade's relative `data-embed-src` to its shared
+ * absolute `/<slug>/…` path (no-op for already-absolute targets).
+ *
+ * @param html - The rendered article HTML.
+ * @param slug - Article directory name.
+ * @returns The HTML with embed `src`s resolved.
+ * @example
+ * ```ts
+ * rewriteEmbedUrls('<figure data-embed-src="./g/">', "post"); // '… data-embed-src="/post/g/"'
+ * ```
+ */
+function rewriteEmbedUrls(html: string, slug: string): string {
+  return html.replaceAll(
+    EMBED_SRC_ATTR,
+    (_match, prefix: string, value: string, suffix: string) =>
+      `${prefix}${resolveEmbedSource(value, slug)}${suffix}`
+  );
 }
 
 /**
@@ -149,7 +212,8 @@ export function fileSystemContent(options: FileSystemContentOptions): ContentPro
       // Parse frontmatter and render the Markdown body through the pipeline.
       const { frontmatter, body } = parseFrontmatter(raw, options);
       const processor = ensureProcessor(state, options);
-      const html = rewriteImageUrls(String(await processor.process(body)), slug);
+      const rendered = String(await processor.process(body));
+      const html = rewriteEmbedUrls(rewriteImageUrls(rendered, slug), slug);
 
       // Derive computed metadata and assemble the Article.
       const { readingTime, wordCount } = calculateReadingTime(body);
