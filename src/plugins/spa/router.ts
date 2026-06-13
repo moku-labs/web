@@ -223,6 +223,21 @@ export async function performNavigation(
 }
 
 /**
+ * Whether the user has asked the platform to minimise motion.
+ *
+ * @returns `true` when `(prefers-reduced-motion: reduce)` currently matches; `false` when
+ *   it does not, or when `matchMedia` is absent (guards SSR/test environments).
+ * @example
+ * const behavior: ScrollBehavior = prefersReducedMotion() ? "instant" : "smooth";
+ */
+function prefersReducedMotion(): boolean {
+  return (
+    typeof globalThis.matchMedia === "function" &&
+    globalThis.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+/**
  * Run a DOM-mutating swap, optionally wrapped in the View Transitions API when
  * enabled and supported (instant swap otherwise — never throws).
  *
@@ -247,9 +262,7 @@ export function runSwap(
   viewTransitions: boolean,
   beforeCapture?: () => void
 ): void {
-  const reduced =
-    typeof globalThis.matchMedia === "function" &&
-    globalThis.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reduced = prefersReducedMotion();
   const docWithVt = document as Document & {
     startViewTransition?: (cb: () => void) => unknown;
   };
@@ -378,7 +391,7 @@ export function attachHistoryFallback(
     if (url.pathname === location.pathname && url.hash) return;
     event.preventDefault();
     if (pathWithSearch(url) === pathWithSearch(location)) {
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "instant" : "smooth" });
       return;
     }
     saveScrollPosition(pathWithSearch(location));
@@ -448,7 +461,7 @@ export function attachNavigationApi(
       navEvent.intercept({
         // eslint-disable-next-line jsdoc/require-jsdoc -- inline same-page scroll handler
         handler: () => {
-          window.scrollTo({ top: 0, behavior: "smooth" });
+          window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "instant" : "smooth" });
           return Promise.resolve();
         }
       });

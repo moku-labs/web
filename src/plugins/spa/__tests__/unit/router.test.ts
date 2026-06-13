@@ -22,6 +22,9 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  // Undo `vi.stubGlobal` between tests: same-page scroll now reads `matchMedia` (reduced-
+  // motion), so a leaked `matches: true` stub would otherwise flip later tests to "instant".
+  vi.unstubAllGlobals();
   sessionStorage.clear();
 });
 
@@ -158,6 +161,25 @@ describe("attachHistoryFallback (fetch error → full browser navigation)", () =
 
     expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
     expect(fetchSpy).not.toHaveBeenCalled();
+    dispose();
+  });
+
+  it("same-page click honours reduced-motion (scrolls INSTANT, not smooth)", () => {
+    vi.stubGlobal("matchMedia", () => ({ matches: true }));
+    Object.defineProperty(globalThis, "location", {
+      value: { origin: "http://localhost:3000", pathname: "/here", search: "" },
+      configurable: true
+    });
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    const dispose = attachHistoryFallback({ onStart() {}, onEnd() {}, onError() {} });
+
+    document.body.innerHTML = `<a id="a" href="/here">x</a>`;
+    const anchor = document.querySelector("#a") as HTMLAnchorElement;
+    Object.defineProperty(anchor, "href", { value: "http://localhost:3000/here" });
+    anchor.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "instant" });
     dispose();
   });
 
@@ -583,6 +605,22 @@ describe("Navigation API intercept handlers", () => {
     listener(event);
     await runIntercept(event);
     expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
+  });
+
+  it("same-page navigation honours reduced-motion (scrolls INSTANT, not smooth)", async () => {
+    vi.stubGlobal("matchMedia", () => ({ matches: true }));
+    Object.defineProperty(globalThis, "location", {
+      value: { origin: "http://localhost:3000", pathname: "/about", search: "" },
+      configurable: true
+    });
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    const listener = attachAndCapture({ onStart: vi.fn(), onEnd: vi.fn(), onError: vi.fn() });
+    const event = fakeNavEvent({ destination: { url: "http://localhost:3000/about" } });
+
+    listener(event);
+    await runIntercept(event);
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "instant" });
   });
 
   it("query-only change fetches the new query (not treated as same-page)", async () => {
