@@ -31,7 +31,14 @@ export { browserEnv } from "./plugins/env/providers.browser";
 // ─── content providers (compose per source; fileSystemContent is the Node markdown source) ──
 export { fileSystemContent } from "./plugins/content/providers";
 export { EmbedFacadeButton } from "./plugins/content/pipeline/embed-facade";
+export { GalleryTrack } from "./plugins/content/pipeline/gallery-default";
 export type { EmbedFacade, EmbedFacadeProps, EmbedOptions } from "./plugins/content/types";
+export type {
+  GalleryComponent,
+  GalleryOptions,
+  GalleryProps,
+  GallerySlide
+} from "./plugins/content/types";
 
 // ─── Consumer helpers: route DSL, SPA islands, SEO <head> primitives ──────────
 export { createUrls, defineRoutes, route } from "./plugins/router";

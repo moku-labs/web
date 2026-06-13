@@ -251,6 +251,77 @@ export type EmbedOptions = {
   facade?: EmbedFacade;
 };
 
+/** One resolved gallery slide handed to a {@link GalleryComponent}. */
+export type GallerySlide = {
+  /** Shared absolute image URL (`/<slug>/<dir>/<file>`), identical from every locale page. */
+  src: string;
+  /** Per-slide alt text (the directive `caption` with a ` · N` index suffix, or just `N`). */
+  alt: string;
+};
+
+/**
+ * Props handed to a `::gallery` component (the swipeable image set the framework
+ * renders to static markup at build time). The framework resolves the directive's
+ * `src` folder to the sorted, URL-rewritten {@link GallerySlide} list; `caption` is
+ * the directive's `caption` attribute; `attributes` is the full raw directive
+ * attribute bag, so a custom component can read arbitrary extra options
+ * (e.g. `::gallery{… layout="dots"}`).
+ *
+ * @example
+ * ```tsx
+ * const Gallery = ({ slides, caption }: GalleryProps) => (
+ *   <div class="gallery-track">
+ *     {slides.map(s => <img src={s.src} alt={s.alt} />)}
+ *   </div>
+ * );
+ * ```
+ */
+export type GalleryProps = {
+  /** The resolved slides, in folder order. */
+  slides: readonly GallerySlide[];
+  /** The directive's `caption` attribute (empty string when unset). */
+  caption: string;
+  /** The full raw directive attribute bag (custom options live here). */
+  attributes: Readonly<Record<string, string>>;
+};
+
+/**
+ * A consumer-supplied gallery component: a Preact function component over
+ * {@link GalleryProps}, rendered (at build time, to static markup) as the inner
+ * content — inside the framework-owned `<div data-component="gallery">` that carries
+ * the island hook. Defaults to the built-in `GalleryTrack`.
+ */
+export type GalleryComponent = FunctionComponent<GalleryProps>;
+
+/**
+ * Options for the `::gallery` feature (the `gallery` key of
+ * {@link FileSystemContentOptions}). `gallery: true` uses the default component;
+ * `gallery: { component }` swaps in a consumer Preact component.
+ *
+ * @example
+ * ```ts
+ * fileSystemContent({ contentDir: "./content", trustedContent: true, gallery: { component: MyGallery } });
+ * ```
+ */
+export type GalleryOptions = {
+  /**
+   * Consumer Preact component rendering the gallery's inner content (SSR'd to
+   * static markup at build). Receives {@link GalleryProps}. Defaults to the
+   * built-in `GalleryTrack`.
+   */
+  component?: GalleryComponent;
+};
+
+/**
+ * Resolved gallery transform inputs — {@link GalleryOptions} plus the provider's
+ * `contentDir` (needed to read the directive's `src` folder from disk). Assembled
+ * by the pipeline wiring; not part of the public config surface.
+ */
+export type GalleryTransformOptions = GalleryOptions & {
+  /** The provider's content directory (folder reads resolve against it). */
+  contentDir: string;
+};
+
 /**
  * Options for the node filesystem provider {@link ContentProvider} `fileSystemContent`.
  * These are the markdown-pipeline + source concerns that used to live on the content
@@ -299,6 +370,17 @@ export type FileSystemContentOptions = {
    * (the facade is raw HTML the sanitize pass would strip). Defaults to disabled.
    */
   embed?: boolean | EmbedOptions;
+  /**
+   * Folder galleries: rewrite `::gallery{src="./images/dir/" caption="…"}` leaf
+   * directives into a swipeable image set. The framework reads the co-located
+   * `src` folder, sorts its images, rewrites each to its shared `/<slug>/…` URL,
+   * and renders them through a consumer Preact component (pair it with a gallery
+   * SPA island for swipe/keyboard/lightbox). `true` enables with the default
+   * component; an object passes {@link GalleryOptions} (e.g. a consumer
+   * `component`). Requires `trustedContent: true` (the markup is raw HTML the
+   * sanitize pass would strip). Defaults to disabled.
+   */
+  gallery?: boolean | GalleryOptions;
 };
 
 /**

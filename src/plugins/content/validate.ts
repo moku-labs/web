@@ -25,14 +25,15 @@ export function validateContentConfig(config: Config): void {
 
 /**
  * Validates the `fileSystemContent` provider options (fail-fast at provider
- * construction). Throws when `mermaid` or `embed` is enabled without
- * `trustedContent: true`: both emit raw HTML (inline SVG / the embed facade),
- * which the sanitize pass (the untrusted-content XSS boundary) would strip — so
- * the combination can never work. Errors use the `[web]` prefix.
+ * construction). Throws when `mermaid`, `embed`, or `gallery` is enabled without
+ * `trustedContent: true`: each emits raw HTML (inline SVG / the embed facade /
+ * the gallery markup), which the sanitize pass (the untrusted-content XSS
+ * boundary) would strip — so the combination can never work. Errors use the
+ * `[web]` prefix.
  *
  * @param options - The provider options to validate.
- * @throws {Error} If `mermaid` or `embed` is enabled while `trustedContent` is
- * not `true`.
+ * @throws {Error} If `mermaid`, `embed`, or `gallery` is enabled while
+ * `trustedContent` is not `true`.
  * @example
  * ```ts
  * validateFileSystemContentOptions({ contentDir: "./content", trustedContent: true, mermaid: true });
@@ -53,6 +54,14 @@ export function validateFileSystemContentOptions(options: FileSystemContentOptio
       "[web] content: `embed` requires `trustedContent: true`.\n" +
         "  Embed directives render to a raw-HTML facade, which the sanitize pass would strip\n" +
         "  (and embedding third-party iframes is never safe for untrusted Markdown).\n" +
+        "  Set trustedContent: true ONLY for fully author-controlled Markdown."
+    );
+  }
+  const galleryEnabled = Boolean(options.gallery);
+  if (galleryEnabled && options.trustedContent !== true) {
+    throw new Error(
+      "[web] content: `gallery` requires `trustedContent: true`.\n" +
+        "  Gallery directives render to raw-HTML markup, which the sanitize pass would strip.\n" +
         "  Set trustedContent: true ONLY for fully author-controlled Markdown."
     );
   }
