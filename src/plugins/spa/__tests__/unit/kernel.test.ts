@@ -408,6 +408,42 @@ describe("kernel.processNav — client DATA path (data plugin composed)", () => 
     expect(fetchSpy).not.toHaveBeenCalled(); // DATA path, not HTML-over-fetch
   });
 
+  it("announces the nav (spa:navigate) BEFORE awaiting the data fetch — feedback during the load", async () => {
+    // A data reader that hangs until released, so we can observe the announce-vs-fetch order.
+    let releaseData: ((value: unknown) => void) | undefined;
+    const state: SpaState = createState({ global: {}, config: {} });
+    const emit = vi.fn();
+    const dataAt = vi.fn(
+      () =>
+        new Promise(resolve => {
+          releaseData = resolve;
+        })
+    );
+    const deps: SpaKernelDeps = {
+      router: makeRouter("hybrid", makeDataRoute()),
+      head: makeHead(),
+      dataAt
+    };
+    const kernel = createSpaKernel(state, {}, emit, deps);
+    kernel.init();
+    const from = state.currentUrl;
+
+    kernel.processNav("/en/hello/");
+
+    // Synchronously after the click: the nav is announced (`spa:navigate`) and the data fetch is
+    // already in flight — but it has NOT resolved, so no swap (`spa:navigated`) yet. That ordering
+    // is the fix: the DATA path gives feedback DURING the network load, not only after it.
+    expect(dataAt).toHaveBeenCalledWith("/en/hello/");
+    expect(emit).toHaveBeenCalledWith("spa:navigate", { from, to: "/en/hello/" });
+    expect(emit).not.toHaveBeenCalledWith("spa:navigated", expect.anything());
+
+    // Release the data → the nav completes.
+    releaseData?.({ title: "T" });
+    await vi.waitFor(() =>
+      expect(emit).toHaveBeenCalledWith("spa:navigated", { url: "/en/hello/" })
+    );
+  });
+
   it("DATA path resolves document.title through head.composeTitle (titleTemplate applied)", async () => {
     // The raw route title must NOT land in document.title — composeTitle owns the final value
     // (template applied; a route-pinned title element wins), matching the SSG <title> output.
