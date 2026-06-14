@@ -205,8 +205,13 @@ export function createSpaKernel(
     progress?.done();
   };
 
+  // `navigate` announces the nav (handleStart) ONCE, up front, before either path runs its
+  // fetch — so the DATA path shows progress during its JSON load, not only after it. The HTML
+  // fallback goes through `performNavigation`, which also calls `onStart`; the kernel passes a
+  // no-op here so the same navigation is never announced twice.
   const handlers: RouterHandlers = {
-    onStart: handleStart,
+    // eslint-disable-next-line jsdoc/require-jsdoc -- nav-start is done once by navigate()
+    onStart: () => {},
     onEnd: handleEnd,
     onError: handleError
   };
@@ -297,9 +302,9 @@ export function createSpaKernel(
     // resolveDataRender awaited the data fetch — bail before any side effect.
     if (signal?.aborted) return;
 
-    // Begin the navigation, then lazy-load the Preact render layer on demand.
+    // The nav was already announced by `navigate` (before the data fetch); here just lazy-load
+    // the Preact render layer on demand.
     const { route, vnode, routeContext, region } = resolvedRender;
-    handleStart(pathname);
     const { renderVNode } = await import("./render");
 
     // Re-check after the async import: the abort can also land while it loads.
@@ -356,9 +361,8 @@ export function createSpaKernel(
       await commitDataRender(pathname, resolvedRender, signal);
       return true;
     } catch {
-      // commitDataRender may have started the progress bar (handleStart) before throwing;
-      // clear it so the HTML-over-fetch fallback starts from a clean state.
-      progress?.done();
+      // The DATA path threw mid-flight → fall back to HTML-over-fetch. The progress bar that
+      // `navigate` already started stays up and is cleared by the fallback's handleEnd/onError.
       return false;
     }
   };
@@ -386,6 +390,11 @@ export function createSpaKernel(
     // Record the scroll intent for this navigation's swap (read by `applyPendingScroll`,
     // run just before the snapshot). Forward navs scroll to top; traverse keeps its scroll.
     pendingScrollToTop = scrollToTop;
+    // Announce the nav (progress bar + onNavStart + `spa:navigate`) NOW, before either path
+    // runs its fetch. The DATA path awaits the persisted JSON inside `resolveDataRender`; doing
+    // this here — not in `commitDataRender`, which runs AFTER that fetch — means the user sees
+    // feedback during the network load instead of a dead pause. Mirrors the HTML path's onStart.
+    handleStart(pathname);
     if (deps.router.mode() !== "ssg" && (await tryDataRender(pathname, signal))) return;
     // Superseded while the DATA path resolved — never start the HTML fallback.
     if (signal?.aborted) return;
