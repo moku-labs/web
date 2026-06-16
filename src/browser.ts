@@ -19,7 +19,7 @@
  * @see src/index.ts — the full (Node-capable) entry.
  */
 import { coreConfig, createCore } from "./config";
-import { browserEnv } from "./plugins/env/providers.browser";
+import { browserEnv } from "@moku-labs/common/browser";
 import { headPlugin } from "./plugins/head";
 import { i18nPlugin } from "./plugins/i18n";
 import { routerPlugin } from "./plugins/router";
@@ -39,11 +39,10 @@ export { dataPlugin } from "./plugins/data";
 // for `ctx.require(contentPlugin)` in build-only loaders; on the client those loaders
 // never run, so no provider is composed and no node code reaches the bundle.
 export { contentPlugin } from "./plugins/content";
-export { envPlugin } from "./plugins/env";
-export { logPlugin } from "./plugins/log";
+export { envPlugin, logPlugin } from "@moku-labs/common/browser";
 
 // ─── env provider (browser-only; also the pre-wired default below) ────────────
-export { browserEnv } from "./plugins/env/providers.browser";
+export { browserEnv } from "@moku-labs/common/browser";
 
 // ─── Consumer helpers: route DSL, SPA islands, SEO <head> primitives ──────────
 export { createUrls, defineRoutes, route } from "./plugins/router";
@@ -62,9 +61,9 @@ export {
 // ─── Plugin type namespaces (node-only Build/Deploy omitted) ──────────────────
 export * as Content from "./plugins/content/types";
 export * as Data from "./plugins/data/types";
-export * as Env from "./plugins/env/types";
+export type { Env } from "@moku-labs/common/browser";
 export * as Head from "./plugins/head/types";
-export * as Log from "./plugins/log/types";
+export type { Log } from "@moku-labs/common/browser";
 export * as Router from "./plugins/router/types";
 export * as Spa from "./plugins/spa/types";
 

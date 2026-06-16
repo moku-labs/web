@@ -1,6 +1,6 @@
+import { logPlugin } from "@moku-labs/common";
 import { createCoreConfig } from "@moku-labs/core";
 import { describe, expectTypeOf, it } from "vitest";
-import { logPlugin } from "../../../log";
 import { sitePlugin } from "../../../site";
 import { deployPlugin } from "../../index";
 import type { Api, DeployResult } from "../../types";
