@@ -7,13 +7,13 @@
  * design (the only module-scope state is these runtime handles — never kernel data).
  */
 
-import type { LogApi } from "../log/types";
+import type { Log } from "@moku-labs/common";
 import type { SpaContext } from "./types";
 
 /** Router/instance teardown captured during onStart (undefined when stopped). */
 let teardown: (() => void) | undefined;
 /** Captured log ref — onStop has no `ctx.log` (spec/08 §4). */
-let logRef: LogApi | undefined;
+let logRef: Log.LogApi | undefined;
 
 /**
  * Capture the teardown + log handles during `onStart` (no-op without a DOM —

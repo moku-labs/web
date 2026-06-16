@@ -3,9 +3,9 @@
  * @see README.md
  */
 
+import type { Log } from "@moku-labs/common";
 import type { EmitFn as EmitFunction } from "@moku-labs/core";
 import type { Api as HeadApi } from "../head/types";
-import type { LogApi } from "../log/types";
 import type { RouterApi } from "../router/types";
 
 /** Payload map for the events `spa` emits, used to type the kernel's `emit` closure. */
@@ -72,7 +72,7 @@ export interface SpaContext {
   /** Emit a spa lifecycle event (notification-only). */
   emit: SpaEmitFunction;
   /** Structured logger (core `log` API). */
-  readonly log: LogApi;
+  readonly log: Log.LogApi;
 }
 
 /** Configuration for the SPA runtime plugin. All fields optional; defaults applied in onInit. */

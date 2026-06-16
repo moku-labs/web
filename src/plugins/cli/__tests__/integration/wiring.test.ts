@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { logPlugin } from "@moku-labs/common";
 import { createCoreConfig } from "@moku-labs/core";
 import { h } from "preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,7 +11,6 @@ import { fileSystemContent } from "../../../content/providers";
 import { deployPlugin } from "../../../deploy";
 import { headPlugin } from "../../../head";
 import { i18nPlugin } from "../../../i18n";
-import { logPlugin } from "../../../log";
 import { defineRoutes, route, routerPlugin } from "../../../router";
 import { sitePlugin } from "../../../site";
 import { cliPlugin } from "../../index";

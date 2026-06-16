@@ -25,8 +25,7 @@ import { headPlugin, i18nPlugin, routerPlugin, sitePlugin, spaPlugin } from "./p
 export * from "./plugins";
 
 // ─── env providers (compose per target: dotenv/processEnv on Node, browserEnv in the browser) ──
-export { cloudflareBindings, dotenv, processEnv } from "./plugins/env/providers";
-export { browserEnv } from "./plugins/env/providers.browser";
+export { browserEnv, cloudflareBindings, dotenv, processEnv } from "@moku-labs/common";
 
 // ─── content providers (compose per source; fileSystemContent is the Node markdown source) ──
 export { fileSystemContent } from "./plugins/content/providers";

@@ -1,9 +1,9 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { logPlugin } from "@moku-labs/common";
 import { createCoreConfig } from "@moku-labs/core";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { i18nPlugin } from "../../../i18n";
-import { logPlugin } from "../../../log";
 import { contentPlugin } from "../../index";
 import { fileSystemContent } from "../../providers";
 import type { Api, Article, ArticleCard, Frontmatter } from "../../types";

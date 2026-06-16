@@ -2,9 +2,9 @@
  * @file Framework configuration — Config + Events types, core plugin registration.
  * @see README.md
  */
+
+import { envPlugin, logPlugin } from "@moku-labs/common";
 import { createCoreConfig } from "@moku-labs/core";
-import { envPlugin } from "./plugins/env";
-import { logPlugin } from "./plugins/log";
 
 /**
  * Deployment stage. Drives content draft visibility — drafts are suppressed

@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
+
+import { logPlugin } from "@moku-labs/common";
 import { createCoreConfig } from "@moku-labs/core";
 import { h } from "preact";
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { dataPlugin } from "../../../data";
 import { headPlugin } from "../../../head";
 import { i18nPlugin } from "../../../i18n";
-import { logPlugin } from "../../../log";
 import { defineRoutes, route, routerPlugin } from "../../../router";
 import { sitePlugin } from "../../../site";
 import { spaPlugin } from "../../index";
