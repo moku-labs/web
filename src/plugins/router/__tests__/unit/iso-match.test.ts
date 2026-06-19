@@ -5,7 +5,8 @@ import {
   bySpecificity,
   compileClientMatcher,
   dynamicSegmentCount,
-  extractGroups
+  extractGroups,
+  isClientOnlyRoute
 } from "../../iso-match";
 import type { CompileInput } from "../../types";
 
@@ -43,6 +44,42 @@ describe("dynamicSegmentCount()", () => {
   it("static-only patterns count zero", () => {
     expect(dynamicSegmentCount("/")).toBe(0);
     expect(dynamicSegmentCount("/about/")).toBe(0);
+  });
+});
+
+/** A route shape for the isClientOnlyRoute predicate: pattern + only the `generate` handler presence. */
+const r = (pattern: string, generate?: () => unknown[]) => ({
+  pattern,
+  _handlers: generate ? { generate } : {}
+});
+
+describe("isClientOnlyRoute()", () => {
+  it("is true ONLY in spa mode for a dynamic route with no .generate()", () => {
+    expect(isClientOnlyRoute("spa", r("/b/{id}/"))).toBe(true);
+    expect(isClientOnlyRoute("spa", r("/:id/"))).toBe(true);
+  });
+
+  it("is false for a dynamic route that declares .generate() (it is pre-rendered)", () => {
+    expect(
+      isClientOnlyRoute(
+        "spa",
+        r("/b/{id}/", () => [{ id: "1" }])
+      )
+    ).toBe(false);
+  });
+
+  it("is false for a static route (it is pre-rendered)", () => {
+    expect(isClientOnlyRoute("spa", r("/"))).toBe(false);
+    expect(isClientOnlyRoute("spa", r("/about/"))).toBe(false);
+  });
+
+  it("excludes the optional {lang:?} segment — a lang-only route is not dynamic", () => {
+    expect(isClientOnlyRoute("spa", r("/{lang:?}/"))).toBe(false);
+  });
+
+  it("is false outside spa mode (hybrid/ssg pre-render every route)", () => {
+    expect(isClientOnlyRoute("hybrid", r("/b/{id}/"))).toBe(false);
+    expect(isClientOnlyRoute("ssg", r("/b/{id}/"))).toBe(false);
   });
 });
 

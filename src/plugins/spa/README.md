@@ -63,6 +63,8 @@ Every navigation entry point (Navigation API, History fallback, `navigate()`) fu
 2. **HTML-over-fetch** (the default + fallback) — fetch the page, swap `swapSelector`, head-sync from the fetched `<head>`. Any DATA-path miss / non-JSON / throw falls back here.
 3. **`location.href`** — a failed fetch falls back to a full browser navigation.
 
+**Client-only routes (spa mode).** In `mode: "spa"` a dynamic route with no `.generate()` (the [`router`](../router/README.md)'s `isClientOnlyRoute`) is **not** pre-rendered by the build — its concrete param paths are unknown at build time, so emitting a static shell would only write a file at the wrong path. The client renders it from the URL with `ctx.data = {}` (its islands fetch whatever they need), so the DATA path runs for it with **neither the `data` plugin nor a sidecar**. This also covers initial load: `boot()` client-renders the matched client-only route into the swap region, so a deep-link / refresh paints the right page (the host serves any SPA-fallback shell for the unmatched path; pre-rendered routes are hydrated from their own served HTML as before).
+
 `spa` stays `depends: [router, head]` and imports neither `data` nor its types — it captures the `data` reader at init via a structural by-name `ctx.require` (only when `ctx.has("data")`) and drives the matched route's handlers structurally.
 
 ## Configuration

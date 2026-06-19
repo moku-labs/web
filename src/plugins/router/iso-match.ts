@@ -63,6 +63,46 @@ export function dynamicSegmentCount(pattern: string): number {
 }
 
 /**
+ * Whether a route is rendered ENTIRELY on the client in `spa` mode: a dynamic route
+ * (≥1 non-lang param) that declares no build-time `.generate()` enumerator, so its
+ * concrete param paths are unknown until runtime.
+ *
+ * The build SKIPS such a route — emitting a static page for it would write one
+ * param-less shell whose path (`/b/{id}`) matches no file (a 404) and carries no
+ * param for the islands to read. Instead the SPA client-renders it from the URL on
+ * boot and on navigation. Build and client share this ONE predicate (the same way
+ * `dynamicSegmentCount`/`bySpecificity` are shared) so the two sides can never
+ * disagree about which routes are pre-rendered vs. client-only.
+ *
+ * Static routes (`/`) and dynamic routes WITH `.generate()` are pre-rendered as
+ * usual and so are NOT client-only. In `ssg`/`hybrid` mode nothing is client-only
+ * (the build pre-renders every route), so this is always `false` outside `spa`.
+ *
+ * @param mode - The global render mode (`router.mode()`).
+ * @param route - The route to test (only its `pattern` + `.generate()` presence are read).
+ * @param route.pattern - The route's URL pattern string.
+ * @param route._handlers - The route's handler bag.
+ * @param route._handlers.generate - The build-only static-paths enumerator, if any (presence only).
+ * @returns `true` when the route is client-only (spa mode, dynamic, no `.generate()`).
+ * @example
+ * ```ts
+ * isClientOnlyRoute("spa", { pattern: "/b/{id}", _handlers: {} }); // true
+ * isClientOnlyRoute("spa", { pattern: "/", _handlers: {} }); // false (static)
+ * isClientOnlyRoute("hybrid", { pattern: "/b/{id}", _handlers: {} }); // false (not spa)
+ * ```
+ */
+export function isClientOnlyRoute(
+  mode: string,
+  route: { readonly pattern: string; readonly _handlers: { readonly generate?: unknown } }
+): boolean {
+  return (
+    mode === "spa" &&
+    route._handlers.generate === undefined &&
+    dynamicSegmentCount(route.pattern) > 0
+  );
+}
+
+/**
  * Comparator that orders two routes most-specific-first (fewest dynamic segments
  * first). Equal specificity yields `0` so a stable sort preserves declaration
  * order — the exact ordering the compiled matcher table uses, guaranteeing

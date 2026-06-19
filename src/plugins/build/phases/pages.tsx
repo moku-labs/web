@@ -24,6 +24,7 @@ import type {
 } from "../../head/types";
 import { i18nPlugin } from "../../i18n";
 import { routerPlugin } from "../../router";
+import { isClientOnlyRoute } from "../../router/iso-match";
 import type {
   GenerateContext,
   HeadConfig,
@@ -201,20 +202,29 @@ function resolveEntry(byPattern: Map<string, TypedRoute>, definition: RouteDefin
  * generate context is the spec `{ locale, require, has }`, so a `.generate()` handler
  * pulls sibling APIs the spec way.
  *
+ * In `spa` mode a client-only route (dynamic, no `.generate()`) is SKIPPED entirely
+ * (`[]`) — it is rendered on the client from the URL, so emitting a static param-less
+ * shell here would only write a file at the wrong path (a 404 for any real param path)
+ * carrying no param. See {@link isClientOnlyRoute}.
+ *
  * @param definition - The route definition from the manifest.
  * @param locale - The active locale to generate param sets for.
+ * @param mode - The global render mode (`router.mode()`); gates the spa client-only skip.
  * @param ctx - Plugin context (provides `require`/`has` for the generate context).
- * @returns The param sets for this route+locale (`[{}]` when there is no `.generate()`).
+ * @returns The param sets for this route+locale (`[{}]` when there is no `.generate()`; `[]` when client-only).
  * @example
  * ```ts
- * const paramSets = await generateParamSets(def, "en", ctx);
+ * const paramSets = await generateParamSets(def, "en", "hybrid", ctx);
  * ```
  */
 async function generateParameterSets(
   definition: RouteDefinition,
   locale: string,
+  mode: string,
   ctx: Pick<PhaseContext, "require" | "has">
 ): Promise<unknown[]> {
+  // spa client-only route → no static page; the client renders it from the URL.
+  if (isClientOnlyRoute(mode, definition)) return [];
   const generateContext: GenerateContext = { locale, require: ctx.require, has: ctx.has };
   return definition._handlers.generate
     ? await definition._handlers.generate(generateContext)
@@ -237,11 +247,12 @@ async function generateParameterSets(
  * @param locales - Active locale codes from i18n.
  * @param defaultLocale - The i18n default locale (kept when locales collapse to one file).
  * @param byPattern - Pattern→compiled-`TypedRoute` map (see {@link makeEntryMap}).
+ * @param mode - The global render mode (`router.mode()`); gates the spa client-only skip.
  * @param ctx - Plugin context (provides `require`/`has` for the generate context).
  * @returns The flattened, file-deduplicated list of page instances for this route.
  * @example
  * ```ts
- * await expandRoute(def, ["en"], "en", byPattern, ctx);
+ * await expandRoute(def, ["en"], "en", byPattern, "hybrid", ctx);
  * ```
  */
 async function expandRoute(
@@ -249,6 +260,7 @@ async function expandRoute(
   locales: readonly string[],
   defaultLocale: string,
   byPattern: Map<string, TypedRoute>,
+  mode: string,
   ctx: Pick<PhaseContext, "require" | "has">
 ): Promise<PageInstance[]> {
   // Correlate the definition to its compiled entry (the URL/file-path source of truth).
@@ -263,7 +275,7 @@ async function expandRoute(
   const instances: PageInstance[] = [];
   const claimedFiles = new Set<string>();
   for (const locale of orderedLocales) {
-    const parameterSets = await generateParameterSets(definition, locale, ctx);
+    const parameterSets = await generateParameterSets(definition, locale, mode, ctx);
 
     // Materialize one page instance per generated param set — skipping any instance
     // whose resolved output file is already claimed (the locale fan-out collapsed).
@@ -660,11 +672,12 @@ async function prepareShell(
  * @param locales - Active locale codes from i18n.
  * @param defaultLocale - The i18n default locale (kept when a route's locales collapse).
  * @param byPattern - Pattern→compiled-`TypedRoute` map (see {@link makeEntryMap}).
+ * @param mode - The global render mode (`router.mode()`); gates the spa client-only skip.
  * @param ctx - Plugin context (provides `require`/`has` for generate contexts).
  * @returns The flattened list of page instances to render.
  * @example
  * ```ts
- * const instances = await expandAllInstances(manifest, ["en"], "en", byPattern, ctx);
+ * const instances = await expandAllInstances(manifest, ["en"], "en", byPattern, "hybrid", ctx);
  * ```
  */
 async function expandAllInstances(
@@ -672,10 +685,13 @@ async function expandAllInstances(
   locales: readonly string[],
   defaultLocale: string,
   byPattern: Map<string, TypedRoute>,
+  mode: string,
   ctx: Pick<PhaseContext, "require" | "has">
 ): Promise<PageInstance[]> {
   const lists = await Promise.all(
-    manifest.map(definition => expandRoute(definition, locales, defaultLocale, byPattern, ctx))
+    manifest.map(definition =>
+      expandRoute(definition, locales, defaultLocale, byPattern, mode, ctx)
+    )
   );
   return lists.flat();
 }
@@ -806,6 +822,7 @@ export async function renderPages(
   // Resolve dependencies + snapshot the manifest into state for later phases.
   const reuse = options?.reuse === true;
   const router = ctx.require(routerPlugin);
+  const mode = router.mode();
   const manifest = router.manifest();
   ctx.state.manifest = [...manifest];
   const locales = ctx.require(i18nPlugin).locales();
@@ -824,6 +841,7 @@ export async function renderPages(
     locales,
     shell.defaultLocale,
     byPattern,
+    mode,
     ctx
   );
   const batchSize = reuse ? INCREMENTAL_BATCH_SIZE : RENDER_BATCH_SIZE;
@@ -835,7 +853,7 @@ export async function renderPages(
   const rendered = renderedBatches.flat();
 
   // Persist client-data sidecars (hybrid/spa) + capture the root page for root-index.
-  await writeDataSidecars(ctx, rendered, router.mode());
+  await writeDataSidecars(ctx, rendered, mode);
   ctx.log.debug("build:pages", { count: rendered.length });
   return { pageCount: rendered.length, rootHtml: findRootHtml(rendered) };
 }
