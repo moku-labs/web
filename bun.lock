@@ -5,7 +5,7 @@
     "": {
       "name": "@moku-labs/web",
       "dependencies": {
-        "@moku-labs/common": "0.1.1",
+        "@moku-labs/common": "0.2.0",
         "@moku-labs/core": "0.1.4",
         "@resvg/resvg-js": "2.6.2",
         "@shikijs/rehype": "3.22.0",
@@ -226,7 +226,7 @@
 
     "@mermaid-js/parser": ["@mermaid-js/parser@1.1.1", "", { "dependencies": { "@chevrotain/types": "~11.1.1" } }, "sha512-VuHdsYMK1bT6X2JbcAaWAhugTRvRBRyuZgd+c22swUeI9g/ntaxF7CY7dYarhZovofCbUNO0G7JesfmNtjYOCw=="],
 
-    "@moku-labs/common": ["@moku-labs/common@0.1.1", "", { "dependencies": { "@moku-labs/core": "0.1.4" } }, "sha512-bvo+azNaiY9BrXbuFU1XXOmkYLSCJzWe6yI8ix6Bb5H/wHo9Vkhh2dWAF+3xTJUZvsZ+eYxsqyH81HIv0/vlMQ=="],
+    "@moku-labs/common": ["@moku-labs/common@0.2.0", "", { "dependencies": { "@moku-labs/core": "0.1.4" } }, "sha512-3CLKsQ0BwrFzk/dWWEP4ene60kx5tejjQntMdhhsgOjcpjFwUs8HY+UfvHLjQ7GXQnRyutjepqq/E9m9JLCePg=="],
 
     "@moku-labs/core": ["@moku-labs/core@0.1.4", "", {}, "sha512-RkpbkrC89BTkVWIKJaIzCDQifjcfgP9AFzMCUhStd9iu87n/xoxt/e/qpoz1vUocDqZfT0da5ibwJshGwzIBLg=="],
 
