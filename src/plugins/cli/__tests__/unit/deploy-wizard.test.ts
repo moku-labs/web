@@ -87,6 +87,31 @@ describe("cli/runDeployWizard (guided deploy)", () => {
     expect(deploy.init).toHaveBeenCalledWith({ ci: true, workflowTrigger: "auto" });
   });
 
+  it("skips the workflow prompt when a deploy workflow already exists", async () => {
+    writeWrangler(tmp);
+    writeNotFound(tmp);
+    process.env[TOKEN] = "tkn";
+    process.env[ACCOUNT] = "acct";
+    // CI is already wired — a deploy.yml is on disk, so the wizard must not re-ask.
+    mkdirSync(path.join(tmp, ".github", "workflows"), { recursive: true });
+    writeFileSync(path.join(tmp, ".github", "workflows", "deploy.yml"), "name: Deploy\n", "utf8");
+    const select = vi.fn(async () => 0);
+    const { ctx, deploy } = makeCtx({
+      state: { confirm: vi.fn(async () => true), select }
+    });
+
+    const outcome = await runDeployWizard(ctx, { guided: true });
+
+    expect(outcome.deployed).toBe(true);
+    expect(select).not.toHaveBeenCalled(); // "Set up a deploy workflow?" was never asked
+    expect(deploy.init).not.toHaveBeenCalled(); // nothing to (re)scaffold
+    // The existing workflow was reported as left unchanged.
+    const checks = (ctx.state.render as CaptureRenderer).calls.filter(c => c[0] === "check");
+    expect(checks.some(c => c[1] === true && /deploy\.yml already exists/.test(String(c[2])))).toBe(
+      true
+    );
+  });
+
   it("routes the manual/versioned choice through the tag sub-option", async () => {
     writeWrangler(tmp);
     writeNotFound(tmp);

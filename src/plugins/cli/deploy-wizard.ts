@@ -218,17 +218,33 @@ async function resolveTrigger(
   return sub === 0 ? "versioned-tag" : "dispatch";
 }
 
+/** Relative path of the GitHub Actions workflow the deploy plugin scaffolds. */
+const WORKFLOW_PATH = ".github/workflows/deploy.yml";
+
 /**
  * Offer to scaffold a GitHub Actions deploy workflow, letting the user choose how it is
- * triggered, then remind them which repo secrets to add. A no-op past a "skip" choice.
+ * triggered, then remind them which repo secrets to add. Short-circuits WITHOUT prompting
+ * when {@link WORKFLOW_PATH} already exists — CI is already wired and the scaffold is
+ * idempotent (a second setup would only no-op), so there is nothing to ask; it just
+ * confirms the file and re-shows the secrets reminder. A no-op past a "skip" choice.
  *
  * @param ctx - The cli plugin context.
+ * @param cwd - The project root (where `.github/workflows/deploy.yml` lives).
  * @returns Resolves once any chosen workflow has been scaffolded.
  * @example
- * await offerWorkflowSetup(ctx);
+ * await offerWorkflowSetup(ctx, process.cwd());
  */
-async function offerWorkflowSetup(ctx: CliPluginContext): Promise<void> {
+async function offerWorkflowSetup(ctx: CliPluginContext, cwd: string): Promise<void> {
   ctx.state.render.heading("Automate future deploys (GitHub Actions)");
+
+  // Already set up — don't re-ask. A present workflow means CI is wired; just confirm it
+  // (left unchanged, since the scaffold is idempotent) and re-show the secrets it needs.
+  if (existsSync(path.join(cwd, WORKFLOW_PATH))) {
+    ctx.state.render.check(true, `${WORKFLOW_PATH} already exists (left unchanged)`);
+    ctx.state.render.info(SECRETS_HELP);
+    return;
+  }
+
   const choice = await ctx.state.select("Set up a deploy workflow?", [
     "Auto-deploy on every push to main",
     "Manual / versioned deploy (choose trigger)",
@@ -238,11 +254,10 @@ async function offerWorkflowSetup(ctx: CliPluginContext): Promise<void> {
   if (trigger === null) return;
 
   const result = await ctx.require(deployPlugin).init({ ci: true, workflowTrigger: trigger });
-  const workflowPath = ".github/workflows/deploy.yml";
-  const wrote = result.written.includes(workflowPath);
+  const wrote = result.written.includes(WORKFLOW_PATH);
   ctx.state.render.check(
     true,
-    wrote ? `wrote ${workflowPath}` : `${workflowPath} already exists (left unchanged)`
+    wrote ? `wrote ${WORKFLOW_PATH}` : `${WORKFLOW_PATH} already exists (left unchanged)`
   );
   ctx.state.render.info(SECRETS_HELP);
 }
@@ -485,6 +500,6 @@ export async function runDeployWizard(
   //    (the deploy is broken; don't pile a CI-setup prompt on top of the fix hint).
   const outcome = await runDeployStep(ctx, options);
   const deployFailed = outcome.deployed === false && outcome.reason === "failed";
-  if (!deployFailed) await offerWorkflowSetup(ctx);
+  if (!deployFailed) await offerWorkflowSetup(ctx, cwd);
   return outcome;
 }
