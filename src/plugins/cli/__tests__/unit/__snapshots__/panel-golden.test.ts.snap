@@ -1,0 +1,53 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`panel golden output — color mode > BUILD summary box (ANSI) 1`] = `
+[
+  "╭────────────────────────────────────────────────────────────────╮",
+  "│ [32m✓[0m [1mBUILD[0m [2m·[0m [1m12[0m pages                               840ms [2m·[0m dist/ │",
+  "│                                                     [2m14 pages/s[0m │",
+  "╰────────────────────────────────────────────────────────────────╯",
+]
+`;
+
+exports[`panel golden output — color mode > deploy box (ANSI) 1`] = `
+[
+  "╭────────────────────────────────────────────────────────────────╮",
+  "│ [32m✓[0m [1mDEPLOYED[0m [2m·[0m main                                         [2m1.2s[0m │",
+  "│ [2m→[0m [36mhttps://x.pages.dev[0m [2m·[0m [2mabc123[0m                                 │",
+  "╰────────────────────────────────────────────────────────────────╯",
+]
+`;
+
+exports[`panel golden output — plain mode > BUILD summary box 1`] = `
+[
+  "+----------------------------------------------------------------+",
+  "| ✓ BUILD · 12 pages                               840ms · dist/ |",
+  "+----------------------------------------------------------------+",
+]
+`;
+
+exports[`panel golden output — plain mode > deploy box 1`] = `
+[
+  "+----------------------------------------------------------------+",
+  "| ✓ DEPLOYED · main                                         1.2s |",
+  "| → https://x.pages.dev · abc123                                 |",
+  "+----------------------------------------------------------------+",
+]
+`;
+
+exports[`panel golden output — plain mode > reload line 1`] = `
+[
+  "  ~ content/a.md",
+  "  ✓ rebuilt 3 pages · 42ms · reloaded",
+]
+`;
+
+exports[`panel golden output — plain mode > server-ready box 1`] = `
+[
+  "+----------------------------------------------------------------+",
+  "| ➜ Local    http://localhost:4173                               |",
+  "| ➜ Network  http://192.168.1.2:4173                             |",
+  "| watching   content, src                                        |",
+  "+----------------------------------------------------------------+",
+]
+`;

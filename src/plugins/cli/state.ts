@@ -11,8 +11,8 @@ import { readFileSync, realpathSync, statSync, watch } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
+import { makePalette, supportsColor, supportsTruecolor, visibleWidth } from "@moku-labs/common/cli";
 import { networkUrl } from "./network";
-import { makePalette, supportsColor, supportsTruecolor, visibleWidth } from "./render/ansi";
 import { createPanelRenderer } from "./render/panel";
 import type {
   Config,

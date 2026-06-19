@@ -8,7 +8,7 @@
  * 16-color magenta approximation otherwise, plain text off a TTY); every line is
  * written through an injectable sink so tests can capture it.
  */
-import type { CliRenderer, Command } from "../types";
+
 import {
   box,
   CLEAR_BELOW,
@@ -20,7 +20,8 @@ import {
   supportsColor,
   supportsTruecolor,
   visibleWidth
-} from "./ansi";
+} from "@moku-labs/common/cli";
+import type { CliRenderer, Command } from "../types";
 
 /**
  * Options for {@link createPanelRenderer}. All optional: the defaults wire the

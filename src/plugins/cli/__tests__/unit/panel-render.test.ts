@@ -1,6 +1,7 @@
 /* eslint-disable sonarjs/no-clear-text-protocols -- local dev/preview URLs are intentionally http. */
+
+import { box, makePalette, supportsColor, visibleWidth } from "@moku-labs/common/cli";
 import { describe, expect, it } from "vitest";
-import { box, makePalette, supportsColor, visibleWidth } from "../../render/ansi";
 import { createPanelRenderer } from "../../render/panel";
 
 /** Build a panel renderer capturing stdout + stderr lines, with color forced off. */
