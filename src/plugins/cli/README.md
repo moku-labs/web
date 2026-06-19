@@ -147,8 +147,7 @@ await app.cli.deploy({ branch: "preview/landing", yes: true });  // forces the d
 | `serve.ts` | The dev loop: `runDevServer`, `createRebuilder`, `createReloadHub`, `createDevHandler`, `injectReloadClient`, `installSignalTeardown`. |
 | `preview.ts` | The static preview server: `runPreviewServer`, the pure `resolveCleanUrl`, `safePath`, `statIsFile`, `createPreviewHandler`. |
 | `network.ts` | LAN IPv4 derivation for the server-ready panel: `networkUrl`, `lanAddress`. |
-| `render/panel.ts` | `createPanelRenderer` — the animated Velocity `CliRenderer`: lockup + version banner, phase tree + build bar, boxed BUILD/server panels, sparkline, idle pulse, `dispose()`. |
-| `render/ansi.ts` | TTY/truecolor/`NO_COLOR` color + box helpers: `supportsColor`, `supportsTruecolor`, `makePalette` (incl. brand `pink`), `fg24`, `box`, `boxGlyphs`, `visibleWidth`, `spinnerFrameAt`. |
+| `render/panel.ts` | `createPanelRenderer` — the animated Velocity `CliRenderer`: lockup + version banner, phase tree + build bar, boxed BUILD/server panels, sparkline, idle pulse, `dispose()`. Imports its ANSI/brand primitives (`makePalette`, `box`, `spinnerFrameAt`, `supportsColor`, …) from [`@moku-labs/common/cli`](https://github.com/moku-labs/common) — the shared family kit, so the look is identical across every Moku CLI. |
 
 ---
 
