@@ -78,6 +78,26 @@ function makeDataRoute(extra: Partial<RouteDefinition["_handlers"]> = {}): Route
   } as RouteDefinition;
 }
 
+/** A client-only route: dynamic (`/b/{id}/`), no `.generate()`, no `.load()`; render reads the URL param. */
+function makeClientOnlyRoute(): RouteDefinition {
+  return {
+    pattern: "/b/{id}/",
+    _meta: {},
+    _handlers: {
+      render: (ctx: { params: Record<string, string> }) =>
+        h("p", {}, `board:${ctx.params.id ?? ""}`)
+    }
+  } as RouteDefinition;
+}
+
+/** A spa router stub that matches `/b/{id}/` with the given id and exposes mode "spa". */
+function makeSpaRouter(route: RouteDefinition, id: string): RouterApi {
+  return {
+    mode: () => "spa",
+    match: () => ({ params: { id }, route })
+  } as unknown as RouterApi;
+}
+
 beforeEach(() => {
   document.body.innerHTML = `<main><section id="page">old</section></main>`;
   document.head.innerHTML = "<title>Old</title>";
@@ -544,6 +564,74 @@ describe("kernel.processNav — client DATA path (data plugin composed)", () => 
 
     kernel.processNav("/en/hello/");
     await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledWith("/en/hello/"));
+  });
+});
+
+describe("kernel — spa client-only routes (dynamic, no .generate())", () => {
+  it("NAVIGATION client-renders it from the URL with NO data plugin and NO fetch", async () => {
+    // A client-only route has no static HTML and no data sidecar — HTML-over-fetch would 404. The
+    // kernel must client-render the matched route's own component from the URL params, no data needed.
+    const state: SpaState = createState({ global: {}, config: {} });
+    const emit = vi.fn();
+    const route = makeClientOnlyRoute();
+    // NB: deps has NO `dataAt` — proves a client-only render needs neither the data plugin nor a sidecar.
+    const clientDeps: SpaKernelDeps = { router: makeSpaRouter(route, "abc"), head: makeHead() };
+    const kernel = createSpaKernel(state, {}, emit, clientDeps);
+    kernel.init();
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+
+    kernel.processNav("/b/abc/");
+    await vi.waitFor(() => expect(emit).toHaveBeenCalledWith("spa:navigated", { url: "/b/abc/" }));
+
+    expect(document.querySelector("#page")?.textContent).toBe("board:abc");
+    expect(fetchSpy).not.toHaveBeenCalled(); // neither HTML-over-fetch nor a sidecar fetch
+    expect(state.currentUrl).toBe("/b/abc/");
+  });
+
+  it("BOOT client-renders the matched client-only route (deep-link / refresh on a fallback shell)", async () => {
+    // On a deep-link the host served a fallback shell whose body is NOT this route. boot() must
+    // client-render the matched route from the URL instead of hydrating the fallback's body.
+    document.body.innerHTML = `<main><section id="page">fallback-shell-body</section></main>`;
+    const state: SpaState = createState({ global: {}, config: {} });
+    const emit = vi.fn();
+    const clientDeps: SpaKernelDeps = {
+      router: makeSpaRouter(makeClientOnlyRoute(), "xyz"),
+      head: makeHead()
+    };
+    const kernel = createSpaKernel(state, {}, emit, clientDeps);
+    kernel.init();
+
+    kernel.boot();
+    await vi.waitFor(() => expect(document.querySelector("#page")?.textContent).toBe("board:xyz"));
+
+    expect(state.started).toBe(true);
+    kernel.dispose();
+  });
+
+  it("BOOT hydrates a NON-client-only route (pre-rendered body is kept, not re-rendered)", () => {
+    // A static (or generated) route IS pre-rendered; boot must hydrate its served body, never replace it.
+    document.body.innerHTML = `<main><section id="page">pre-rendered</section></main>`;
+    const state: SpaState = createState({ global: {}, config: {} });
+    const emit = vi.fn();
+    const staticRoute = {
+      pattern: "/",
+      _meta: {},
+      _handlers: { render: () => h("p", {}, "client-rendered") }
+    } as RouteDefinition;
+    const staticDeps: SpaKernelDeps = {
+      router: {
+        mode: () => "spa",
+        match: () => ({ params: {}, route: staticRoute })
+      } as unknown as RouterApi,
+      head: makeHead()
+    };
+    const kernel = createSpaKernel(state, {}, emit, staticDeps);
+    kernel.init();
+
+    kernel.boot(); // hydrate path is synchronous — no client re-render
+    expect(document.querySelector("#page")?.textContent).toBe("pre-rendered");
+    kernel.dispose();
   });
 });
 

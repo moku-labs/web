@@ -10,6 +10,7 @@
 import { dataPlugin } from "../data";
 import { headPlugin } from "../head";
 import { routerPlugin } from "../router";
+import { isClientOnlyRoute } from "../router/iso-match";
 import type { RouteContext, RouteDefinition, RouteState } from "../router/types";
 import {
   notifyNavEnd,
@@ -247,17 +248,25 @@ export function createSpaKernel(
    * const resolved = await resolveDataRender("/en/world/");
    */
   const resolveDataRender = async (pathname: string): Promise<ResolvedDataRender | false> => {
-    // Bail unless the DATA path can run: data reader composed, route matched with a render.
-    if (!deps.dataAt) return false;
     const matchPath = pathname.split("?")[0] ?? pathname;
     const hit = deps.router.match(matchPath);
     if (!hit?.route._handlers.render) return false;
 
-    // Read the page's persisted payload — a miss degrades to the HTML-over-fetch fallback.
-    const data = await deps.dataAt(pathname); // persisted JSON (unknown) — null on miss
-    if (data === null) return false;
+    // Resolve this page's `ctx.data`:
+    //   • spa client-only route (dynamic, no `.generate()`) — the build emitted no static HTML and
+    //     no data sidecar for it (HTML-over-fetch would 404), and it has no build-time data. Render
+    //     from the URL with `{}`; its islands fetch whatever they need. Works with no `data` plugin.
+    //   • any other route — read the persisted sidecar via the `data` reader (the build wrote it from
+    //     `.load()`). No reader, or a miss, degrades to HTML-over-fetch (the route's real static HTML).
+    let data: unknown = {};
+    if (!isClientOnlyRoute(deps.router.mode(), hit.route)) {
+      if (!deps.dataAt) return false;
+      const persisted = await deps.dataAt(pathname); // persisted JSON (unknown) — null on miss
+      if (persisted === null) return false;
+      data = persisted;
+    }
 
-    // Build the render context directly from the persisted payload (no validation step):
+    // Build the render context directly from the resolved payload (no validation step):
     // the build wrote this JSON from `load()`, so it IS this page's `ctx.data`.
     const locale = hit.params.lang ?? document.documentElement.lang ?? "";
     const routeContext: RouteContext<RouteState> = {
@@ -368,6 +377,30 @@ export function createSpaKernel(
   };
 
   /**
+   * Initial-load render for a spa client-only route (dynamic, no `.generate()`): the build emitted
+   * no static HTML for it, so the host served a fallback shell. Client-render the matched route into
+   * the swap region from the URL, then mount its islands — the deep-link / refresh paint. Unlike a
+   * navigation there is nothing to unmount and no `spa:navigated` to emit. If the route cannot be
+   * resolved (defensive — a matched client-only route always resolves), fall back to mounting the
+   * served body so boot still wires up whatever islands the shell does carry.
+   *
+   * @param pathname - The current document path (pathname + search).
+   * @example
+   * await bootRender("/b/abc123");
+   */
+  const bootRender = async (pathname: string): Promise<void> => {
+    const resolvedRender = await resolveDataRender(pathname);
+    if (resolvedRender === false) {
+      scanAndMount(state, emit, resolved.swapSelector);
+      return;
+    }
+    const { vnode, region } = resolvedRender;
+    const { renderVNode } = await import("./render");
+    renderVNode(vnode, region);
+    scanAndMount(state, emit, resolved.swapSelector);
+  };
+
+  /**
    * Unified navigation: try the client DATA path first (only when the `data`
    * plugin is composed), then fall back to HTML-over-fetch (which itself falls
    * back to a full `location.href` reload). Injected into the router so every
@@ -430,10 +463,19 @@ export function createSpaKernel(
       // Stand up the progress bar and seed the current URL from the live document.
       progress = createProgressBar(resolved.progressBar);
       state.currentUrl = currentLocationUrl();
-
-      // Intercept navigation, mount the initial islands, and mark the kernel started.
       state.destroyRouter = attachRouter(handlers, navigate);
-      scanAndMount(state, emit, resolved.swapSelector);
+
+      // Initial island mount. In spa mode a client-only route (dynamic, no `.generate()`) was NOT
+      // pre-rendered — the host served a fallback shell — so client-render the matched route from the
+      // URL before mounting, so a deep-link / refresh paints the right page. Every pre-rendered route
+      // (static, or dynamic WITH `.generate()`) is hydrated directly from its own served HTML.
+      const matchPath = state.currentUrl.split("?")[0] ?? state.currentUrl;
+      const hit = deps.router.match(matchPath);
+      if (hit?.route._handlers.render && isClientOnlyRoute(deps.router.mode(), hit.route)) {
+        void bootRender(state.currentUrl);
+      } else {
+        scanAndMount(state, emit, resolved.swapSelector);
+      }
       state.started = true;
     },
     /**

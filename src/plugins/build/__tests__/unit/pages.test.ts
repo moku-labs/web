@@ -180,6 +180,70 @@ describe("build/phases/pages", () => {
     expect(result.rootHtml).toContain("root");
   });
 
+  it("spa mode SKIPS a dynamic route with no .generate() (client-only); keeps static + generated", async () => {
+    // The bug: a dynamic route without .generate() used to emit ONE param-less shell (e.g. b/index.html)
+    // whose real param path (/b/{id}) matches no file (a 404) and carries no param. In spa mode that
+    // route is client-rendered from the URL, so the build must skip it entirely.
+    const home = makeRoute("/", { render: () => h("div", {}, "root") }); // static → kept
+    const board = makeRoute("/b/{id}/", {
+      // dynamic, NO generate → client-only → skipped
+      render: rctx => h("div", {}, (rctx.params as Record<string, string>).id)
+    });
+    const tag = makeRoute("/t/{tag}/", {
+      // dynamic WITH generate → still pre-rendered
+      generate: () => [{ tag: "x" }],
+      render: rctx => h("div", {}, (rctx.params as Record<string, string>).tag)
+    });
+    const ctx = makeCtx({
+      config: { outDir: tmp },
+      requireMap: {
+        router: {
+          mode: () => "spa",
+          manifest: () => [home, board, tag],
+          entries: makeEntries([
+            { name: "home", pattern: "/" },
+            { name: "board", pattern: "/b/{id}/" },
+            { name: "tag", pattern: "/t/{tag}/" }
+          ])
+        },
+        i18n: { locales: () => ["en"], defaultLocale: () => "en" },
+        head: { render: () => "" }
+      }
+    });
+
+    const result = await renderPages(ctx);
+
+    // home (1) + tag's one generated page (1) = 2; the board route emits NO static file.
+    expect(result.pageCount).toBe(2);
+    expect(existsSync(path.join(tmp, "index.html"))).toBe(true);
+    expect(existsSync(path.join(tmp, "t", "x", "index.html"))).toBe(true);
+    expect(existsSync(path.join(tmp, "b", "index.html"))).toBe(false); // the broken shell is gone
+  });
+
+  it("hybrid mode still pre-renders a dynamic route with no .generate() (only spa skips)", async () => {
+    // Regression guard: the spa client-only skip must NOT change hybrid/ssg — they pre-render every route.
+    const board = makeRoute("/b/{id}/", {
+      render: rctx => h("div", {}, (rctx.params as Record<string, string>).id)
+    });
+    const ctx = makeCtx({
+      config: { outDir: tmp },
+      requireMap: {
+        router: {
+          mode: () => "hybrid",
+          manifest: () => [board],
+          entries: makeEntries([{ name: "board", pattern: "/b/{id}/" }])
+        },
+        i18n: { locales: () => ["en"], defaultLocale: () => "en" },
+        head: { render: () => "" }
+      }
+    });
+
+    const result = await renderPages(ctx);
+
+    expect(result.pageCount).toBe(1);
+    expect(existsSync(path.join(tmp, "b", "index.html"))).toBe(true);
+  });
+
   it("renders a lang-less route exactly once (default locale) in a multi-locale app", async () => {
     // Regression: a route with no {lang}/{lang:?} placeholder resolves to the SAME
     // output file for every locale — without dedupe both locales' writes raced on one
