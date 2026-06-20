@@ -22,7 +22,7 @@ import type {
   HeadElement,
   ResolvedRoute
 } from "../../head/types";
-import { i18nPlugin } from "../../i18n";
+import { fallbackI18n, i18nPlugin } from "../../i18n";
 import { routerPlugin } from "../../router";
 import { isClientOnlyRoute } from "../../router/iso-match";
 import type {
@@ -637,7 +637,7 @@ async function renderInstance(
  * shell `template` from disk when configured + present, and precompute the injected
  * asset tags. `template` is `null` when unset/missing (use the in-code shell).
  *
- * @param ctx - Plugin context (provides `config`, `state`, `require`).
+ * @param ctx - Plugin context (provides `config`, `state`, `require`, `has`).
  * @returns The shared shell wiring (asset tags + template-or-null + default locale) for every page.
  * @example
  * ```ts
@@ -645,7 +645,7 @@ async function renderInstance(
  * ```
  */
 async function prepareShell(
-  ctx: Pick<PhaseContext, "state" | "config" | "require">
+  ctx: Pick<PhaseContext, "state" | "config" | "require" | "has">
 ): Promise<RenderShell> {
   const templatePath = ctx.config.template;
   const template =
@@ -653,12 +653,14 @@ async function prepareShell(
       ? await readFile(templatePath, "utf8")
       : // eslint-disable-next-line unicorn/no-null -- `null` = use the in-code shell
         null;
+  // i18n is OPTIONAL — single default-locale fallback when not composed.
+  const i18n = ctx.has("i18n") ? ctx.require(i18nPlugin) : fallbackI18n;
   return {
     assets: buildAssetTags(ctx),
     assetsCss: buildAssetTags(ctx, "css"),
     assetsJs: buildAssetTags(ctx, "js"),
     template,
-    defaultLocale: ctx.require(i18nPlugin).defaultLocale()
+    defaultLocale: i18n.defaultLocale()
   };
 }
 
@@ -824,7 +826,9 @@ export async function renderPages(
   const mode = router.mode();
   const manifest = router.manifest();
   ctx.state.manifest = [...manifest];
-  const locales = ctx.require(i18nPlugin).locales();
+  // i18n is OPTIONAL — single default-locale fallback when not composed.
+  const i18n = ctx.has("i18n") ? ctx.require(i18nPlugin) : fallbackI18n;
+  const locales = i18n.locales();
   const byPattern = makeEntryMap(router);
 
   // A full render drops the stale render cache (so removed/renamed routes never linger);

@@ -2,12 +2,11 @@
  * @file content — Complex Plugin skeleton (wiring-only).
  *
  * Markdown pipeline: discover, parse frontmatter, render to sanitized HTML, and
- * expose a locale-keyed Article model. Depends on i18n. Emits `content:ready`
- * and `content:invalidated`.
+ * expose a locale-keyed Article model. i18n is OPTIONAL (single default-locale
+ * fallback when absent). Emits `content:ready` and `content:invalidated`.
  * @see README.md
  */
 import { createPlugin } from "../../config";
-import { i18nPlugin } from "../i18n";
 import { contentApi } from "./api";
 import { defaultContentConfig } from "./config";
 import { contentEvents } from "./events";
@@ -19,7 +18,8 @@ import { validateContentConfig } from "./validate";
  * (locale fallback, draft filtering, sort, caching, events) lives here; source I/O +
  * the Markdown pipeline live in a {@link ContentProvider} you compose (like `env`
  * providers). The shell imports zero node code, so `contentPlugin` is browser-safe.
- * Depends on i18n; emits `content:ready` and `content:invalidated`.
+ * i18n is OPTIONAL (single default-locale fallback when absent); emits `content:ready`
+ * and `content:invalidated`.
  *
  * @example Compose the node filesystem provider with a content dir + Shiki theme
  * ```ts
@@ -35,7 +35,6 @@ import { validateContentConfig } from "./validate";
  * ```
  */
 export const contentPlugin = createPlugin("content", {
-  depends: [i18nPlugin],
   events: contentEvents,
   config: defaultContentConfig,
   createState: createContentState,

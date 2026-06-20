@@ -23,6 +23,18 @@ describe("build/phases/content", () => {
     );
   });
 
+  it("no-ops to an empty cache when the content plugin is NOT composed (optional dep)", async () => {
+    // No `content` in requireMap → ctx.has("content") is false → no ctx.require throw.
+    const ctx = makeCtx({ requireMap: {} });
+
+    const result = await loadContent(ctx);
+
+    // Returns + caches an empty map so downstream phases (feeds/og-images) read zero articles.
+    expect(result.size).toBe(0);
+    expect(ctx.state.buildCache.get(CONTENT_CACHE_KEY)).toBeInstanceOf(Map);
+    expect(readCachedContent(ctx).size).toBe(0);
+  });
+
   it("a full load (no options) reuse-loads false and never invalidates", async () => {
     const loadAll = vi.fn(async () => new Map<string, Article[]>());
     const invalidate = vi.fn();

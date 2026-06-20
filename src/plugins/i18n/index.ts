@@ -10,17 +10,10 @@
  * @see README.md
  */
 import { createPlugin } from "../../config";
-import { createI18nApi, validateI18nConfig } from "./api";
-import type { Config } from "./types";
+import { createI18nApi, DEFAULT_I18N_CONFIG, validateI18nConfig } from "./api";
 
-/** Typed default config (R6: no inline `as`). Optional maps default to `{}` so every lookup is total. */
-const defaultConfig: Config = {
-  locales: ["en"],
-  defaultLocale: "en",
-  localeNames: {},
-  ogLocaleMap: {},
-  translations: {}
-};
+export { fallbackI18n } from "./api";
+export type { Api, Config } from "./types";
 
 /**
  * Internationalization plugin — locale registry plus a flat translation helper
@@ -42,7 +35,7 @@ const defaultConfig: Config = {
  * ```
  */
 export const i18nPlugin = createPlugin("i18n", {
-  config: defaultConfig,
+  config: DEFAULT_I18N_CONFIG,
   onInit: validateI18nConfig,
   api: createI18nApi
 });

@@ -194,7 +194,7 @@ bun add -d mermaid-isomorphic playwright && bunx playwright install chromium
 
 ## Dependencies
 
-`depends: [i18nPlugin]`. The shell PULLs the `i18n` API via `ctx.require(i18nPlugin)` for `locales()` (which locales `loadAll` iterates) and `defaultLocale()` (the fallback source for `load`). See [`../i18n/README.md`](../i18n/README.md).
+No hard `depends` (a leaf plugin). `i18n` is **OPTIONAL**: the shell pulls it via `ctx.has("i18n") ? ctx.require(i18nPlugin) : fallbackI18n` for `locales()` (which locales `loadAll` iterates) and `defaultLocale()` (the fallback source for `load`) — a single default locale (`"en"`) when the i18n plugin is absent. See [`../i18n/README.md`](../i18n/README.md).
 
 `ContentProvider` is the composition seam the shell drives:
 

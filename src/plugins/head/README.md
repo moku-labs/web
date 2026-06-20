@@ -90,7 +90,7 @@ Pure, context-free builders, each returning a serializable `HeadElement` (or `He
 
 ## Dependencies
 
-`depends: [sitePlugin, i18nPlugin, routerPlugin]` — all **PULL** via `ctx.require` at render time (resolved fresh on every `render`, never cached).
+`depends: [sitePlugin, routerPlugin]` — both **PULL** via `ctx.require` at render time (resolved fresh on every `render`, never cached). `i18n` is **OPTIONAL**: pulled via `ctx.has("i18n") ? ctx.require(i18nPlugin) : fallbackI18n`, so `render`/`siteHead` work without the i18n plugin (single default locale, no `og:locale` mapping).
 
 | Plugin | Slice consumed by `compose.ts` |
 |---|---|

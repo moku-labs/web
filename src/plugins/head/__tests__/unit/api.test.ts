@@ -42,7 +42,8 @@ function makeCtx(): ApiContext {
   const byName: Record<string, unknown> = { site, i18n, router };
   return {
     state: { defaults: DEFAULTS },
-    require: ((plugin: { name: string }) => byName[plugin.name]) as ApiContext["require"]
+    require: ((plugin: { name: string }) => byName[plugin.name]) as ApiContext["require"],
+    has: (name: string) => name in byName
   };
 }
 
@@ -60,7 +61,8 @@ function makeCtxWithImage(defaults: Partial<HeadDefaults> = {}): ApiContext {
   };
   return {
     state: { defaults: withImage },
-    require: ((plugin: { name: string }) => byName[plugin.name]) as ApiContext["require"]
+    require: ((plugin: { name: string }) => byName[plugin.name]) as ApiContext["require"],
+    has: (name: string) => name in byName
   };
 }
 

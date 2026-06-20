@@ -73,13 +73,13 @@ The surface mounted on `app.build` (and reachable via `ctx.require(buildPlugin)`
 
 ## Dependencies
 
-`depends: [site, i18n, content, router, head]` — all PULLed synchronously via `ctx.require(...)` inside phases:
+`depends: [site, router, head]` — PULLed synchronously via `ctx.require(...)` inside phases. `content` and `i18n` are **OPTIONAL** (pulled behind `ctx.has(...)` guards), so a content-less or single-locale site builds without them:
 
 | Plugin | Pulled for |
 |---|---|
 | [`site`](../site/README.md) | Site identity + `canonical()` for feed/sitemap/OG URLs |
-| [`i18n`](../i18n/README.md) | Locale set + default locale (feeds are default-locale; pages/sitemap expand per locale) |
-| [`content`](../content/README.md) | `loadAll()` article model + `contentDir()` for co-located images |
+| [`i18n`](../i18n/README.md) _(optional)_ | Locale set + default locale (single `"en"` fallback when absent) |
+| [`content`](../content/README.md) _(optional)_ | `loadAll()` article model + `contentDir()` for co-located images (zero articles when absent) |
 | [`router`](../router/README.md) | `manifest()` / `entries()` route definitions, compiled `toFile`/`toUrl`, and `mode()` |
 | [`head`](../head/README.md) | `render(route, data)` — the composed `<head>` for each page |
 

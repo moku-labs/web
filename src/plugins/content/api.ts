@@ -8,7 +8,7 @@
  * `contentPlugin` is browser-safe and is exported from `@moku-labs/web/browser`.
  */
 import type { Stage } from "../../config";
-import { i18nPlugin } from "../i18n";
+import { fallbackI18n, i18nPlugin } from "../i18n";
 import type { Api as I18nApi } from "../i18n/types";
 import type {
   Api,
@@ -34,9 +34,10 @@ const PATH_SLUG_INDEX = -2;
 
 /**
  * Minimal structural shape of the plugin context that {@link contentApi} consumes —
- * shell state, config (providers), global, emit, and the typed `require` accessor used
- * to reach the i18n plugin API. Typed loosely on purpose so api.ts stays free of the
- * kernel's full plugin-context generic machinery (and of any node import).
+ * shell state, config (providers), global, emit, the typed `require` accessor used to
+ * reach the i18n plugin API, and `has` (to detect the OPTIONAL i18n plugin). Typed
+ * loosely on purpose so api.ts stays free of the kernel's full plugin-context generic
+ * machinery (and of any node import).
  *
  * @example
  * ```ts
@@ -54,6 +55,8 @@ export type ContentPluginContext = {
   emit: <K extends keyof ContentEvents>(event: K, payload: ContentEvents[K]) => void;
   /** Resolve a depended-upon plugin's API (here the i18n plugin). */
   require: (plugin: typeof i18nPlugin) => I18nApi;
+  /** Check whether the OPTIONAL i18n plugin is composed before requiring it. */
+  has: (name: string) => boolean;
 };
 
 /**
@@ -167,7 +170,8 @@ function articleNotFound(slug: string, locale: string): Error {
 }
 
 /**
- * Plugin `api` factory: resolves i18n via `ctx.require`, merges `config.providers` into
+ * Plugin `api` factory: resolves i18n via `ctx.require` (or the single default-locale
+ * fallback when i18n is not composed), merges `config.providers` into
  * one source, assembles the kernel-free {@link ContentApiContext}, and delegates to
  * {@link createContentApi}. Referenced directly as the plugin's `api` so index.ts stays
  * wiring-only. Imports no node code (the provider owns it).
@@ -180,7 +184,8 @@ function articleNotFound(slug: string, locale: string): Error {
  * ```
  */
 export function contentApi(ctx: ContentPluginContext): Api {
-  const i18nApi = ctx.require(i18nPlugin);
+  // i18n is OPTIONAL — single default-locale fallback when not composed.
+  const i18nApi = ctx.has("i18n") ? ctx.require(i18nPlugin) : fallbackI18n;
 
   /**
    * Active locale codes from i18n.

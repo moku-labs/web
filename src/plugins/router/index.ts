@@ -3,7 +3,6 @@
  * @see README.md
  */
 import { createPlugin } from "../../config";
-import { i18nPlugin } from "../i18n";
 import { sitePlugin } from "../site";
 import { createApi, registerRoutes } from "./api";
 import { createUrls, defineRoutes, route } from "./builders/route-builder";
@@ -15,8 +14,8 @@ const defaultConfig: RouterConfig = {};
 /**
  * Router plugin — typed, named route definitions with locale-aware URL generation
  * and matching. Author routes with {@link route}, then register them the normal config
- * way via `pluginConfigs.router.routes` (compiled at init). Depends on site (base URL)
- * and i18n (locales).
+ * way via `pluginConfigs.router.routes` (compiled at init). Depends on site (base URL);
+ * i18n (locales) is OPTIONAL — falls back to a single default locale ("en") when absent.
  *
  * @example Register routes via config, then start/build
  * ```ts
@@ -29,7 +28,7 @@ const defaultConfig: RouterConfig = {};
  * ```
  */
 export const routerPlugin = createPlugin("router", {
-  depends: [sitePlugin, i18nPlugin],
+  depends: [sitePlugin],
   helpers: { route, defineRoutes, createUrls },
   config: defaultConfig,
   createState,
