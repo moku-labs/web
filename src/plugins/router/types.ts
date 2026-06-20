@@ -52,7 +52,10 @@ export interface RouteState<P extends string = string, D = unknown> {
   readonly data: D;
 }
 
-/** Render-time context handed to `.render()` / `.head()`; `data` is `.load()`'s return. */
+/**
+ * Render-time context handed to `.render()` / `.head()`; `data` is `.load()`'s return,
+ * `meta` the route's `.meta()` bag.
+ */
 export interface RouteContext<S extends RouteState> {
   /** Resolved path params. */
   readonly params: S["params"];
@@ -60,6 +63,13 @@ export interface RouteContext<S extends RouteState> {
   readonly data: S["data"];
   /** Active locale for this render. */
   readonly locale: string;
+  /**
+   * The route's `.meta()` bag (e.g. `{ activeTab: "home" }`). Available in `.render()` and
+   * `.head()`, identically at build and on the client — `meta` is compiled into the route and
+   * shipped in the client manifest, so a client-only route (dynamic, no `.generate()`, whose
+   * `.load()` data is `{}` on the client) can feed static per-route config into its render.
+   */
+  readonly meta: Record<string, unknown>;
   /**
    * Build a link to a named route by pattern substitution — the framework delivers
    * this on the context (same output as `app.router.toUrl`), so render/head build
@@ -149,21 +159,16 @@ export interface GenerateContext {
 }
 
 /**
- * Context handed to a route's `.layout()` wrapper: the render-time
- * {@link RouteContext} plus the route's `.meta()` bag, so persistent chrome (e.g. a
- * TopBar/TabNav) can read `locale` and `meta.activeTab`. Distinct from
- * `RouteContext` because the layout is the only handler that needs `meta`; keeping
- * it on its own type leaves `.render()`/`.head()` contexts unchanged.
+ * Context handed to a route's `.layout()` wrapper — identical to {@link RouteContext}
+ * (which now carries `meta` for every handler). Retained as a named alias so existing
+ * `.layout((ctx, children) => …)` typings keep compiling.
  *
  * @remarks
  * The layout is applied in the SSG render path ONLY. On client (SPA) navigation the
- * chrome is persistent and the layout is intentionally NOT re-applied — only the
- * inner swap region is replaced. See `build`'s pages phase and `spa`'s kernel.
+ * chrome is persistent and the layout is intentionally NOT re-applied — only the inner
+ * swap region is replaced. See `build`'s pages phase and `spa`'s kernel.
  */
-export interface LayoutContext<S extends RouteState> extends RouteContext<S> {
-  /** The route's `.meta()` bag (e.g. `{ activeTab: "home" }`). */
-  readonly meta: Record<string, unknown>;
-}
+export type LayoutContext<S extends RouteState> = RouteContext<S>;
 
 /** Head metadata produced by a route's `.head()` handler. */
 export interface HeadConfig {

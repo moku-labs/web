@@ -589,6 +589,31 @@ describe("kernel — spa client-only routes (dynamic, no .generate())", () => {
     expect(state.currentUrl).toBe("/b/abc/");
   });
 
+  it("passes the route's .meta() bag (+ params) to .render() on client nav", async () => {
+    // The client-only route declares `.meta({ focus: "card" })`; the client render reads it off the
+    // ctx, alongside the URL param. This closes the gap that lets a client-only route drive its render
+    // from route metadata (its `.load()` data is `{}`). The build half lives in build/pages.test.ts.
+    const route = {
+      pattern: "/b/{id}/",
+      _meta: { focus: "card" },
+      _handlers: {
+        render: (ctx: { params: Record<string, string>; meta: Record<string, unknown> }) =>
+          h("p", {}, `focus:${String(ctx.meta.focus)}:${ctx.params.id ?? ""}`)
+      }
+    } as RouteDefinition;
+    const state: SpaState = createState({ global: {}, config: {} });
+    const emit = vi.fn();
+    const clientDeps: SpaKernelDeps = { router: makeSpaRouter(route, "abc"), head: makeHead() };
+    const kernel = createSpaKernel(state, {}, emit, clientDeps);
+    kernel.init();
+    vi.stubGlobal("fetch", vi.fn());
+
+    kernel.processNav("/b/abc/");
+    await vi.waitFor(() => expect(emit).toHaveBeenCalledWith("spa:navigated", { url: "/b/abc/" }));
+
+    expect(document.querySelector("#page")?.textContent).toBe("focus:card:abc");
+  });
+
   it("BOOT client-renders the matched client-only route (deep-link / refresh on a fallback shell)", async () => {
     // On a deep-link the host served a fallback shell whose body is NOT this route. boot() must
     // client-render the matched route from the URL instead of hydrating the fallback's body.

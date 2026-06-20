@@ -15,6 +15,7 @@ import type { RouteContext, RouteDefinition, RouteState } from "../router/types"
 import {
   notifyNavEnd,
   notifyNavStart,
+  type RouteSlice,
   scanAndMount,
   unmountAll,
   unmountPageSpecific
@@ -147,6 +148,31 @@ export function createSpaKernel(
   };
 
   /**
+   * Build the matched-route slice (params/meta/locale/url) for the component context at `path`,
+   * so islands read their route's params/meta directly. An unmatched path yields an empty slice.
+   *
+   * @param path - The URL (pathname + search) to match.
+   * @returns The route slice for the matched route.
+   * @example
+   * scanAndMount(state, emit, resolved.swapSelector, componentRouteContext(pathname));
+   */
+  const componentRouteContext = (path: string): RouteSlice => {
+    const matchPath = path.split("?")[0] ?? path;
+    const hit = deps.router.match(matchPath);
+    const locale =
+      hit?.params.lang ??
+      (typeof document === "undefined" ? "" : document.documentElement.lang) ??
+      "";
+    return {
+      params: hit?.params ?? {},
+      meta: hit?.route._meta ?? {},
+      locale,
+      // eslint-disable-next-line jsdoc/require-jsdoc -- inline link builder; delegates to router.toUrl
+      url: (name, params = {}) => deps.router.toUrl(name, params)
+    };
+  };
+
+  /**
    * Process one navigation: head-sync, unmount, swap, re-mount, emit navigated.
    * When the region cannot be swapped (either document lacks the swap selector)
    * the SPA nav cannot complete — the head is already synced and the islands torn
@@ -168,8 +194,9 @@ export function createSpaKernel(
       resolved.swapSelector,
       resolved.viewTransitions,
       () => {
-        scanAndMount(state, emit, resolved.swapSelector);
-        notifyNavEnd(state);
+        const routeSlice = componentRouteContext(pathname);
+        scanAndMount(state, emit, resolved.swapSelector, routeSlice);
+        notifyNavEnd(state, routeSlice);
       },
       applyPendingScroll
     );
@@ -273,6 +300,7 @@ export function createSpaKernel(
       params: hit.params,
       data,
       locale,
+      meta: hit.route._meta,
       // eslint-disable-next-line jsdoc/require-jsdoc -- inline link builder; delegates to router.toUrl
       url: (routeName, routeParams = {}) => deps.router.toUrl(routeName, routeParams)
     };
@@ -322,6 +350,7 @@ export function createSpaKernel(
     // Sync the document head and tear down the outgoing page-specific islands.
     syncDataHead(deps.head, route, routeContext);
     unmountPageSpecific(state, emit);
+    const routeSlice = componentRouteContext(pathname);
 
     /**
      * Render the VNode into the region and re-mount its islands in one paint — the
@@ -337,8 +366,8 @@ export function createSpaKernel(
       // then lets Preact own + diff it on subsequent navs (clearing again would desync
       // Preact's retained vdom from the live DOM → a blank region on the next nav).
       renderVNode(vnode, region);
-      scanAndMount(state, emit, resolved.swapSelector);
-      notifyNavEnd(state);
+      scanAndMount(state, emit, resolved.swapSelector, routeSlice);
+      notifyNavEnd(state, routeSlice);
     };
     runSwap(renderAndMount, resolved.viewTransitions, applyPendingScroll);
 
@@ -389,15 +418,16 @@ export function createSpaKernel(
    * await bootRender("/b/abc123");
    */
   const bootRender = async (pathname: string): Promise<void> => {
+    const routeSlice = componentRouteContext(pathname);
     const resolvedRender = await resolveDataRender(pathname);
     if (resolvedRender === false) {
-      scanAndMount(state, emit, resolved.swapSelector);
+      scanAndMount(state, emit, resolved.swapSelector, routeSlice);
       return;
     }
     const { vnode, region } = resolvedRender;
     const { renderVNode } = await import("./render");
     renderVNode(vnode, region);
-    scanAndMount(state, emit, resolved.swapSelector);
+    scanAndMount(state, emit, resolved.swapSelector, routeSlice);
   };
 
   /**
@@ -474,7 +504,7 @@ export function createSpaKernel(
       if (hit?.route._handlers.render && isClientOnlyRoute(deps.router.mode(), hit.route)) {
         void bootRender(state.currentUrl);
       } else {
-        scanAndMount(state, emit, resolved.swapSelector);
+        scanAndMount(state, emit, resolved.swapSelector, componentRouteContext(state.currentUrl));
       }
       state.started = true;
     },
@@ -506,7 +536,7 @@ export function createSpaKernel(
      * kernel.scan();
      */
     scan(): void {
-      scanAndMount(state, emit, resolved.swapSelector);
+      scanAndMount(state, emit, resolved.swapSelector, componentRouteContext(state.currentUrl));
     },
     /**
      * Tear down router listeners, dispose all instances, reset boot state.

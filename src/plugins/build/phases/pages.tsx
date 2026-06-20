@@ -28,7 +28,6 @@ import { isClientOnlyRoute } from "../../router/iso-match";
 import type {
   GenerateContext,
   HeadConfig,
-  LayoutContext,
   LoadContext,
   RouteContext,
   RouteDefinition,
@@ -416,8 +415,8 @@ function composeHeadHtml(
  * layout is NOT re-applied on navigation), then serialize with
  * preact-render-to-string. Returns `""` when the route has no `.render()`.
  *
- * @param definition - The route definition (provides `.render()`/`.layout()`/`._meta`).
- * @param routeContext - The route context (params/data/locale/url) — extended with `meta` for the layout.
+ * @param definition - The route definition (provides `.render()`/`.layout()`).
+ * @param routeContext - The route context (params/data/locale/meta/url); `meta` flows to the layout.
  * @returns The SSR-rendered body HTML, or `""` when the route has no `.render()`.
  * @example
  * ```ts
@@ -427,9 +426,8 @@ function composeHeadHtml(
 function renderBody(definition: RouteDefinition, routeContext: RouteContext<RouteState>): string {
   const vnode = definition._handlers.render?.(routeContext);
   if (!vnode) return "";
-  const layoutContext: LayoutContext<RouteState> = { ...routeContext, meta: definition._meta };
   const page = definition._handlers.layout
-    ? definition._handlers.layout(layoutContext, vnode)
+    ? definition._handlers.layout(routeContext, vnode)
     : vnode;
   return renderToString(page);
 }
@@ -593,6 +591,7 @@ async function renderInstance(
     params,
     data,
     locale,
+    meta: definition._meta,
     // eslint-disable-next-line jsdoc/require-jsdoc -- inline link builder; delegates to router.toUrl
     url: (routeName, routeParams = {}) => router.toUrl(routeName, routeParams)
   };

@@ -110,12 +110,25 @@ export interface ResolvedSpaConfig {
   components: ComponentDef[];
 }
 
-/** Context handed to every component lifecycle hook. */
+/**
+ * Context handed to every component lifecycle hook — the bound element + page data,
+ * plus the matched route's `params`/`meta`/`locale` and a link builder, so an island
+ * can read its route context (e.g. a `card` route's `ctx.meta.focus` + `ctx.params.id`)
+ * directly, without the page bridging it through `data-*` attributes.
+ */
 export interface ComponentContext {
   /** The element the component instance is bound to. */
   el: Element;
   /** Page data extracted from the `script#__DATA__` payload. */
   data: PageData;
+  /** Resolved path params of the route matched for the current URL (empty if unmatched). */
+  readonly params: Record<string, string | undefined>;
+  /** The matched route's `.meta()` bag (empty if unmatched). */
+  readonly meta: Record<string, unknown>;
+  /** Active locale for the current route (empty string if unknown). */
+  readonly locale: string;
+  /** Build a link to a named route by pattern substitution (same output as `app.router.toUrl`). */
+  readonly url: (name: string, params?: Record<string, string>) => string;
 }
 
 /** Lifecycle hooks a component may implement. */
