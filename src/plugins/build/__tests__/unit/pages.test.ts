@@ -122,6 +122,33 @@ describe("build/phases/pages", () => {
     expect(html).toContain("<h1>Home</h1>");
   });
 
+  it("passes the route's .meta() bag to .render() (build path)", async () => {
+    // The route declares `.meta({ tab })`; the render reads it off the context. This is the build
+    // half of "meta reaches render" — the client half lives in spa/kernel.test.ts.
+    const home = makeRoute(
+      "/",
+      { render: rc => h("h1", {}, String((rc.meta as { tab?: string }).tab ?? "(none)")) },
+      { tab: "home" }
+    );
+    const ctx = makeCtx({
+      config: { outDir: tmp },
+      requireMap: {
+        router: {
+          mode: () => "ssg",
+          manifest: () => [home],
+          entries: makeEntries([{ name: "home", pattern: "/" }])
+        },
+        i18n: { locales: () => ["en"], defaultLocale: () => "en" },
+        head: { render: () => "<title>Home</title>" }
+      }
+    });
+
+    await renderPages(ctx);
+
+    const html = readFileSync(path.join(tmp, "index.html"), "utf8");
+    expect(html).toContain("<h1>home</h1>");
+  });
+
   it("emits charset + viewport scaffold meta before the composed head", async () => {
     const home = makeRoute("/", { render: () => h("h1", {}, "Home") });
     const ctx = makeCtx({

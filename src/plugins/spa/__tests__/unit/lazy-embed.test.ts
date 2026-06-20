@@ -14,7 +14,14 @@ const FACADE_HTML =
 function mountFacade(html: string = FACADE_HTML): HTMLElement {
   document.body.innerHTML = html;
   const figure = document.querySelector("figure") as HTMLElement;
-  lazyEmbed.hooks.onMount?.({ el: figure, data: {} });
+  lazyEmbed.hooks.onMount?.({
+    el: figure,
+    data: {},
+    params: {},
+    meta: {},
+    locale: "",
+    url: () => ""
+  });
   return figure;
 }
 
@@ -82,7 +89,14 @@ describe("spa/lazy-embed island", () => {
   it("stops activating after onDestroy unbinds the handler", () => {
     const figure = mountFacade();
 
-    lazyEmbed.hooks.onDestroy?.({ el: figure, data: {} });
+    lazyEmbed.hooks.onDestroy?.({
+      el: figure,
+      data: {},
+      params: {},
+      meta: {},
+      locale: "",
+      url: () => ""
+    });
     (figure.querySelector("button") as HTMLButtonElement).click();
 
     expect(figure.querySelector("iframe")).toBeNull();

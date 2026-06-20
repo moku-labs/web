@@ -21,6 +21,23 @@ const ERROR_PREFIX = "[web]";
 /** The set of legal hook names, frozen for O(1) membership checks. */
 const HOOK_NAME_SET: ReadonlySet<string> = new Set(COMPONENT_HOOK_NAMES);
 
+/** The matched-route slice merged onto the component context (params/meta/locale + link builder). */
+export type RouteSlice = Pick<ComponentContext, "params" | "meta" | "locale" | "url">;
+
+/**
+ * No-op link builder for the {@link EMPTY_ROUTE} slice (used when no route matched).
+ *
+ * @returns An empty string.
+ * @example
+ * const href = noUrl();
+ */
+function noUrl(): string {
+  return "";
+}
+
+/** Empty route slice — used for mounts with no matched route (headless, tests, public `scan()`). */
+const EMPTY_ROUTE: RouteSlice = { params: {}, meta: {}, locale: "", url: noUrl };
+
 /**
  * Validate a single hook entry: its key must be a known hook name and its value
  * must be a function. Throws fail-fast on the first violation.
@@ -137,16 +154,30 @@ export function runHook(
 }
 
 /**
- * Builds the component context handed to a hook (the bound element + page data).
+ * Builds the component context handed to a hook: the bound element + page data, merged
+ * with the matched route's slice (params/meta/locale/url). Defaults to {@link EMPTY_ROUTE}
+ * when no route is supplied (headless, tests, public `scan()`).
  *
  * @param element - The element the instance is bound to.
  * @param data - The current page data payload.
+ * @param route - The matched-route slice for the current URL.
  * @returns The hook context.
  * @example
- * const ctx = makeContext(element, data);
+ * const ctx = makeContext(element, data, route);
  */
-function makeContext(element: Element, data: PageData): ComponentContext {
-  return { el: element, data };
+function makeContext(
+  element: Element,
+  data: PageData,
+  route: RouteSlice = EMPTY_ROUTE
+): ComponentContext {
+  return {
+    el: element,
+    data,
+    params: route.params,
+    meta: route.meta,
+    locale: route.locale,
+    url: route.url
+  };
 }
 
 /**
@@ -160,15 +191,17 @@ function makeContext(element: Element, data: PageData): ComponentContext {
  * @param swapArea - The swap-region element, or null when none was found.
  * @param data - The current page data payload.
  * @param element - The candidate element carrying a `data-component` attribute.
+ * @param route - The matched-route slice for the current URL (params/meta/locale/url).
  * @example
- * mountElement(state, emit, swapArea, data, element);
+ * mountElement(state, emit, swapArea, data, element, route);
  */
 function mountElement(
   state: SpaState,
   emit: SpaEmitFunction,
   swapArea: Element | null,
   data: PageData,
-  element: HTMLElement
+  element: HTMLElement,
+  route: RouteSlice = EMPTY_ROUTE
 ): void {
   // Skip elements already bound to a live instance.
   if (state.instances.has(element)) return;
@@ -182,7 +215,7 @@ function mountElement(
   // Persistent when outside the swap area (or when there is no swap area).
   const isPersistent = swapArea ? !swapArea.contains(element) : true;
   const instance = createInstance(definition, element, isPersistent);
-  const ctx = makeContext(element, data);
+  const ctx = makeContext(element, data, route);
 
   // Run creation hooks, record the instance, and announce the mount.
   runHook(instance, "onCreate", ctx);
@@ -200,10 +233,16 @@ function mountElement(
  * @param state - The plugin state (registeredComponents + instances).
  * @param emit - The event emitter for spa:component-mount.
  * @param swapSelector - CSS selector bounding page-specific components.
+ * @param route - The matched-route slice for the current URL (params/meta/locale/url).
  * @example
- * scanAndMount(state, emit, "main > section");
+ * scanAndMount(state, emit, "main > section", route);
  */
-export function scanAndMount(state: SpaState, emit: SpaEmitFunction, swapSelector: string): void {
+export function scanAndMount(
+  state: SpaState,
+  emit: SpaEmitFunction,
+  swapSelector: string,
+  route: RouteSlice = EMPTY_ROUTE
+): void {
   // No-op outside a DOM (SSR / non-browser environments).
   if (typeof document === "undefined") return;
 
@@ -213,7 +252,7 @@ export function scanAndMount(state: SpaState, emit: SpaEmitFunction, swapSelecto
 
   // Mount each candidate element (the helper skips already-mounted/invalid ones).
   for (const element of document.querySelectorAll<HTMLElement>("[data-component]")) {
-    mountElement(state, emit, swapArea, data, element);
+    mountElement(state, emit, swapArea, data, element, route);
   }
 }
 
@@ -280,12 +319,13 @@ export function notifyNavStart(state: SpaState): void {
  * instances were already destroyed and re-created by the swap).
  *
  * @param state - The plugin state holding live instances.
+ * @param route - The matched-route slice for the destination URL (params/meta/locale/url).
  * @example
- * notifyNavEnd(state);
+ * notifyNavEnd(state, route);
  */
-export function notifyNavEnd(state: SpaState): void {
+export function notifyNavEnd(state: SpaState, route: RouteSlice = EMPTY_ROUTE): void {
   const data = typeof document === "undefined" ? {} : extractPageData(document);
   for (const [element, instance] of state.instances) {
-    if (instance.persistent) runHook(instance, "onNavEnd", makeContext(element, data));
+    if (instance.persistent) runHook(instance, "onNavEnd", makeContext(element, data, route));
   }
 }

@@ -87,6 +87,47 @@ describe("scanAndMount", () => {
     expect(state.instances.size).toBe(1);
   });
 
+  it("passes the matched route slice (params/meta/locale) to the component context", () => {
+    const state = freshState();
+    let seen: { params: unknown; meta: unknown; locale: string } | undefined;
+    state.registeredComponents.set("c", {
+      name: "c",
+      hooks: {
+        onMount(ctx) {
+          seen = { params: ctx.params, meta: ctx.meta, locale: ctx.locale };
+        }
+      }
+    });
+    document.body.innerHTML = `<main><section><div data-component="c"></div></section></main>`;
+
+    scanAndMount(state, vi.fn(), "main > section", {
+      params: { id: "abc" },
+      meta: { focus: "card" },
+      locale: "en",
+      url: () => "/board/abc"
+    });
+
+    expect(seen).toEqual({ params: { id: "abc" }, meta: { focus: "card" }, locale: "en" });
+  });
+
+  it("defaults to an empty route slice when none is passed (params/meta empty)", () => {
+    const state = freshState();
+    let seen: { params: unknown; meta: unknown } | undefined;
+    state.registeredComponents.set("c", {
+      name: "c",
+      hooks: {
+        onMount(ctx) {
+          seen = { params: ctx.params, meta: ctx.meta };
+        }
+      }
+    });
+    document.body.innerHTML = `<main><section><div data-component="c"></div></section></main>`;
+
+    scanAndMount(state, vi.fn(), "main > section");
+
+    expect(seen).toEqual({ params: {}, meta: {} });
+  });
+
   it("classifies elements outside the swap area as persistent", () => {
     const state = freshState();
     state.registeredComponents.set("nav", { name: "nav", hooks: {} });
