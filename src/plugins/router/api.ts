@@ -4,7 +4,7 @@
  * Closures over `ctx.state.table` exposing `match` / `toUrl` / `entries` /
  * `manifest`. Returns values/copies, never the raw `ctx.state` reference (spec/11 §2.4).
  */
-import { i18nPlugin } from "../i18n";
+import { fallbackI18n, i18nPlugin } from "../i18n";
 import { sitePlugin } from "../site";
 import { compileRoutes, validateRoutes } from "./builders/compile";
 import { matchRoute } from "./builders/match";
@@ -24,22 +24,26 @@ const ERROR_PREFIX = "[web] router";
 
 /**
  * Minimal context the router's `onInit` consumes to compile config routes: the mutable
- * state holder, the global render `mode`, and `require` (to resolve site/i18n while
- * compiling). Also the surface {@link createApi} reads (`state` + `global.mode`).
+ * state holder, the global render `mode`, `require` (to resolve site, and i18n when
+ * composed, while compiling), and `has` (to detect the OPTIONAL i18n plugin). Also the
+ * surface {@link createApi} reads (`state` + `global.mode`).
  */
 interface RouterRegisterContext {
   /** Mutable router state holding the compiled matcher table. */
   readonly state: RouterState;
   /** Global framework config — the render mode is read here (not router config). */
   readonly global: Readonly<{ mode: "ssg" | "spa" | "hybrid" }>;
-  /** Resolve a dependency plugin's API (site/i18n) while compiling. */
+  /** Resolve a dependency plugin's API (site, and i18n when composed) while compiling. */
   readonly require: RouteRequire;
+  /** Check whether an OPTIONAL plugin (i18n) is composed before requiring it. */
+  readonly has: (name: string) => boolean;
 }
 
 /**
  * Validate a route map and compile it into the matcher table on `ctx.state`,
- * resolving the global render `mode` + site base URL + i18n locales at call time.
- * Called by the router's `onInit` to compile `config.routes`. Re-calling replaces the table.
+ * resolving the global render `mode` + site base URL + i18n locales (or the single
+ * default-locale fallback when i18n is not composed) at call time. Called by the
+ * router's `onInit` to compile `config.routes`. Re-calling replaces the table.
  *
  * @param ctx - The router register context (state + global mode + require).
  * @param routes - The route map to compile (an `import * as routes` namespace works).
@@ -51,7 +55,8 @@ interface RouterRegisterContext {
  */
 export function registerRoutes(ctx: RouterRegisterContext, routes: RouteMap): void {
   validateRoutes(routes);
-  const i18n = ctx.require(i18nPlugin);
+  // i18n is OPTIONAL — fall back to the single default-locale API when it is not composed.
+  const i18n = ctx.has("i18n") ? ctx.require(i18nPlugin) : fallbackI18n;
   ctx.state.table = compileRoutes({
     routes,
     mode: ctx.global.mode,

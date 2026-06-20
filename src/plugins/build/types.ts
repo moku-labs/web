@@ -95,7 +95,7 @@ export type PhaseContext = {
   readonly global: Readonly<{ stage: Stage }>;
   /** Resolve a depended-upon plugin instance to its public API. */
   require: PhaseRequire;
-  /** Whether a plugin is registered (by name) — used to detect the OPTIONAL `data` plugin. */
+  /** Whether a plugin is registered (by name) — used to detect OPTIONAL plugins (`data`, `content`, `i18n`, `head`). */
   has: (name: string) => boolean;
   /** Emit a build event (notification-only). */
   emit: PhaseEmit;

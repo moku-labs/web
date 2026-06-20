@@ -6,7 +6,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Feed } from "feed";
 import type { Article } from "../../content/types";
-import { i18nPlugin } from "../../i18n";
+import { fallbackI18n, i18nPlugin } from "../../i18n";
 import { sitePlugin } from "../../site";
 import type { Api as SiteApi } from "../../site/types";
 import type { PhaseContext } from "../types";
@@ -148,7 +148,7 @@ async function writeFeedFiles(outDir: string, result: FeedsResult): Promise<void
  * canonical (absolute) article URL. Writes `feed.xml`, `atom.xml`, and `feed.json`
  * to `outDir`. No-op when `config.feeds` is false.
  *
- * @param ctx - Plugin context (provides `require`, `state`, `config`, `log`).
+ * @param ctx - Plugin context (provides `require`, `has`, `state`, `config`, `log`).
  * @returns The generated feed payloads + GUID set, or `null` when disabled.
  * @example
  * ```ts
@@ -156,7 +156,7 @@ async function writeFeedFiles(outDir: string, result: FeedsResult): Promise<void
  * ```
  */
 export async function generateFeeds(
-  ctx: Pick<PhaseContext, "require" | "state" | "config" | "log">
+  ctx: Pick<PhaseContext, "require" | "has" | "state" | "config" | "log">
 ): Promise<FeedsResult | null> {
   // Feeds are opt-in — a disabled build skips the phase entirely.
   if (!ctx.config.feeds) {
@@ -166,8 +166,10 @@ export async function generateFeeds(
   }
 
   // Gather the inputs: site/i18n metadata and the published default-locale articles.
+  // i18n is OPTIONAL — single default-locale fallback when not composed.
   const site = ctx.require(sitePlugin);
-  const defaultLocale = ctx.require(i18nPlugin).defaultLocale();
+  const i18n = ctx.has("i18n") ? ctx.require(i18nPlugin) : fallbackI18n;
+  const defaultLocale = i18n.defaultLocale();
   const articles = selectArticles(readCachedContent(ctx), defaultLocale);
 
   // Build the channel, then add one item per article, collecting GUIDs in order.

@@ -4,7 +4,7 @@
  */
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { i18nPlugin } from "../../i18n";
+import { fallbackI18n, i18nPlugin } from "../../i18n";
 import { routerPlugin } from "../../router";
 import type {
   GenerateContext,
@@ -230,8 +230,10 @@ export async function generateSitemap(
   }
 
   // Gather the inputs: site metadata, active locales, and the route manifest.
+  // i18n is OPTIONAL — single default-locale fallback when not composed.
   const site = ctx.require(sitePlugin);
-  const locales = ctx.require(i18nPlugin).locales();
+  const i18n = ctx.has("i18n") ? ctx.require(i18nPlugin) : fallbackI18n;
+  const locales = i18n.locales();
   const router = ctx.require(routerPlugin);
 
   // Expand every route to its canonical (absolute) URLs across all locales, deduplicating

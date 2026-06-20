@@ -74,11 +74,11 @@ Registered as plugin `helpers` and re-exported from the `@moku-labs/web` barrel.
 The render `mode` is **not** here — it is a GLOBAL framework option (`createApp({ config: { mode } })`), read by the router via `ctx.global`.
 
 ## Dependencies
-`depends: [sitePlugin, i18nPlugin]`. At compile time `registerRoutes` resolves both via `ctx.require`:
+`depends: [sitePlugin]` — site is required. `i18n` is **OPTIONAL**: `registerRoutes` resolves it via `ctx.has("i18n") ? ctx.require(i18nPlugin) : fallbackI18n`, so a site that omits the i18n plugin compiles with a single default locale (`"en"`).
 
-- `ctx.require(sitePlugin).url()` — site base URL.
-- `ctx.require(i18nPlugin).locales()` — locale alternation used to build the `withLang` matcher.
-- `ctx.require(i18nPlugin).defaultLocale()` — injected when the `bare` fallback matches.
+- `ctx.require(sitePlugin).url()` — site base URL (required).
+- `i18n.locales()` — locale alternation used to build the `withLang` matcher (`["en"]` when i18n is absent).
+- `i18n.defaultLocale()` — injected when the `bare` fallback matches (`"en"` when i18n is absent).
 
 The render `mode` is read from `ctx.global.mode`, not from a dependency.
 

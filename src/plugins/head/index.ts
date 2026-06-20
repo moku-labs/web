@@ -3,7 +3,6 @@
  * @see README.md
  */
 import { createPlugin } from "../../config";
-import { i18nPlugin } from "../i18n";
 import { routerPlugin } from "../router";
 import { sitePlugin } from "../site";
 import { createApi } from "./api";
@@ -15,7 +14,7 @@ import { createState } from "./state";
  * Head plugin — composes per-route `<head>` metadata (title template, Open Graph,
  * Twitter cards, canonical, hreflang). Use the re-exported SEO primitives
  * ({@link meta}, {@link og}, {@link twitter}, …) inside a route's `.head()`.
- * Depends on site, i18n, and router.
+ * Depends on site and router; i18n is OPTIONAL (single default-locale fallback when absent).
  *
  * @example Set global head defaults
  * ```ts
@@ -31,7 +30,7 @@ import { createState } from "./state";
  * ```
  */
 export const headPlugin = createPlugin("head", {
-  depends: [sitePlugin, i18nPlugin, routerPlugin],
+  depends: [sitePlugin, routerPlugin],
   helpers: headHelpers,
   config: defaultConfig,
   createState,

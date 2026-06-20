@@ -10,7 +10,7 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { h, type VNode } from "preact";
 import type { Article } from "../../content/types";
-import { i18nPlugin } from "../../i18n";
+import { fallbackI18n, i18nPlugin } from "../../i18n";
 import { sitePlugin } from "../../site";
 import type { OgFont, OgImageConfig, PhaseContext, RichOgInput } from "../types";
 import { readCachedContent } from "./content";
@@ -520,7 +520,7 @@ async function renderArticleOg(
  * hook (when present) builds each card; otherwise the built-in card is used. Fonts
  * are loaded ONCE for the whole pass. No-op when `config.ogImage` is false.
  *
- * @param ctx - Plugin context (provides `require`, `state`, `config`, `log`).
+ * @param ctx - Plugin context (provides `require`, `has`, `state`, `config`, `log`).
  * @param options - Optional dependency-injection seam (PNG rasterizer).
  * @returns The render/skip counts + peak concurrency, or `null` when disabled.
  * @example
@@ -529,7 +529,7 @@ async function renderArticleOg(
  * ```
  */
 export async function generateOgImages(
-  ctx: Pick<PhaseContext, "require" | "state" | "config" | "log">,
+  ctx: Pick<PhaseContext, "require" | "has" | "state" | "config" | "log">,
   options: OgImagesOptions = {}
 ): Promise<OgImagesResult | null> {
   // OG images are opt-in — a disabled build skips the phase entirely.
@@ -556,8 +556,10 @@ export async function generateOgImages(
   const renderSitePng = options.renderPng ?? makeDefaultRenderer({ fonts, render: siteCardRender });
 
   // Gather the inputs: site name, published default-locale articles, and the warmed hash cache.
+  // i18n is OPTIONAL — single default-locale fallback when not composed.
   const siteName = resolveSiteName(ctx);
-  const defaultLocale = ctx.require(i18nPlugin).defaultLocale();
+  const i18n = ctx.has("i18n") ? ctx.require(i18nPlugin) : fallbackI18n;
+  const defaultLocale = i18n.defaultLocale();
   const articles = selectArticles(readCachedContent(ctx), defaultLocale);
   const cache = ctx.state.ogImageHashCache;
   await loadDiskCache(ctx.config.outDir, cache);

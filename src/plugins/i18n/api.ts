@@ -12,6 +12,24 @@ type I18nContext = {
 };
 
 /**
+ * The framework's default i18n config — a single `"en"` locale with empty lookup
+ * maps. Used both as the i18n plugin's `config` default and as the source for
+ * {@link fallbackI18n}, so "no i18n config" and "no i18n plugin" resolve identically.
+ *
+ * @example
+ * ```ts
+ * createI18nApi({ config: DEFAULT_I18N_CONFIG }).defaultLocale(); // "en"
+ * ```
+ */
+export const DEFAULT_I18N_CONFIG: Config = {
+  locales: ["en"],
+  defaultLocale: "en",
+  localeNames: {},
+  ogLocaleMap: {},
+  translations: {}
+};
+
+/**
  * Validates the resolved i18n config (fail-fast at `createApp`). Throws when
  * `locales` is empty or when `defaultLocale` is not a member of `locales`.
  * Errors use the `[web]` prefix with an actionable remediation line.
@@ -151,3 +169,19 @@ export function createI18nApi(ctx: I18nContext): Api {
     }
   };
 }
+
+/**
+ * The i18n API a consumer sees when the i18n plugin is NOT composed: a single
+ * default locale (`"en"`) with empty maps. `locales()` is `["en"]`,
+ * `defaultLocale()` is `"en"`, and every map lookup misses (`undefined`, or the
+ * key for `t()`). Identical to composing the i18n plugin with its defaults — which
+ * is what makes i18n optional: `router`/`head`/`content`/`build` fall back to this
+ * when `ctx.has("i18n")` is false, leaving every downstream call unchanged.
+ *
+ * @example
+ * ```ts
+ * const i18n = ctx.has("i18n") ? ctx.require(i18nPlugin) : fallbackI18n;
+ * i18n.locales(); // ["en"]
+ * ```
+ */
+export const fallbackI18n: Api = createI18nApi({ config: DEFAULT_I18N_CONFIG });

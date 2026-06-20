@@ -31,7 +31,8 @@ function makeRealRouter(routes: RouteMap): RouterApi {
     require: ((plugin: { name: string }) =>
       plugin.name === "i18n" ? I18N : { url: () => "https://blog.dev" }) as Parameters<
       typeof registerRoutes
-    >[0]["require"]
+    >[0]["require"],
+    has: () => true
   };
   registerRoutes(registerContext, routes);
   return createRouterApi(registerContext);

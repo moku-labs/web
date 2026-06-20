@@ -16,6 +16,10 @@ export const CONTENT_CACHE_KEY = "content";
  * pages/feeds/og-images phases. Performs NO Markdown parsing itself — the
  * content plugin owns rendering (god-plugin invariant).
  *
+ * When the `content` plugin is NOT composed (an app/routes-only site with no
+ * Markdown), this is a no-op that caches an empty map, so the pages/feeds/og-images
+ * phases read zero articles and skip cleanly — `content` is an optional dependency.
+ *
  * On a dev incremental rebuild (`options.changed` set) it first `invalidate()`s the
  * changed Markdown so `loadAll({ reuse: true })` re-reads + re-renders ONLY those
  * articles, reusing the cached HTML for the rest. With no options it does a full load.
@@ -31,9 +35,17 @@ export const CONTENT_CACHE_KEY = "content";
  * ```
  */
 export async function loadContent(
-  ctx: Pick<PhaseContext, "require" | "state" | "log">,
+  ctx: Pick<PhaseContext, "require" | "has" | "state" | "log">,
   options?: { reuse?: boolean; changed?: readonly string[] }
 ): Promise<Map<string, Article[]>> {
+  // `content` is OPTIONAL — with no content plugin the site has no Markdown, so cache
+  // an empty map (downstream phases read it via `readCachedContent` and no-op) and return.
+  if (!ctx.has("content")) {
+    const empty = new Map<string, Article[]>();
+    ctx.state.buildCache.set(CONTENT_CACHE_KEY, empty);
+    ctx.log.debug("build:content", { skipped: true, reason: "no content plugin" });
+    return empty;
+  }
   const content = ctx.require(contentPlugin);
   // Drop only the changed Markdown so the reuse load re-reads + re-highlights just those.
   if (options?.changed && options.changed.length > 0) content.invalidate(options.changed);

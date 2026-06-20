@@ -17,7 +17,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { headPlugin } from "../../head";
-import { i18nPlugin } from "../../i18n";
+import { fallbackI18n, i18nPlugin } from "../../i18n";
 import { routerPlugin } from "../../router";
 import type { GenerateContext, RouteDefinition, TypedRoute } from "../../router/types";
 import type { PhaseContext } from "../types";
@@ -221,8 +221,10 @@ export async function generateLocaleRedirects(
   }
 
   // Gather the inputs: the router (manifest + entries) and the default locale.
+  // i18n is OPTIONAL — single default-locale fallback when not composed.
   const router = ctx.require(routerPlugin);
-  const defaultLocale = ctx.require(i18nPlugin).defaultLocale();
+  const i18n = ctx.has("i18n") ? ctx.require(i18nPlugin) : fallbackI18n;
+  const defaultLocale = i18n.defaultLocale();
 
   // Expand every correlated route into its bare→default redirect jobs.
   const jobLists = await Promise.all(

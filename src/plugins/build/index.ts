@@ -3,9 +3,7 @@
  * @see README.md
  */
 import { createPlugin } from "../../config";
-import { contentPlugin } from "../content";
 import { headPlugin } from "../head";
-import { i18nPlugin } from "../i18n";
 import { routerPlugin } from "../router";
 import { sitePlugin } from "../site";
 import { createApi, defaultConfig, validateConfig } from "./api";
@@ -15,7 +13,8 @@ import { createState } from "./state";
 /**
  * Build plugin — the static-site-generation orchestrator. Renders every route to
  * `outDir`, and optionally emits feeds, a sitemap, optimized images, and OG
- * images. Depends on site, i18n, content, router, and head; emits `build:phase`.
+ * images. Hard-depends only on site, router, and head; `content` and `i18n` are
+ * OPTIONAL (a content-less or single-locale site builds without them). Emits `build:phase`.
  *
  * @example Configure the production build
  * ```ts
@@ -34,7 +33,7 @@ import { createState } from "./state";
  * ```
  */
 export const buildPlugin = createPlugin("build", {
-  depends: [sitePlugin, i18nPlugin, contentPlugin, routerPlugin, headPlugin],
+  depends: [sitePlugin, routerPlugin, headPlugin],
   config: defaultConfig,
   createState,
   events: createEvents,

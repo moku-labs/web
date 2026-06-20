@@ -3,9 +3,10 @@
  *
  * The `render` method pulls `site`/`i18n`/`router` via `ctx.require` at call time,
  * composes the head element set via the shared `compose.ts` module, and serializes
- * it to a string. It holds no resource and caches no subscription.
+ * it to a string. It holds no resource and caches no subscription. `i18n` is
+ * OPTIONAL — a single default-locale fallback is used when it is not composed.
  */
-import { i18nPlugin } from "../i18n";
+import { fallbackI18n, i18nPlugin } from "../i18n";
 import { routerPlugin } from "../router";
 import { sitePlugin } from "../site";
 import { composeHead, composeSiteHead, composeTitle, serializeHead } from "./compose";
@@ -78,6 +79,8 @@ export type ApiContext = {
   >(
     plugin: PluginCandidate
   ) => ExtractApi<PluginCandidate>;
+  /** Check whether an OPTIONAL plugin (i18n) is composed before requiring it. */
+  has: (name: string) => boolean;
 };
 
 /**
@@ -112,7 +115,8 @@ export function createApi(ctx: ApiContext): Api {
         data,
         defaults: readDefaults(ctx.state),
         site: ctx.require(sitePlugin),
-        i18n: ctx.require(i18nPlugin),
+        // i18n is OPTIONAL — single default-locale fallback when not composed.
+        i18n: ctx.has("i18n") ? ctx.require(i18nPlugin) : fallbackI18n,
         router: ctx.require(routerPlugin)
       });
       return serializeHead(elements);
@@ -134,8 +138,9 @@ export function createApi(ctx: ApiContext): Api {
      */
     siteHead(input) {
       const site = ctx.require(sitePlugin);
-      const ogLocale =
-        input.locale === undefined ? undefined : ctx.require(i18nPlugin).ogLocale(input.locale);
+      // i18n is OPTIONAL — single default-locale fallback when not composed.
+      const i18n = ctx.has("i18n") ? ctx.require(i18nPlugin) : fallbackI18n;
+      const ogLocale = input.locale === undefined ? undefined : i18n.ogLocale(input.locale);
       const elements = composeSiteHead({
         site,
         defaults: readDefaults(ctx.state),

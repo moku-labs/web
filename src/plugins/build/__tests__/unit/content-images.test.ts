@@ -52,6 +52,16 @@ describe("build/phases/content-images", () => {
     );
   });
 
+  it("no-ops (returns 0) when the content plugin is NOT composed, even with images enabled", async () => {
+    // images enabled but no `content` in requireMap → ctx.has("content") false → no require throw.
+    const ctx = makeCtx({
+      config: { outDir: path.join(tmp, "dist"), images: true },
+      requireMap: {}
+    });
+
+    expect(await copyContentImages(ctx)).toBe(0);
+  });
+
   it("copies nested subdirectories under images/ recursively", async () => {
     const contentDir = path.join(tmp, "content");
     seedImage(contentDir, "ball-factory", "bf-1.webp", "TOP");

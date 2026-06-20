@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createI18nApi, validateI18nConfig } from "../../api";
+import { createI18nApi, fallbackI18n, validateI18nConfig } from "../../api";
 import type { Config } from "../../types";
 
 /** Build a full i18n config for exercising the API closures directly. */
@@ -106,5 +106,23 @@ describe("i18n", () => {
     expect(() =>
       validateI18nConfig({ config: makeConfig({ locales: ["en", "uk"], defaultLocale: "en" }) })
     ).not.toThrow();
+  });
+});
+
+describe("fallbackI18n (the absent-i18n default API)", () => {
+  // This is the API router/head/content/build fall back to when the i18n plugin is NOT
+  // composed. It MUST behave identically to composing i18n with its default config —
+  // single "en" locale, empty maps — so omitting i18n is transparent to consumers.
+  it("exposes a single default 'en' locale", () => {
+    expect(fallbackI18n.locales()).toEqual(["en"]);
+    expect(fallbackI18n.defaultLocale()).toBe("en");
+    expect(fallbackI18n.isLocale("en")).toBe(true);
+    expect(fallbackI18n.isLocale("uk")).toBe(false);
+  });
+
+  it("returns undefined from every (empty) lookup map and the key from t()", () => {
+    expect(fallbackI18n.localeName("en")).toBeUndefined();
+    expect(fallbackI18n.ogLocale("en")).toBeUndefined();
+    expect(fallbackI18n.t("en", "nav.home")).toBe("nav.home");
   });
 });
