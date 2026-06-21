@@ -118,7 +118,15 @@ export interface ResolvedSpaConfig {
  * - `void`/`undefined` — the render mutated the DOM itself (DOM-only islands → no Preact loaded).
  */
 // biome-ignore lint/suspicious/noConfusingVoidType: a render may legitimately return nothing (DOM-only islands)
-export type RenderResult = import("preact").VNode | Node | string | void;
+export type RenderResult = AnyVNode | Node | string | void;
+
+/**
+ * A Preact `VNode` of ANY props shape. A render returns `h(Component, props)`, i.e. a
+ * `VNode<SomeProps>`; the props generic is invariant under `exactOptionalPropertyTypes`,
+ * so the only supertype that accepts every concrete `VNode<P>` is `VNode<any>`.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- props are invariant; `any` is the only supertype of every VNode<P>
+export type AnyVNode = import("preact").VNode<any>;
 
 /**
  * Factory that builds a component's typed per-instance state (mirrors a plugin's

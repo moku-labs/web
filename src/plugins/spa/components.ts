@@ -6,8 +6,8 @@
  * @see README.md
  */
 
-import type { VNode } from "preact";
 import {
+  type AnyVNode,
   COMPONENT_HOOK_NAMES,
   type ComponentContext,
   // eslint-disable-next-line unicorn/prevent-abbreviations -- canonical public type name per spec
@@ -109,7 +109,7 @@ function commitResult(host: Element, result: RenderResult): void {
     return;
   }
   // Otherwise a Preact VNode → commit via the lazy gate (load on demand if not yet cached).
-  const vnode = result as VNode;
+  const vnode = result as AnyVNode;
   if (commitVNodeFunction) {
     commitVNodeFunction(vnode, host);
     return;
