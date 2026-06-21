@@ -45,6 +45,12 @@
         "types": "./dist/browser.d.mts",
         "default": "./dist/browser.mjs"
       }
+    },
+    "./testing": {
+      "import": {
+        "types": "./dist/testing.d.mts",
+        "default": "./dist/testing.mjs"
+      }
     }
   },
   "sideEffects": false,

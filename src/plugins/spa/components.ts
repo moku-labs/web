@@ -1,17 +1,27 @@
 /**
- * @file spa plugin — component lifecycle, mounting, and createComponent helper.
+ * @file spa plugin — component lifecycle, mounting, the plugin-mirror authoring
+ * surface (`createComponent` with a typed `{ state, render, events, api }` spec),
+ * the per-instance state + microtask-batched render scheduler, declarative
+ * delegated events, and the cross-island api registry.
  * @see README.md
  */
 
-import type { SpaEmitFunction } from "./types";
+import type { VNode } from "preact";
 import {
   COMPONENT_HOOK_NAMES,
   type ComponentContext,
   // eslint-disable-next-line unicorn/prevent-abbreviations -- canonical public type name per spec
   type ComponentDef,
+  type ComponentEventHandler,
+  type ComponentEvents,
   type ComponentHooks,
   type ComponentInstance,
+  type ComponentRouteSlice,
+  type ComponentSpec,
+  type ComponentSpecExtras,
   type PageData,
+  type RenderResult,
+  type SpaEmitFunction,
   type SpaState
 } from "./types";
 
@@ -21,8 +31,14 @@ const ERROR_PREFIX = "[web]";
 /** The set of legal hook names, frozen for O(1) membership checks. */
 const HOOK_NAME_SET: ReadonlySet<string> = new Set(COMPONENT_HOOK_NAMES);
 
+/** The spec-only keys that select the plugin-mirror form of {@link createComponent}. */
+const SPEC_KEYS: ReadonlySet<string> = new Set(["state", "render", "events", "api"]);
+
+/** Synchronous re-entrancy cap for the render scheduler (a render that calls `ctx.flush`). */
+const MAX_RENDER_DEPTH = 25;
+
 /** The matched-route slice merged onto the component context (params/meta/locale + link builder). */
-export type RouteSlice = Pick<ComponentContext, "params" | "meta" | "locale" | "url">;
+export type RouteSlice = ComponentRouteSlice;
 
 /**
  * No-op link builder for the {@link EMPTY_ROUTE} slice (used when no route matched).
@@ -39,27 +55,330 @@ function noUrl(): string {
 const EMPTY_ROUTE: RouteSlice = { params: {}, meta: {}, locale: "", url: noUrl };
 
 /**
+ * No-op placeholder for an instance's `flush` slot until the real one is bound at mount.
+ *
+ * @example
+ * const instance = { flush: noop };
+ */
+function noop(): void {}
+
+// ─── lazy Preact-render gate ──────────────────────────────────────────────────
+// The component render scheduler reaches Preact's `render` ONLY through this dynamic
+// import, so an app whose islands never return a VNode never pulls Preact's `render`
+// into its main bundle (the browser bundle-assertion gate).
+
+/** Cached promise for the lazy `./render` chunk (loaded at most once per module). */
+let renderChunk: Promise<typeof import("./render")> | undefined;
+/** The resolved VNode committer once the chunk loads (undefined until then). */
+let commitVNodeFunction: typeof import("./render").commitVNode | undefined;
+
+/**
+ * Load the lazy `./render` chunk (once) and cache its `commitVNode` for synchronous
+ * use by later renders. Awaited by a component's `mountPromise` so the test harness's
+ * `settle()` can deterministically flush a VNode render.
+ *
+ * @returns A promise that resolves once `commitVNode` is available.
+ * @example
+ * await loadRenderChunk();
+ */
+async function loadRenderChunk(): Promise<void> {
+  renderChunk ??= import("./render");
+  const module = await renderChunk;
+  commitVNodeFunction = module.commitVNode;
+}
+
+/**
+ * Commit a {@link RenderResult} into a host: `string` → `innerHTML`, `Node` →
+ * `replaceChildren`, `void`/`undefined` → no-op (the render mutated the DOM itself), and
+ * a Preact `VNode` → committed through the lazy gate (loading it on demand if needed).
+ *
+ * @param host - The island host element to render into.
+ * @param result - The value returned by the component's `render`.
+ * @example
+ * commitResult(host, h(View, { items }));
+ */
+function commitResult(host: Element, result: RenderResult): void {
+  // `void`/`undefined` → the render performed its own imperative DOM writes (DOM-only island).
+  if (result === undefined) return;
+  if (typeof result === "string") {
+    host.innerHTML = result;
+    return;
+  }
+  if (result instanceof Node) {
+    host.replaceChildren(result);
+    return;
+  }
+  // Otherwise a Preact VNode → commit via the lazy gate (load on demand if not yet cached).
+  const vnode = result as VNode;
+  if (commitVNodeFunction) {
+    commitVNodeFunction(vnode, host);
+    return;
+  }
+  loadRenderChunk()
+    .then(() => commitVNodeFunction?.(vnode, host))
+    .catch(() => {});
+}
+
+/**
+ * Run a component's `render(state, ctx)` and commit the result now. Guards against
+ * synchronous re-entrancy (a render that calls `ctx.flush`) with a depth cap.
+ *
+ * @param instance - The instance to render.
+ * @throws {Error} When the synchronous render depth exceeds {@link MAX_RENDER_DEPTH}.
+ * @example
+ * runRender(instance);
+ */
+function runRender(instance: ComponentInstance): void {
+  const render = instance.def.spec?.render;
+  if (!render) return;
+
+  if (instance.renderDepth > MAX_RENDER_DEPTH) {
+    throw new Error(
+      `${ERROR_PREFIX} component "${instance.def.name}" render re-entered ${MAX_RENDER_DEPTH}+ times\n  → a render must not synchronously trigger its own render (avoid ctx.flush() inside render)`
+    );
+  }
+
+  instance.renderDepth += 1;
+  try {
+    commitResult(instance.el, render(instance.state ?? {}, instance.ctx));
+  } finally {
+    instance.renderDepth -= 1;
+  }
+}
+
+/**
+ * Schedule a microtask-batched render for an instance (no-op when it has no `render`).
+ * Multiple `ctx.set` calls in the same tick coalesce into a single render.
+ *
+ * @param instance - The instance to schedule a render for.
+ * @example
+ * scheduleRender(instance);
+ */
+function scheduleRender(instance: ComponentInstance): void {
+  if (!instance.def.spec?.render || instance.renderScheduled) return;
+  instance.renderScheduled = true;
+  queueMicrotask(() => {
+    // A synchronous `ctx.flush()` may have already drained it — only render if still pending.
+    if (!instance.renderScheduled) return;
+    instance.renderScheduled = false;
+    runRender(instance);
+  });
+}
+
+/**
+ * Build the single per-instance {@link ComponentContext} reused by every hook, event
+ * handler, and render. Route fields (`params`/`meta`/`locale`/`url`) and `data` read
+ * through the instance so a navigation update is reflected without rebuilding the ctx;
+ * `state`/`set`/`flush`/`cleanup`/`component` are bound to the instance + plugin state.
+ *
+ * @param state - The plugin state (for the cross-island `component` resolver).
+ * @param instance - The instance the context is bound to.
+ * @returns The instance-bound context.
+ * @example
+ * instance.ctx = buildContext(state, instance);
+ */
+function buildContext(state: SpaState, instance: ComponentInstance): ComponentContext<object> {
+  return {
+    el: instance.el,
+    /**
+     * The current page data payload (live; updated across navigations).
+     *
+     * @returns The page data.
+     * @example
+     * ctx.data;
+     */
+    get data(): PageData {
+      return instance.data;
+    },
+    /**
+     * The matched route's path params (live; updated across navigations).
+     *
+     * @returns The route params.
+     * @example
+     * ctx.params.id;
+     */
+    get params(): Record<string, string | undefined> {
+      return instance.route.params;
+    },
+    /**
+     * The matched route's `.meta()` bag (live; updated across navigations).
+     *
+     * @returns The route meta.
+     * @example
+     * ctx.meta.focus;
+     */
+    get meta(): Record<string, unknown> {
+      return instance.route.meta;
+    },
+    /**
+     * The active locale for the current route (live; updated across navigations).
+     *
+     * @returns The locale code.
+     * @example
+     * ctx.locale;
+     */
+    get locale(): string {
+      return instance.route.locale;
+    },
+    /**
+     * The named-route link builder for the current route.
+     *
+     * @returns The link builder.
+     * @example
+     * ctx.url("board", { id });
+     */
+    get url(): (name: string, params?: Record<string, string>) => string {
+      return instance.route.url;
+    },
+    /**
+     * The live per-instance state (`undefined` for legacy hooks-only islands).
+     *
+     * @returns The current state.
+     * @example
+     * ctx.state.count;
+     */
+    get state(): object {
+      return instance.state as object;
+    },
+    /**
+     * Merge a patch into the per-instance state and schedule one batched render.
+     *
+     * @param patch - A partial state object, or an updater `(prev) => partial`.
+     * @example
+     * ctx.set(prev => ({ count: prev.count + 1 }));
+     */
+    set(patch: Partial<object> | ((prev: Readonly<object>) => Partial<object>)): void {
+      const previous = (instance.state ?? {}) as object;
+      const next = typeof patch === "function" ? patch(previous) : patch;
+      instance.state = Object.assign({}, previous, next);
+      scheduleRender(instance);
+    },
+    /**
+     * Force a synchronous render now (drains any pending scheduled render).
+     *
+     * @example
+     * ctx.flush();
+     */
+    flush(): void {
+      instance.flush();
+    },
+    /**
+     * Register a disposer run on destroy (subscriptions, timers, manual listeners).
+     *
+     * @param dispose - The teardown function.
+     * @example
+     * ctx.cleanup(off);
+     */
+    cleanup(dispose: () => void): void {
+      instance.cleanups.push(dispose);
+    },
+    /**
+     * Resolve another island's registered api by name (`undefined` when absent).
+     *
+     * @param name - The provider island's component name.
+     * @returns The provider's api, or `undefined`.
+     * @example
+     * ctx.component("lightbox");
+     */
+    component<T = unknown>(name: string): T | undefined {
+      return state.componentApis.get(name) as T | undefined;
+    }
+  };
+}
+
+/**
+ * Resolve the element a delegated handler should receive for an event: the host for a
+ * host-level binding (empty selector), else the nearest ancestor of `event.target`
+ * matching the selector that is still inside the host.
+ *
+ * @param host - The island host element.
+ * @param event - The dispatched DOM event.
+ * @param selector - The key's selector (empty string → host-level).
+ * @returns The matched element, or `undefined` when nothing matches inside the host.
+ * @example
+ * const target = matchTarget(host, event, "[data-action]");
+ */
+function matchTarget(host: Element, event: Event, selector: string): Element | undefined {
+  if (selector === "") return host;
+  const target = event.target;
+  if (!(target instanceof Element)) return undefined;
+  const matched = target.closest(selector);
+  return matched && host.contains(matched) ? matched : undefined;
+}
+
+/**
+ * Attach a component's declarative `events` map: one real listener per event TYPE on
+ * the host (dispatch walks `closest(selector)` for each registered selector), each
+ * removed via the instance's cleanup registry on destroy.
+ *
+ * @param instance - The instance whose host the listeners attach to.
+ * @param events - The declarative `{ "&lt;type&gt; &lt;selector&gt;": handler }` map.
+ * @throws {Error} When a key has no event type.
+ * @example
+ * attachEvents(instance, { "click [data-action]": (ctx, e, el) => {} });
+ */
+function attachEvents(instance: ComponentInstance, events: ComponentEvents<object>): void {
+  const host = instance.el;
+  const byType = new Map<
+    string,
+    Array<{ selector: string; handler: ComponentEventHandler<object> }>
+  >();
+
+  // Group handlers by event type so each type attaches exactly one delegated listener.
+  for (const [key, handler] of Object.entries(events)) {
+    const space = key.indexOf(" ");
+    const type = (space === -1 ? key : key.slice(0, space)).trim();
+    const selector = space === -1 ? "" : key.slice(space + 1).trim();
+    if (type === "") {
+      throw new Error(
+        `${ERROR_PREFIX} component "${instance.def.name}" event key must start with an event type: "${key}"\n  → use "<type>" or "<type> <selector>" (e.g. "click [data-action]")`
+      );
+    }
+    const list = byType.get(type) ?? [];
+    list.push({ selector, handler });
+    byType.set(type, list);
+  }
+
+  // Attach one delegated listener per type; register its removal on the cleanup stack.
+  for (const [type, handlers] of byType) {
+    // eslint-disable-next-line jsdoc/require-jsdoc -- inline delegated dispatcher for one event type
+    const listener = (event: Event): void => {
+      for (const { selector, handler } of handlers) {
+        const target = matchTarget(host, event, selector);
+        if (target) handler(instance.ctx, event, target);
+      }
+    };
+    host.addEventListener(type, listener);
+    instance.cleanups.push(() => host.removeEventListener(type, listener));
+  }
+}
+
+/**
  * Validate a single hook entry: its key must be a known hook name and its value
  * must be a function. Throws fail-fast on the first violation.
  *
  * @param componentName - The owning component name (for error messages).
- * @param hooks - The hooks object being validated.
+ * @param source - The raw authoring object being validated.
  * @param key - The hook key to validate.
  * @throws {Error} If `key` is not in `COMPONENT_HOOK_NAMES`.
  * @throws {TypeError} If the hook value is not a function.
  * @example
- * validateHookEntry("counter", hooks, "onMount");
+ * validateHookEntry("counter", source, "onMount");
  */
-function validateHookEntry(componentName: string, hooks: ComponentHooks, key: string): void {
+function validateHookEntry(
+  componentName: string,
+  source: Record<string, unknown>,
+  key: string
+): void {
   // Reject typo'd / unknown hook names so e.g. `onMout` fails immediately.
   if (!HOOK_NAME_SET.has(key)) {
     throw new Error(
-      `${ERROR_PREFIX} unknown component hook "${key}" on "${componentName}"\n  → valid hooks: ${COMPONENT_HOOK_NAMES.join(", ")}`
+      `${ERROR_PREFIX} unknown component hook "${key}" on "${componentName}"\n  → valid hooks: ${COMPONENT_HOOK_NAMES.join(", ")}\n  → spec keys: state, render, events, api`
     );
   }
 
   // Reject non-function values for an otherwise-valid hook name.
-  if (typeof (hooks as Record<string, unknown>)[key] !== "function") {
+  if (typeof source[key] !== "function") {
     throw new TypeError(
       `${ERROR_PREFIX} component hook "${key}" on "${componentName}" must be a function\n  → provide a function or omit the hook`
     );
@@ -67,35 +386,92 @@ function validateHookEntry(componentName: string, hooks: ComponentHooks, key: st
 }
 
 /**
- * Create a validated component definition. Validates hook names at registration
- * for fail-fast typo detection (e.g. `onMout` throws immediately) and asserts
- * each provided hook is a function.
+ * Validate the spec extras (`state`/`render`/`api` must be functions; `events` must be
+ * a plain object of functions). Throws fail-fast on the first violation.
+ *
+ * @param componentName - The owning component name (for error messages).
+ * @param extras - The partitioned spec extras to validate.
+ * @throws {TypeError} If a present extra has the wrong shape.
+ * @example
+ * validateSpecExtras("board", { state: () => ({}) });
+ */
+function validateSpecExtras(componentName: string, extras: ComponentSpecExtras): void {
+  for (const key of ["state", "render", "api"] as const) {
+    if (extras[key] !== undefined && typeof extras[key] !== "function") {
+      throw new TypeError(
+        `${ERROR_PREFIX} component "${key}" on "${componentName}" must be a function\n  → provide a function or omit it`
+      );
+    }
+  }
+  if (extras.events !== undefined) {
+    const events = extras.events as Record<string, unknown>;
+    const isObject = typeof events === "object";
+    if (!isObject) {
+      throw new TypeError(
+        `${ERROR_PREFIX} component "events" on "${componentName}" must be an object of handlers`
+      );
+    }
+    for (const [key, handler] of Object.entries(events)) {
+      if (typeof handler !== "function") {
+        throw new TypeError(
+          `${ERROR_PREFIX} component event "${key}" on "${componentName}" must be a function`
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Create a validated component definition. Accepts either the legacy hooks-only form
+ * (`createComponent("counter", { onMount() {} })`) or the plugin-mirror spec form
+ * (`createComponent("board", { state, render, events, api, ...hooks })`). Spec-only
+ * keys (`state`/`render`/`events`/`api`) are partitioned out before hook-name
+ * validation, so a real typo (e.g. `onMout`) still throws immediately while the spec
+ * keys are accepted.
  *
  * @param name - Unique component name.
- * @param hooks - Lifecycle hook implementations.
+ * @param spec - Lifecycle hooks, or the `{ state, render, events, api, ...hooks }` spec.
  * @returns A `ComponentDef` ready to `register`.
- * @throws {Error} If `name` is empty, any hook key is not in
- *   `COMPONENT_HOOK_NAMES`, or any provided hook value is not a function.
+ * @throws {Error} If `name` is empty, a hook key is unknown, or an extra/hook value has the wrong shape.
  * @example
- * const counter = createComponent("counter", {
- *   onMount({ el }) { el.textContent = "0"; }
+ * const counter = createComponent("counter", { onMount({ el }) { el.textContent = "0"; } });
+ * @example
+ * const list = createComponent<{ items: string[] }>("list", {
+ *   state: () => ({ items: [] }),
+ *   render: (s) => h(List, { items: s.items })
  * });
  */
-export function createComponent(name: string, hooks: ComponentHooks): ComponentDef {
+export function createComponent<S extends object = object, A = unknown>(
+  name: string,
+  spec: ComponentSpec<S, A>
+): ComponentDef {
   // Guard: the name must be a non-empty (post-trim) identifier.
-  const hasEmptyName = name.trim() === "";
-  if (hasEmptyName) {
+  if (name.trim() === "") {
     throw new Error(
       `${ERROR_PREFIX} component name must be a non-empty string\n  → pass a unique name to createComponent("name", hooks)`
     );
   }
 
-  // Validate every provided hook entry (unknown key or non-function throws).
-  for (const key of Object.keys(hooks)) {
-    validateHookEntry(name, hooks, key);
+  // Partition spec-only keys from lifecycle hooks; validate each as it is classified.
+  const source = spec as Record<string, unknown>;
+  const hooks: Record<string, unknown> = {};
+  const extras: Record<string, unknown> = {};
+  for (const key of Object.keys(source)) {
+    if (SPEC_KEYS.has(key)) {
+      extras[key] = source[key];
+      continue;
+    }
+    validateHookEntry(name, source, key);
+    hooks[key] = source[key];
   }
+  validateSpecExtras(name, extras as ComponentSpecExtras);
 
-  return { name, hooks };
+  const hasExtras = Object.keys(extras).length > 0;
+  // The legacy and spec forms both produce the opaque ComponentDef token (author
+  // inference lives on the overload signatures; the registry stores the erased form).
+  return hasExtras
+    ? { name, hooks: hooks as ComponentHooks<object>, spec: extras as ComponentSpecExtras }
+    : { name, hooks: hooks as ComponentHooks<object> };
 }
 
 /**
@@ -118,75 +494,64 @@ export function extractPageData(doc: Document): PageData {
 }
 
 /**
- * Builds a live component instance bound to an element.
+ * Read the current page data, or `{}` in a headless (non-browser) context.
  *
- * @param definition - The component definition.
- * @param element - The element the instance binds to.
- * @param persistent - Whether the instance survives navigation.
- * @returns The constructed (not-yet-mounted) instance.
+ * @returns The current page data payload.
  * @example
- * const inst = createInstance(definition, element, false);
+ * const data = currentPageData();
  */
-export function createInstance(
-  definition: ComponentDef,
-  element: Element,
-  persistent: boolean
-): ComponentInstance {
-  return { def: definition, el: element, persistent };
+function currentPageData(): PageData {
+  return typeof document === "undefined" ? {} : extractPageData(document);
 }
 
 /**
- * Invokes a single lifecycle hook on an instance with its component context.
- * Missing hooks are skipped silently.
+ * Invokes a single lifecycle hook on an instance with its bound context. Missing
+ * hooks are skipped silently.
  *
  * @param instance - The instance whose hook to run.
  * @param hook - The hook name to invoke.
- * @param ctx - The component context passed to the hook.
  * @example
- * runHook(instance, "onMount", ctx);
+ * runHook(instance, "onDestroy");
  */
-export function runHook(
-  instance: ComponentInstance,
-  hook: keyof ComponentHooks,
-  ctx: ComponentContext
-): void {
-  instance.def.hooks[hook]?.(ctx);
+function runHook(instance: ComponentInstance, hook: keyof ComponentHooks<object>): void {
+  instance.def.hooks[hook]?.(instance.ctx);
 }
 
 /**
- * Builds the component context handed to a hook: the bound element + page data, merged
- * with the matched route's slice (params/meta/locale/url). Defaults to {@link EMPTY_ROUTE}
- * when no route is supplied (headless, tests, public `scan()`).
+ * Run an instance's registered cleanup disposers (LIFO) and unregister its api. Each
+ * disposer runs in isolation so a throwing one never strands the others during teardown.
  *
- * @param element - The element the instance is bound to.
- * @param data - The current page data payload.
- * @param route - The matched-route slice for the current URL.
- * @returns The hook context.
+ * @param state - The plugin state (for the api registry).
+ * @param instance - The instance being disposed.
  * @example
- * const ctx = makeContext(element, data, route);
+ * disposeInstance(state, instance);
  */
-function makeContext(
-  element: Element,
-  data: PageData,
-  route: RouteSlice = EMPTY_ROUTE
-): ComponentContext {
-  return {
-    el: element,
-    data,
-    params: route.params,
-    meta: route.meta,
-    locale: route.locale,
-    url: route.url
-  };
+function disposeInstance(state: SpaState, instance: ComponentInstance): void {
+  for (let index = instance.cleanups.length - 1; index >= 0; index -= 1) {
+    try {
+      instance.cleanups[index]?.();
+    } catch {
+      // Teardown is best-effort: a failing disposer must not strand the rest.
+    }
+  }
+  instance.cleanups.length = 0;
+  instance.renderScheduled = false;
+
+  // Drop this instance's api from the registry only if it still owns the entry.
+  if (instance.api !== undefined && state.componentApis.get(instance.def.name) === instance.api) {
+    state.componentApis.delete(instance.def.name);
+  }
 }
 
 /**
- * Mounts a single `data-component` element: classifies persistent vs
- * page-specific, builds the instance, fires `onCreate` then `onMount`, records
- * it in state, and emits `spa:component-mount`. No-ops if the element is already
+ * Mounts a single `data-component` element: classifies persistent vs page-specific,
+ * builds the instance + its bound context, initializes per-instance `state`, registers
+ * its `api`, attaches declarative `events`, fires `onCreate` then `onMount` (capturing
+ * an async `onMount` + render-chunk load as `mountPromise`), schedules the initial
+ * render, records it, and emits `spa:component-mount`. No-ops if the element is already
  * mounted, has no component name, or names an unregistered component.
  *
- * @param state - The plugin state (registeredComponents + instances).
+ * @param state - The plugin state (registeredComponents + instances + componentApis).
  * @param emit - The event emitter for spa:component-mount.
  * @param swapArea - The swap-region element, or null when none was found.
  * @param data - The current page data payload.
@@ -214,23 +579,70 @@ function mountElement(
 
   // Persistent when outside the swap area (or when there is no swap area).
   const isPersistent = swapArea ? !swapArea.contains(element) : true;
-  const instance = createInstance(definition, element, isPersistent);
-  const ctx = makeContext(element, data, route);
+  const instance: ComponentInstance = {
+    def: definition,
+    el: element,
+    persistent: isPersistent,
+    // The ctx is bound to this instance right after construction (it reads the fields below).
+    ctx: undefined as unknown as ComponentContext<object>,
+    state: undefined,
+    api: undefined,
+    route,
+    data,
+    cleanups: [],
+    flush: noop,
+    renderScheduled: false,
+    renderDepth: 0,
+    mountPromise: undefined
+  };
+  instance.ctx = buildContext(state, instance);
+  // eslint-disable-next-line jsdoc/require-jsdoc -- the ctx.flush implementation: drain a pending render now
+  instance.flush = (): void => {
+    instance.renderScheduled = false;
+    runRender(instance);
+  };
 
-  // Run creation hooks, record the instance, and announce the mount.
-  runHook(instance, "onCreate", ctx);
-  runHook(instance, "onMount", ctx);
+  const spec = definition.spec;
+
+  // 1. Initialize per-instance state (before hooks/render so they observe it).
+  if (spec?.state) instance.state = spec.state(instance.ctx);
+  // 2. Register the island's api under its name (cross-island seam; last-registered-wins).
+  if (spec?.api) {
+    instance.api = spec.api(instance.ctx);
+    state.componentApis.set(definition.name, instance.api);
+  }
+  // 3. Attach declarative delegated events (auto-removed on destroy via the cleanup stack).
+  if (spec?.events) attachEvents(instance, spec.events);
+
+  // Creation hook, then mount. `onMount` may be async — capture its promise (the
+  // kernel stays fire-and-forget; only the test harness awaits it via settle()).
+  runHook(instance, "onCreate");
+  // `onMount` is typed `void` for caller ergonomics (the void-return rule accepts async
+  // functions too), but at RUNTIME it may return a Promise — capture it as `unknown`.
+  const onMountResult: unknown = definition.hooks.onMount?.(instance.ctx);
+
+  // Initial render is scheduled (microtask) so any synchronous `ctx.set` in onMount coalesces in.
+  if (spec?.render) scheduleRender(instance);
+
+  // mountPromise = render-chunk load (so settle() can flush a VNode) + an async onMount.
+  const pending: Array<Promise<unknown>> = [];
+  if (spec?.render) pending.push(loadRenderChunk());
+  if (onMountResult && typeof (onMountResult as { then?: unknown }).then === "function") {
+    pending.push(onMountResult as Promise<void>);
+  }
+  instance.mountPromise = pending.length > 0 ? Promise.all(pending).then(() => {}) : undefined;
+
   state.instances.set(element, instance);
   emit("spa:component-mount", { name: definition.name, el: element });
 }
 
 /**
- * Scans the swap region, mounts components for matching `data-component`
- * elements, classifies persistent (outside swap area) vs page-specific (inside),
- * fires `onCreate` then `onMount`, and emits `spa:component-mount` per instance.
+ * Scans the swap region, mounts components for matching `data-component` elements,
+ * classifies persistent (outside swap area) vs page-specific (inside), runs
+ * `onCreate`/`onMount` + initial render, and emits `spa:component-mount` per instance.
  * Already-mounted elements are skipped.
  *
- * @param state - The plugin state (registeredComponents + instances).
+ * @param state - The plugin state (registeredComponents + instances + componentApis).
  * @param emit - The event emitter for spa:component-mount.
  * @param swapSelector - CSS selector bounding page-specific components.
  * @param route - The matched-route slice for the current URL (params/meta/locale/url).
@@ -257,9 +669,10 @@ export function scanAndMount(
 }
 
 /**
- * Unmounts page-specific instances inside the swap region (runs `onUnMount`
- * then `onDestroy`), removes them from state, and emits `spa:component-unmount`.
- * Persistent instances (outside the swap area) are left in place.
+ * Unmounts page-specific instances inside the swap region (runs `onUnMount` then
+ * `onDestroy`, then their cleanup disposers + api unregister), removes them from state,
+ * and emits `spa:component-unmount`. Persistent instances (outside the swap area) are
+ * left in place.
  *
  * @param state - The plugin state holding live instances.
  * @param emit - The event emitter for spa:component-unmount.
@@ -267,21 +680,23 @@ export function scanAndMount(
  * unmountPageSpecific(state, emit);
  */
 export function unmountPageSpecific(state: SpaState, emit: SpaEmitFunction): void {
-  const data = typeof document === "undefined" ? {} : extractPageData(document);
+  const data = currentPageData();
   for (const [element, instance] of state.instances) {
     if (instance.persistent) continue;
-    const ctx = makeContext(element, data);
-    runHook(instance, "onUnMount", ctx);
-    runHook(instance, "onDestroy", ctx);
+    instance.data = data;
+    runHook(instance, "onUnMount");
+    runHook(instance, "onDestroy");
+    disposeInstance(state, instance);
     state.instances.delete(element);
     emit("spa:component-unmount", { name: instance.def.name, el: element });
   }
 }
 
 /**
- * Disposes ALL live instances (persistent and page-specific) on teardown:
- * runs `onUnMount` then `onDestroy`, emits `spa:component-unmount`, and clears
- * the instance map. Used by the kernel's `dispose` on plugin stop.
+ * Disposes ALL live instances (persistent and page-specific) on teardown: runs
+ * `onUnMount` then `onDestroy`, then their cleanup disposers + api unregister, emits
+ * `spa:component-unmount`, and clears the instance + api maps. Used by the kernel's
+ * `dispose` on plugin stop.
  *
  * @param state - The plugin state holding live instances.
  * @param emit - The event emitter for spa:component-unmount.
@@ -289,14 +704,16 @@ export function unmountPageSpecific(state: SpaState, emit: SpaEmitFunction): voi
  * unmountAll(state, emit);
  */
 export function unmountAll(state: SpaState, emit: SpaEmitFunction): void {
-  const data = typeof document === "undefined" ? {} : extractPageData(document);
+  const data = currentPageData();
   for (const [element, instance] of state.instances) {
-    const ctx = makeContext(element, data);
-    runHook(instance, "onUnMount", ctx);
-    runHook(instance, "onDestroy", ctx);
+    instance.data = data;
+    runHook(instance, "onUnMount");
+    runHook(instance, "onDestroy");
+    disposeInstance(state, instance);
     emit("spa:component-unmount", { name: instance.def.name, el: element });
   }
   state.instances.clear();
+  state.componentApis.clear();
 }
 
 /**
@@ -308,15 +725,17 @@ export function unmountAll(state: SpaState, emit: SpaEmitFunction): void {
  * notifyNavStart(state);
  */
 export function notifyNavStart(state: SpaState): void {
-  const data = typeof document === "undefined" ? {} : extractPageData(document);
-  for (const [element, instance] of state.instances) {
-    runHook(instance, "onNavStart", makeContext(element, data));
+  const data = currentPageData();
+  for (const instance of state.instances.values()) {
+    instance.data = data;
+    runHook(instance, "onNavStart");
   }
 }
 
 /**
  * Fires `onNavEnd` on persistent instances that survived the swap (page-specific
- * instances were already destroyed and re-created by the swap).
+ * instances were already destroyed and re-created by the swap), updating their route
+ * slice to the destination first.
  *
  * @param state - The plugin state holding live instances.
  * @param route - The matched-route slice for the destination URL (params/meta/locale/url).
@@ -324,8 +743,11 @@ export function notifyNavStart(state: SpaState): void {
  * notifyNavEnd(state, route);
  */
 export function notifyNavEnd(state: SpaState, route: RouteSlice = EMPTY_ROUTE): void {
-  const data = typeof document === "undefined" ? {} : extractPageData(document);
-  for (const [element, instance] of state.instances) {
-    if (instance.persistent) runHook(instance, "onNavEnd", makeContext(element, data, route));
+  const data = currentPageData();
+  for (const instance of state.instances.values()) {
+    if (!instance.persistent) continue;
+    instance.data = data;
+    instance.route = route;
+    runHook(instance, "onNavEnd");
   }
 }

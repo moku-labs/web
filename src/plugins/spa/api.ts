@@ -51,6 +51,18 @@ export function createApi(ctx: SpaContext): SpaApi {
      */
     current() {
       return ctx.state.currentUrl;
+    },
+    /**
+     * Resolve a registered island's api by name (the cross-island seam). Returns
+     * `undefined` when no provider with that name is currently registered.
+     *
+     * @param name - The provider island's component name.
+     * @returns The provider's api, or `undefined`.
+     * @example
+     * app.spa.component("lightbox");
+     */
+    component<T = unknown>(name: string): T | undefined {
+      return ctx.state.componentApis.get(name) as T | undefined;
     }
   };
 }

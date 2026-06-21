@@ -48,6 +48,45 @@ describe("createComponent validation", () => {
   });
 });
 
+describe("createComponent spec form", () => {
+  it("accepts the plugin-mirror spec keys without flagging them as unknown hooks", () => {
+    const def = createComponent<{ n: number }, { bump(): void }>("c", {
+      state: () => ({ n: 0 }),
+      render: s => `<output>${s.n}</output>`,
+      events: { "click [data-inc]": ctx => ctx.set(s => ({ n: s.n + 1 })) },
+      api: ctx => ({ bump: () => ctx.set(s => ({ n: s.n + 1 })) }),
+      onMount() {}
+    });
+    expect(def.name).toBe("c");
+    expect(def.spec?.state).toBeTypeOf("function");
+    expect(def.spec?.render).toBeTypeOf("function");
+    expect(def.spec?.events).toBeTypeOf("object");
+    expect(def.spec?.api).toBeTypeOf("function");
+    expect(def.hooks.onMount).toBeTypeOf("function");
+  });
+
+  it("still throws on a typo'd hook alongside valid spec keys", () => {
+    expect(() => createComponent("c", { state: () => ({}), onMout() {} } as never)).toThrow(
+      /unknown component hook/
+    );
+  });
+
+  it("throws when a spec extra has the wrong shape (state not a function)", () => {
+    expect(() => createComponent("c", { state: 5 } as never)).toThrow(/must be a function/);
+  });
+
+  it("throws when an events handler is not a function", () => {
+    expect(() => createComponent("c", { events: { click: 1 } } as never)).toThrow(
+      /must be a function/
+    );
+  });
+
+  it("omits the spec slot entirely for the legacy hooks-only form", () => {
+    const def = createComponent("legacy", { onMount() {} });
+    expect(def.spec).toBeUndefined();
+  });
+});
+
 describe("extractPageData", () => {
   it("parses the inline script#__DATA__ payload", () => {
     document.body.innerHTML = `<script id="__DATA__" type="application/json">{"a":1}</script>`;

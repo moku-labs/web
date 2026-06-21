@@ -46,7 +46,9 @@ export default defineConfig({
       // test loads would never be globbed as "untested" and would silently escape
       // the coverage thresholds.
       include: ["src/**/*.{ts,tsx}"],
-      exclude: ["src/**/types.ts", "src/**/types/**", "src/**/__tests__/**"],
+      // `src/testing.ts` is the devDep-only test harness — exercised transitively by
+      // every island test, but a coverage gate on glue is low-value (mirrors types.ts).
+      exclude: ["src/**/types.ts", "src/**/types/**", "src/**/__tests__/**", "src/testing.ts"],
       reporter: ["text", "lcov"],
       thresholds: { lines: 85, functions: 85, branches: 85, statements: 85 }
     }

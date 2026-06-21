@@ -111,12 +111,90 @@ export interface ResolvedSpaConfig {
 }
 
 /**
- * Context handed to every component lifecycle hook — the bound element + page data,
- * plus the matched route's `params`/`meta`/`locale` and a link builder, so an island
- * can read its route context (e.g. a `card` route's `ctx.meta.focus` + `ctx.params.id`)
- * directly, without the page bridging it through `data-*` attributes.
+ * What a component's `render` may return:
+ * - a Preact `VNode` — committed into the host through the lazy Preact gate (`commitVNode`);
+ * - a `Node` — replaces the host's children;
+ * - a `string` — set as the host's `innerHTML`;
+ * - `void`/`undefined` — the render mutated the DOM itself (DOM-only islands → no Preact loaded).
  */
-export interface ComponentContext {
+// biome-ignore lint/suspicious/noConfusingVoidType: a render may legitimately return nothing (DOM-only islands)
+export type RenderResult = import("preact").VNode | Node | string | void;
+
+/**
+ * Factory that builds a component's typed per-instance state (mirrors a plugin's
+ * `createState`). Called ONCE at mount; the returned object is stored on the
+ * {@link ComponentInstance} and exposed read-only as `ctx.state`.
+ *
+ * @param ctx - The component context for this instance (state is not yet set).
+ * @returns The initial per-instance state.
+ * @example
+ * state: (ctx): BoardState => ({ boardId: ctx.params.id ?? "", cards: [] })
+ */
+export type ComponentStateFactory<S extends object> = (ctx: ComponentContext<S>) => S;
+
+/**
+ * Pure render of `(state, ctx)` → {@link RenderResult}. Called after mount-state-init
+ * and again (microtask-batched) after every `ctx.set`. Must be free of side effects
+ * beyond producing its result.
+ *
+ * @param state - The current per-instance state (read-only).
+ * @param ctx - The component context for this instance.
+ * @returns The render result to commit into the host.
+ * @example
+ * render: (state) => h(BoardView, { snapshot: state.snapshot })
+ */
+export type ComponentRender<S extends object> = (
+  state: Readonly<S>,
+  ctx: ComponentContext<S>
+) => RenderResult;
+
+/**
+ * A delegated DOM event handler. `target` is the element matched by the key's selector
+ * (already resolved via `closest` — no `instanceof`/`closest` ceremony in the body).
+ *
+ * Typed `void` for ergonomics (the void-return rule accepts async handlers returning
+ * `Promise<void>` too); the kernel ignores any returned value.
+ *
+ * @param ctx - The component context (carries the live per-instance `state`).
+ * @param event - The raw DOM event.
+ * @param target - The element matched by the selector (the host when no selector).
+ * @returns void (a returned promise is ignored by the kernel).
+ * @example
+ * (ctx, event, button) => { event.preventDefault(); ctx.set({ open: true }); }
+ */
+export type ComponentEventHandler<S extends object> = (
+  ctx: ComponentContext<S>,
+  event: Event,
+  target: Element
+) => void;
+
+/**
+ * Declarative delegated event map. Each key is `"<type> <selector>"` (the selector is
+ * optional → a host-level listener). ONE real listener per event TYPE is attached to
+ * the host; dispatch walks `event.target.closest(selector)` within the host. All
+ * listeners are auto-removed on destroy.
+ *
+ * @example
+ * events: {
+ *   "click [data-action='delete']": (ctx, _e, btn) => ctx.set(removeCard(ctx.state, btn)),
+ *   "submit [data-add]": (ctx, e) => { e.preventDefault(); add(ctx); }
+ * }
+ */
+export type ComponentEvents<S extends object> = Record<string, ComponentEventHandler<S>>;
+
+/**
+ * Context handed to every component lifecycle hook, render, and event handler — the
+ * bound element + page data, plus the matched route's `params`/`meta`/`locale` and a
+ * link builder, so an island can read its route context (e.g. a `card` route's
+ * `ctx.meta.focus` + `ctx.params.id`) directly, without the page bridging it through
+ * `data-*` attributes.
+ *
+ * Generic over the per-instance state `S` (default `undefined` so every existing
+ * hooks-only island still type-checks). The additive members (`state`/`set`/`flush`/
+ * `cleanup`/`component`) are ALWAYS-PRESENT functions — never optional keys — so they
+ * never trip `exactOptionalPropertyTypes`.
+ */
+export interface ComponentContext<S = undefined> {
   /** The element the component instance is bound to. */
   el: Element;
   /** Page data extracted from the `script#__DATA__` payload. */
@@ -129,10 +207,53 @@ export interface ComponentContext {
   readonly locale: string;
   /** Build a link to a named route by pattern substitution (same output as `app.router.toUrl`). */
   readonly url: (name: string, params?: Record<string, string>) => string;
+  /** The live per-instance state (the object returned by `spec.state`). `undefined` for legacy hooks-only islands. */
+  readonly state: S;
+  /**
+   * Merge a patch into the per-instance state, then schedule ONE batched render.
+   * Accepts a partial object or an updater `(prev) => partial`. A no-op for legacy
+   * islands with no `state`/`render`.
+   *
+   * @param patch - A partial state object, or an updater returning one.
+   * @returns void
+   * @example
+   * ctx.set({ open: true });
+   * ctx.set(prev => ({ count: prev.count + 1 }));
+   */
+  set(patch: Partial<S> | ((prev: Readonly<S>) => Partial<S>)): void;
+  /**
+   * Force a synchronous render now (drains any pending scheduled render). Rarely
+   * needed in app code — `ctx.set` already schedules one; mainly a test seam.
+   *
+   * @returns void
+   * @example
+   * ctx.flush();
+   */
+  flush(): void;
+  /**
+   * Register a disposer run on `onDestroy` (subscriptions, timers, manual/global
+   * listeners the declarative `events` map cannot cover). Disposers run LIFO.
+   *
+   * @param dispose - The teardown function.
+   * @returns void
+   * @example
+   * ctx.cleanup(onPatch(p => applyPatch(ctx, p)));
+   */
+  cleanup(dispose: () => void): void;
+  /**
+   * Resolve another island's registered `api` by name. Returns `undefined` when no
+   * provider is registered (optional-dependency semantics, mirroring `ctx.has`).
+   *
+   * @param name - The provider island's component name.
+   * @returns The provider's api, or `undefined`.
+   * @example
+   * ctx.component<LightboxApi>("lightbox")?.open(slides, index);
+   */
+  component<T = unknown>(name: string): T | undefined;
 }
 
-/** Lifecycle hooks a component may implement. */
-export interface ComponentHooks {
+/** Lifecycle hooks a component may implement. Generic over the per-instance state `S`. */
+export interface ComponentHooks<S = undefined> {
   /**
    * Called once when the instance is created (before DOM attach).
    *
@@ -141,7 +262,7 @@ export interface ComponentHooks {
    * @example
    * onCreate({ el }) { el.dataset.ready = "1"; }
    */
-  onCreate?(ctx: ComponentContext): void;
+  onCreate?(ctx: ComponentContext<S>): void;
   /**
    * Called after the instance is attached to its element.
    *
@@ -149,8 +270,10 @@ export interface ComponentHooks {
    * @returns void
    * @example
    * onMount({ el }) { el.textContent = "0"; }
+   * @example
+   * async onMount(ctx) { ctx.set({ items: await load() }); } // async is allowed; the harness awaits it via settle()
    */
-  onMount?(ctx: ComponentContext): void;
+  onMount?(ctx: ComponentContext<S>): void;
   /**
    * Called when a navigation begins while this instance is mounted.
    *
@@ -159,7 +282,7 @@ export interface ComponentHooks {
    * @example
    * onNavStart({ el }) { el.dataset.loading = ""; }
    */
-  onNavStart?(ctx: ComponentContext): void;
+  onNavStart?(ctx: ComponentContext<S>): void;
   /**
    * Called when a navigation completes while this instance is mounted.
    *
@@ -168,7 +291,7 @@ export interface ComponentHooks {
    * @example
    * onNavEnd({ el }) { delete el.dataset.loading; }
    */
-  onNavEnd?(ctx: ComponentContext): void;
+  onNavEnd?(ctx: ComponentContext<S>): void;
   /**
    * Called before the instance is detached from its element.
    *
@@ -177,7 +300,7 @@ export interface ComponentHooks {
    * @example
    * onUnMount({ el }) { el.replaceChildren(); }
    */
-  onUnMount?(ctx: ComponentContext): void;
+  onUnMount?(ctx: ComponentContext<S>): void;
   /**
    * Called once when the instance is destroyed (after detach).
    *
@@ -186,7 +309,7 @@ export interface ComponentHooks {
    * @example
    * onDestroy({ el }) { delete el.dataset.ready; }
    */
-  onDestroy?(ctx: ComponentContext): void;
+  onDestroy?(ctx: ComponentContext<S>): void;
 }
 
 /** Allowed hook names — single source of truth for fail-fast validation. */
@@ -199,14 +322,60 @@ export const COMPONENT_HOOK_NAMES = [
   "onDestroy"
 ] as const;
 
-/** A registered component definition. */
+/**
+ * The plugin-mirror authoring form for {@link createComponent}: typed per-instance
+ * `state`, `render`, declarative `events`, and a cross-island `api` on top of the
+ * lifecycle hooks. All keys optional + additive; the presence of any spec-only key
+ * (`state`/`render`/`events`/`api`) selects the spec overload of `createComponent`.
+ *
+ * @example
+ * createComponent<{ boards: Board[] }>("board-list", {
+ *   state: () => ({ boards: [] }),
+ *   async onMount(ctx) { ctx.set({ boards: await ctx.component<Api>("api")!.list() }); },
+ *   render: (s) => h(BoardList, { boards: s.boards }),
+ *   events: { "submit [data-create]": (ctx, e) => { e.preventDefault(); create(ctx); } }
+ * });
+ */
+export interface ComponentSpec<S extends object = object, A = unknown> extends ComponentHooks<S> {
+  /** Build typed per-instance state at mount (stored on the instance, not a module WeakMap). */
+  state?: ComponentStateFactory<S>;
+  /** Pure render re-invoked (microtask-batched) on every `ctx.set`. */
+  render?: ComponentRender<S>;
+  /** Declarative delegated DOM events with auto-teardown. */
+  events?: ComponentEvents<S>;
+  /** Public api factory — registered under the component name; reached via `app.spa.component(name)`. */
+  api?: (ctx: ComponentContext<S>) => A;
+}
+
+/**
+ * The spec extras carried on a {@link ComponentDef}, type-erased to `object` state
+ * (authors keep full `S` inference at the `createComponent` call site; the registry
+ * stores the runtime-only erased form). Absent for legacy `(name, hooks)` defs.
+ */
+export interface ComponentSpecExtras {
+  /** Per-instance state factory. */
+  state?: ComponentStateFactory<object>;
+  /** Render called on mount + after every `ctx.set`. */
+  render?: ComponentRender<object>;
+  /** Declarative delegated events. */
+  events?: ComponentEvents<object>;
+  /** Public api factory registered under the component name. */
+  api?: (ctx: ComponentContext<object>) => unknown;
+}
+
+/** A registered component definition (an opaque token; author inference lives on `createComponent`). */
 // eslint-disable-next-line unicorn/prevent-abbreviations -- `ComponentDef` is the canonical public type name per spec
 export interface ComponentDef {
   /** Unique component name (matched against `data-component`). */
   name: string;
-  /** Lifecycle hooks. */
-  hooks: ComponentHooks;
+  /** Lifecycle hooks (the subset shared with the legacy form). */
+  hooks: ComponentHooks<object>;
+  /** Plugin-mirror extras (state/render/events/api). Absent for legacy `(name, hooks)` defs. */
+  spec?: ComponentSpecExtras;
 }
+
+/** The matched-route slice carried on a live instance (params/meta/locale + link builder). */
+export type ComponentRouteSlice = Pick<ComponentContext, "params" | "meta" | "locale" | "url">;
 
 /** A live, mounted component instance. */
 export interface ComponentInstance {
@@ -220,6 +389,26 @@ export interface ComponentInstance {
    * page-specific: full unmount/destroy on every navigation.
    */
   persistent: boolean;
+  /** The single per-instance context reused by every hook, event handler, and render. */
+  ctx: ComponentContext<object>;
+  /** Live per-instance state (the object returned by `spec.state`), or undefined for hooks-only islands. */
+  state: object | undefined;
+  /** This instance's public api (the object returned by `spec.api`), or undefined when none declared. */
+  api: unknown;
+  /** Current matched-route slice (updated on navigation; read by `ctx.params/meta/locale/url`). */
+  route: ComponentRouteSlice;
+  /** Current page data payload (updated on navigation; read by `ctx.data`). */
+  data: PageData;
+  /** Disposers from `ctx.cleanup` + the declarative `events` listeners — run LIFO on destroy. */
+  cleanups: Array<() => void>;
+  /** Synchronously drain a pending render (the `ctx.flush` implementation). */
+  flush: () => void;
+  /** True while a render is queued for the next microtask — coalesces multiple `set` calls. */
+  renderScheduled: boolean;
+  /** Re-entrancy depth guard for the render scheduler (a render that calls `ctx.set`). */
+  renderDepth: number;
+  /** onMount's returned promise (+ render-module load) — awaited by the test harness's `settle()`. */
+  mountPromise: Promise<void> | undefined;
 }
 
 /** Page data payload parsed from the inline `script#__DATA__` element. */
@@ -308,6 +497,8 @@ export interface SpaState {
   registeredComponents: Map<string, ComponentDef>;
   /** Live component instances keyed by their bound element. */
   instances: Map<Element, ComponentInstance>;
+  /** Registered island apis by component name (the cross-island `ctx.component`/`app.spa.component` seam). */
+  componentApis: Map<string, unknown>;
   /** The current resolved URL (pathname + search). */
   currentUrl: string;
   /** Teardown handle for the attached router listeners (null when detached). */
@@ -346,4 +537,14 @@ export type SpaApi = {
    * const url = app.spa.current(); // "/about"
    */
   current(): string;
+  /**
+   * Resolve a registered island's api by name (the cross-island seam). Returns
+   * `undefined` when no provider with that name is currently registered.
+   *
+   * @param name - The provider island's component name.
+   * @returns The provider's api, or `undefined`.
+   * @example
+   * app.spa.component<LightboxApi>("lightbox")?.open(slides, 0);
+   */
+  component<T = unknown>(name: string): T | undefined;
 };
