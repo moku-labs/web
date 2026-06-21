@@ -445,6 +445,24 @@ export type BuildOptions = {
 };
 
 /**
+ * Options for `cli.update()` — the per-session dev-output opt-ins, mirroring the
+ * relevant subset of {@link ServeOptions}. Each defaults to `false`: an incremental
+ * rebuild skips expensive, preview-irrelevant outputs (OG images / sitemap / feeds)
+ * for speed, and a flag re-enables that one output for the rebuild.
+ *
+ * @example
+ * await app.cli.update(["src/styles.css"], { feeds: true });
+ */
+export type UpdateOptions = {
+  /** Re-enable OG-image generation for this rebuild. Defaults to `false`. */
+  og?: boolean;
+  /** Re-enable `sitemap.xml` + `robots.txt` for this rebuild. Defaults to `false`. */
+  sitemap?: boolean;
+  /** Re-enable RSS/Atom/JSON feeds for this rebuild. Defaults to `false`. */
+  feeds?: boolean;
+};
+
+/**
  * Options for `cli.serve()`.
  *
  * @example
@@ -515,6 +533,24 @@ export type Api = {
    * const summary = await app.cli.build();
    */
   build(options?: BuildOptions): Promise<BuildSummary>;
+  /**
+   * Incremental dev rebuild from a set of changed paths — the fast counterpart to
+   * {@link build} for a long-lived EXTERNAL dev loop (e.g. an `@moku-labs/worker` dev
+   * session driving the composed web client via `dev({ onChange })`). Reuses the build
+   * plugin's incremental engine: skips the destructive clean, scopes the rebuild to
+   * `changes` (re-reads only changed Markdown, reuses cached page renders whose data is
+   * unchanged), and applies the dev overrides (minify off; OG/sitemap/feeds off unless
+   * re-enabled per {@link UpdateOptions}). An unclassifiable path forces a full rebuild.
+   * Unlike {@link build} it renders no command header and skips the not-found assertion
+   * (it's a per-change dev rebuild, not a release build).
+   *
+   * @param changes - The paths changed since the last build (the incremental hint).
+   * @param options - Optional per-session dev-output opt-ins.
+   * @returns The rebuild summary (`outDir`, `pageCount`, `durationMs`).
+   * @example
+   * await app.cli.update(["src/islands/board.ts"]);
+   */
+  update(changes: readonly string[], options?: UpdateOptions): Promise<BuildSummary>;
   /**
    * Dev loop: build once, serve `dist/` in-process (live-reload injected), watch
    * `watchDirs`, debounced rebuild + reload. Resolves when SIGINT/SIGTERM tears down.

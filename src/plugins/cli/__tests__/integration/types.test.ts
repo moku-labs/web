@@ -10,7 +10,7 @@ import { i18nPlugin } from "../../../i18n";
 import { routerPlugin } from "../../../router";
 import { sitePlugin } from "../../../site";
 import { cliPlugin } from "../../index";
-import type { Api, BuildSummary, DeployOutcome } from "../../types";
+import type { Api, BuildSummary, DeployOutcome, UpdateOptions } from "../../types";
 
 /**
  * Construct the full app TYPE (never executed — purely for type assertions). The
@@ -47,9 +47,11 @@ function makeApp() {
 type App = ReturnType<typeof makeApp>;
 
 describe("cli type-level surface", () => {
-  it("app.cli is the Api with exactly build/serve/preview/deploy", () => {
+  it("app.cli is the Api with exactly build/update/serve/preview/deploy", () => {
     expectTypeOf<App["cli"]>().toEqualTypeOf<Api>();
-    expectTypeOf<keyof App["cli"]>().toEqualTypeOf<"build" | "serve" | "preview" | "deploy">();
+    expectTypeOf<keyof App["cli"]>().toEqualTypeOf<
+      "build" | "update" | "serve" | "preview" | "deploy"
+    >();
   });
 
   it("build() returns Promise<BuildSummary> and accepts the documented option", () => {
@@ -57,6 +59,12 @@ describe("cli type-level surface", () => {
     expectTypeOf<App["cli"]["build"]>()
       .parameter(0)
       .toEqualTypeOf<{ assertNotFound?: boolean } | undefined>();
+  });
+
+  it("update() takes the changed paths + dev opts and resolves to BuildSummary", () => {
+    expectTypeOf<App["cli"]["update"]>().returns.resolves.toEqualTypeOf<BuildSummary>();
+    expectTypeOf<App["cli"]["update"]>().parameter(0).toEqualTypeOf<readonly string[]>();
+    expectTypeOf<App["cli"]["update"]>().parameter(1).toEqualTypeOf<UpdateOptions | undefined>();
   });
 
   it("serve()/preview() resolve to void; deploy() resolves to DeployOutcome", () => {
