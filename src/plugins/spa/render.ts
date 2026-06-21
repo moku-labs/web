@@ -15,6 +15,7 @@
 
 import type { VNode } from "preact";
 import { render } from "preact";
+import type { AnyVNode } from "./types";
 
 /**
  * Render a route's `VNode` into the live swap region, starting from a clean slate
@@ -65,6 +66,6 @@ export function renderVNode(vnode: VNode, region: Element): void {
  * commitVNode(h(BoardView, { snapshot }), host);
  * ```
  */
-export function commitVNode(vnode: VNode, host: Element): void {
+export function commitVNode(vnode: AnyVNode, host: Element): void {
   render(vnode, host);
 }
