@@ -77,7 +77,7 @@ describe("content/pipeline/gallery", () => {
     const root = fixture(["01-a.webp", "02-b.webp"]);
     const [html] = transform('::gallery{src="./images/mk/" caption="Our game"}', root);
 
-    expect(html).toContain('<div class="gallery" data-component="gallery">');
+    expect(html).toContain('<div class="gallery" data-island="gallery">');
     expect(html).toContain("data-gallery-track");
     expect(html).toContain('<img src="/post/images/mk/01-a.webp" alt="Our game · 1"');
     expect(html).toContain('<img src="/post/images/mk/02-b.webp" alt="Our game · 2"');

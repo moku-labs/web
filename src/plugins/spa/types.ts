@@ -14,10 +14,10 @@ export type SpaEvents = {
   "spa:navigate": { from: string; to: string };
   /** The swap completed and the new URL is active. */
   "spa:navigated": { url: string };
-  /** A component instance attached to an element. */
-  "spa:component-mount": { name: string; el: Element };
-  /** A component instance detached from an element. */
-  "spa:component-unmount": { name: string; el: Element };
+  /** A island instance attached to an element. */
+  "spa:island-mount": { name: string; el: Element };
+  /** A island instance detached from an element. */
+  "spa:island-unmount": { name: string; el: Element };
 };
 
 /** Strictly-typed emit closure for the spa events (kernel overload form). */
@@ -92,10 +92,10 @@ export type SpaConfig = {
    */
   progressBar?: boolean;
   /**
-   * Components to auto-register at init (in addition to runtime `register`).
+   * Islands to auto-register at init (in addition to runtime `register`).
    * Defaults to an empty array.
    */
-  components?: ComponentDef[];
+  islands?: IslandDef[];
 };
 
 /** Resolved SPA config after defaults are applied. */
@@ -106,12 +106,12 @@ export interface ResolvedSpaConfig {
   viewTransitions: boolean;
   /** Whether the progress bar is enabled. */
   progressBar: boolean;
-  /** Pre-registered components. */
-  components: ComponentDef[];
+  /** Pre-registered islands. */
+  islands: IslandDef[];
 }
 
 /**
- * What a component's `render` may return:
+ * What a island's `render` may return:
  * - a Preact `VNode` — committed into the host through the lazy Preact gate (`commitVNode`);
  * - a `Node` — replaces the host's children;
  * - a `string` — set as the host's `innerHTML`;
@@ -125,20 +125,23 @@ export type RenderResult = AnyVNode | Node | string | void;
  * `VNode<SomeProps>`; the props generic is invariant under `exactOptionalPropertyTypes`,
  * so the only supertype that accepts every concrete `VNode<P>` is `VNode<any>`.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- props are invariant; `any` is the only supertype of every VNode<P>
+
+/**
+ *
+ */
 export type AnyVNode = import("preact").VNode<any>;
 
 /**
- * Factory that builds a component's typed per-instance state (mirrors a plugin's
+ * Factory that builds a island's typed per-instance state (mirrors a plugin's
  * `createState`). Called ONCE at mount; the returned object is stored on the
- * {@link ComponentInstance} and exposed read-only as `ctx.state`.
+ * {@link IslandInstance} and exposed read-only as `ctx.state`.
  *
- * @param ctx - The component context for this instance (state is not yet set).
+ * @param ctx - The island context for this instance (state is not yet set).
  * @returns The initial per-instance state.
  * @example
  * state: (ctx): BoardState => ({ boardId: ctx.params.id ?? "", cards: [] })
  */
-export type ComponentStateFactory<S extends object> = (ctx: ComponentContext<S>) => S;
+export type IslandStateFactory<S extends object> = (ctx: IslandContext<S>) => S;
 
 /**
  * Pure render of `(state, ctx)` → {@link RenderResult}. Called after mount-state-init
@@ -146,14 +149,14 @@ export type ComponentStateFactory<S extends object> = (ctx: ComponentContext<S>)
  * beyond producing its result.
  *
  * @param state - The current per-instance state (read-only).
- * @param ctx - The component context for this instance.
+ * @param ctx - The island context for this instance.
  * @returns The render result to commit into the host.
  * @example
  * render: (state) => h(BoardView, { snapshot: state.snapshot })
  */
-export type ComponentRender<S extends object> = (
+export type IslandRender<S extends object> = (
   state: Readonly<S>,
-  ctx: ComponentContext<S>
+  ctx: IslandContext<S>
 ) => RenderResult;
 
 /**
@@ -163,15 +166,15 @@ export type ComponentRender<S extends object> = (
  * Typed `void` for ergonomics (the void-return rule accepts async handlers returning
  * `Promise<void>` too); the kernel ignores any returned value.
  *
- * @param ctx - The component context (carries the live per-instance `state`).
+ * @param ctx - The island context (carries the live per-instance `state`).
  * @param event - The raw DOM event.
  * @param target - The element matched by the selector (the host when no selector).
  * @returns void (a returned promise is ignored by the kernel).
  * @example
  * (ctx, event, button) => { event.preventDefault(); ctx.set({ open: true }); }
  */
-export type ComponentEventHandler<S extends object> = (
-  ctx: ComponentContext<S>,
+export type IslandEventHandler<S extends object> = (
+  ctx: IslandContext<S>,
   event: Event,
   target: Element
 ) => void;
@@ -188,10 +191,10 @@ export type ComponentEventHandler<S extends object> = (
  *   "submit [data-add]": (ctx, e) => { e.preventDefault(); add(ctx); }
  * }
  */
-export type ComponentEvents<S extends object> = Record<string, ComponentEventHandler<S>>;
+export type IslandEvents<S extends object> = Record<string, IslandEventHandler<S>>;
 
 /**
- * Context handed to every component lifecycle hook, render, and event handler — the
+ * Context handed to every island lifecycle hook, render, and event handler — the
  * bound element + page data, plus the matched route's `params`/`meta`/`locale` and a
  * link builder, so an island can read its route context (e.g. a `card` route's
  * `ctx.meta.focus` + `ctx.params.id`) directly, without the page bridging it through
@@ -199,11 +202,11 @@ export type ComponentEvents<S extends object> = Record<string, ComponentEventHan
  *
  * Generic over the per-instance state `S` (default `undefined` so every existing
  * hooks-only island still type-checks). The additive members (`state`/`set`/`flush`/
- * `cleanup`/`component`) are ALWAYS-PRESENT functions — never optional keys — so they
+ * `cleanup`/`island`) are ALWAYS-PRESENT functions — never optional keys — so they
  * never trip `exactOptionalPropertyTypes`.
  */
-export interface ComponentContext<S = undefined> {
-  /** The element the component instance is bound to. */
+export interface IslandContext<S = undefined> {
+  /** The element the island instance is bound to. */
   el: Element;
   /** Page data extracted from the `script#__DATA__` payload. */
   data: PageData;
@@ -252,76 +255,76 @@ export interface ComponentContext<S = undefined> {
    * Resolve another island's registered `api` by name. Returns `undefined` when no
    * provider is registered (optional-dependency semantics, mirroring `ctx.has`).
    *
-   * @param name - The provider island's component name.
+   * @param name - The provider island's island name.
    * @returns The provider's api, or `undefined`.
    * @example
-   * ctx.component<LightboxApi>("lightbox")?.open(slides, index);
+   * ctx.island<LightboxApi>("lightbox")?.open(slides, index);
    */
-  component<T = unknown>(name: string): T | undefined;
+  island<T = unknown>(name: string): T | undefined;
 }
 
-/** Lifecycle hooks a component may implement. Generic over the per-instance state `S`. */
-export interface ComponentHooks<S = undefined> {
+/** Lifecycle hooks a island may implement. Generic over the per-instance state `S`. */
+export interface IslandHooks<S = undefined> {
   /**
    * Called once when the instance is created (before DOM attach).
    *
-   * @param ctx - The component context for this instance.
+   * @param ctx - The island context for this instance.
    * @returns void
    * @example
    * onCreate({ el }) { el.dataset.ready = "1"; }
    */
-  onCreate?(ctx: ComponentContext<S>): void;
+  onCreate?(ctx: IslandContext<S>): void;
   /**
    * Called after the instance is attached to its element.
    *
-   * @param ctx - The component context for this instance.
+   * @param ctx - The island context for this instance.
    * @returns void
    * @example
    * onMount({ el }) { el.textContent = "0"; }
    * @example
    * async onMount(ctx) { ctx.set({ items: await load() }); } // async is allowed; the harness awaits it via settle()
    */
-  onMount?(ctx: ComponentContext<S>): void;
+  onMount?(ctx: IslandContext<S>): void;
   /**
    * Called when a navigation begins while this instance is mounted.
    *
-   * @param ctx - The component context for this instance.
+   * @param ctx - The island context for this instance.
    * @returns void
    * @example
    * onNavStart({ el }) { el.dataset.loading = ""; }
    */
-  onNavStart?(ctx: ComponentContext<S>): void;
+  onNavStart?(ctx: IslandContext<S>): void;
   /**
    * Called when a navigation completes while this instance is mounted.
    *
-   * @param ctx - The component context for this instance.
+   * @param ctx - The island context for this instance.
    * @returns void
    * @example
    * onNavEnd({ el }) { delete el.dataset.loading; }
    */
-  onNavEnd?(ctx: ComponentContext<S>): void;
+  onNavEnd?(ctx: IslandContext<S>): void;
   /**
    * Called before the instance is detached from its element.
    *
-   * @param ctx - The component context for this instance.
+   * @param ctx - The island context for this instance.
    * @returns void
    * @example
    * onUnMount({ el }) { el.replaceChildren(); }
    */
-  onUnMount?(ctx: ComponentContext<S>): void;
+  onUnMount?(ctx: IslandContext<S>): void;
   /**
    * Called once when the instance is destroyed (after detach).
    *
-   * @param ctx - The component context for this instance.
+   * @param ctx - The island context for this instance.
    * @returns void
    * @example
    * onDestroy({ el }) { delete el.dataset.ready; }
    */
-  onDestroy?(ctx: ComponentContext<S>): void;
+  onDestroy?(ctx: IslandContext<S>): void;
 }
 
 /** Allowed hook names — single source of truth for fail-fast validation. */
-export const COMPONENT_HOOK_NAMES = [
+export const ISLAND_HOOK_NAMES = [
   "onCreate",
   "onMount",
   "onNavStart",
@@ -331,64 +334,64 @@ export const COMPONENT_HOOK_NAMES = [
 ] as const;
 
 /**
- * The plugin-mirror authoring form for {@link createComponent}: typed per-instance
+ * The plugin-mirror authoring form for {@link createIsland}: typed per-instance
  * `state`, `render`, declarative `events`, and a cross-island `api` on top of the
  * lifecycle hooks. All keys optional + additive; the presence of any spec-only key
- * (`state`/`render`/`events`/`api`) selects the spec overload of `createComponent`.
+ * (`state`/`render`/`events`/`api`) selects the spec overload of `createIsland`.
  *
  * @example
- * createComponent<{ boards: Board[] }>("board-list", {
+ * createIsland<{ boards: Board[] }>("board-list", {
  *   state: () => ({ boards: [] }),
- *   async onMount(ctx) { ctx.set({ boards: await ctx.component<Api>("api")!.list() }); },
+ *   async onMount(ctx) { ctx.set({ boards: await ctx.island<Api>("api")!.list() }); },
  *   render: (s) => h(BoardList, { boards: s.boards }),
  *   events: { "submit [data-create]": (ctx, e) => { e.preventDefault(); create(ctx); } }
  * });
  */
-export interface ComponentSpec<S extends object = object, A = unknown> extends ComponentHooks<S> {
+export interface IslandSpec<S extends object = object, A = unknown> extends IslandHooks<S> {
   /** Build typed per-instance state at mount (stored on the instance, not a module WeakMap). */
-  state?: ComponentStateFactory<S>;
+  state?: IslandStateFactory<S>;
   /** Pure render re-invoked (microtask-batched) on every `ctx.set`. */
-  render?: ComponentRender<S>;
+  render?: IslandRender<S>;
   /** Declarative delegated DOM events with auto-teardown. */
-  events?: ComponentEvents<S>;
-  /** Public api factory — registered under the component name; reached via `app.spa.component(name)`. */
-  api?: (ctx: ComponentContext<S>) => A;
+  events?: IslandEvents<S>;
+  /** Public api factory — registered under the island name; reached via `app.spa.island(name)`. */
+  api?: (ctx: IslandContext<S>) => A;
 }
 
 /**
- * The spec extras carried on a {@link ComponentDef}, type-erased to `object` state
- * (authors keep full `S` inference at the `createComponent` call site; the registry
+ * The spec extras carried on a {@link IslandDef}, type-erased to `object` state
+ * (authors keep full `S` inference at the `createIsland` call site; the registry
  * stores the runtime-only erased form). Absent for legacy `(name, hooks)` defs.
  */
-export interface ComponentSpecExtras {
+export interface IslandSpecExtras {
   /** Per-instance state factory. */
-  state?: ComponentStateFactory<object>;
+  state?: IslandStateFactory<object>;
   /** Render called on mount + after every `ctx.set`. */
-  render?: ComponentRender<object>;
+  render?: IslandRender<object>;
   /** Declarative delegated events. */
-  events?: ComponentEvents<object>;
-  /** Public api factory registered under the component name. */
-  api?: (ctx: ComponentContext<object>) => unknown;
+  events?: IslandEvents<object>;
+  /** Public api factory registered under the island name. */
+  api?: (ctx: IslandContext<object>) => unknown;
 }
 
-/** A registered component definition (an opaque token; author inference lives on `createComponent`). */
-// eslint-disable-next-line unicorn/prevent-abbreviations -- `ComponentDef` is the canonical public type name per spec
-export interface ComponentDef {
-  /** Unique component name (matched against `data-component`). */
+/** A registered island definition (an opaque token; author inference lives on `createIsland`). */
+// eslint-disable-next-line unicorn/prevent-abbreviations -- `IslandDef` is the canonical public type name per spec
+export interface IslandDef {
+  /** Unique island name (matched against `data-island`). */
   name: string;
   /** Lifecycle hooks (the subset shared with the legacy form). */
-  hooks: ComponentHooks<object>;
+  hooks: IslandHooks<object>;
   /** Plugin-mirror extras (state/render/events/api). Absent for legacy `(name, hooks)` defs. */
-  spec?: ComponentSpecExtras;
+  spec?: IslandSpecExtras;
 }
 
 /** The matched-route slice carried on a live instance (params/meta/locale + link builder). */
-export type ComponentRouteSlice = Pick<ComponentContext, "params" | "meta" | "locale" | "url">;
+export type IslandRouteSlice = Pick<IslandContext, "params" | "meta" | "locale" | "url">;
 
-/** A live, mounted component instance. */
-export interface ComponentInstance {
+/** A live, mounted island instance. */
+export interface IslandInstance {
   /** The definition this instance was created from. */
-  def: ComponentDef;
+  def: IslandDef;
   /** The element this instance is bound to. */
   el: Element;
   /**
@@ -398,13 +401,13 @@ export interface ComponentInstance {
    */
   persistent: boolean;
   /** The single per-instance context reused by every hook, event handler, and render. */
-  ctx: ComponentContext<object>;
+  ctx: IslandContext<object>;
   /** Live per-instance state (the object returned by `spec.state`), or undefined for hooks-only islands. */
   state: object | undefined;
   /** This instance's public api (the object returned by `spec.api`), or undefined when none declared. */
   api: unknown;
   /** Current matched-route slice (updated on navigation; read by `ctx.params/meta/locale/url`). */
-  route: ComponentRouteSlice;
+  route: IslandRouteSlice;
   /** Current page data payload (updated on navigation; read by `ctx.data`). */
   data: PageData;
   /** Disposers from `ctx.cleanup` + the declarative `events` listeners — run LIFO on destroy. */
@@ -448,7 +451,7 @@ export interface SpaKernelDeps {
 /** The single shared SPA kernel — pure factory over state/config/emit/deps. */
 export interface SpaKernel {
   /**
-   * Validate config, register config.components, seed currentUrl.
+   * Validate config, register config.islands, seed currentUrl.
    *
    * @returns void
    * @example
@@ -464,14 +467,14 @@ export interface SpaKernel {
    */
   boot(): void;
   /**
-   * Register a component definition (last-registered-wins).
+   * Register a island definition (last-registered-wins).
    *
-   * @param component - The component definition to register.
+   * @param island - The island definition to register.
    * @returns void
    * @example
    * kernel.register(counter);
    */
-  register(component: ComponentDef): void;
+  register(island: IslandDef): void;
   /**
    * Process a navigation to `path`: fetch then swap then head-sync then emit.
    *
@@ -482,7 +485,7 @@ export interface SpaKernel {
    */
   processNav(path: string): void;
   /**
-   * Query the swap region and mount components for matching elements.
+   * Query the swap region and mount islands for matching elements.
    *
    * @returns void
    * @example
@@ -501,12 +504,12 @@ export interface SpaKernel {
 
 /** Internal mutable state for the spa plugin (all kernel data lives here). */
 export interface SpaState {
-  /** Components registered by name (last-registered-wins). */
-  registeredComponents: Map<string, ComponentDef>;
-  /** Live component instances keyed by their bound element. */
-  instances: Map<Element, ComponentInstance>;
-  /** Registered island apis by component name (the cross-island `ctx.component`/`app.spa.component` seam). */
-  componentApis: Map<string, unknown>;
+  /** Islands registered by name (last-registered-wins). */
+  registeredIslands: Map<string, IslandDef>;
+  /** Live island instances keyed by their bound element. */
+  instances: Map<Element, IslandInstance>;
+  /** Registered island apis by island name (the cross-island `ctx.island`/`app.spa.island` seam). */
+  islandApis: Map<string, unknown>;
   /** The current resolved URL (pathname + search). */
   currentUrl: string;
   /** Teardown handle for the attached router listeners (null when detached). */
@@ -520,14 +523,14 @@ export interface SpaState {
 /** Public API of the spa plugin (registration / control surface). */
 export type SpaApi = {
   /**
-   * Register a component definition for client mounting.
+   * Register a island definition for client mounting.
    *
-   * @param component - The component definition created via `createComponent`.
+   * @param island - The island definition created via `createIsland`.
    * @returns void
    * @example
    * app.spa.register(counter);
    */
-  register(component: ComponentDef): void;
+  register(island: IslandDef): void;
   /**
    * Programmatically navigate to a path (client runtime; no-op without a DOM).
    *
@@ -549,10 +552,10 @@ export type SpaApi = {
    * Resolve a registered island's api by name (the cross-island seam). Returns
    * `undefined` when no provider with that name is currently registered.
    *
-   * @param name - The provider island's component name.
+   * @param name - The provider island's island name.
    * @returns The provider's api, or `undefined`.
    * @example
-   * app.spa.component<LightboxApi>("lightbox")?.open(slides, 0);
+   * app.spa.island<LightboxApi>("lightbox")?.open(slides, 0);
    */
-  component<T = unknown>(name: string): T | undefined;
+  island<T = unknown>(name: string): T | undefined;
 };

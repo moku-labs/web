@@ -5,7 +5,7 @@ import { createState, defaultSpaConfig, resolveSpaConfig } from "../../state";
 describe("createState (headless / node)", () => {
   it("returns fresh empty state seeded from defaults", () => {
     const state = createState({ global: {}, config: defaultSpaConfig });
-    expect(state.registeredComponents.size).toBe(0);
+    expect(state.registeredIslands.size).toBe(0);
     expect(state.instances.size).toBe(0);
     expect(state.currentUrl).toBe("");
     expect(state.destroyRouter).toBeNull();
@@ -31,7 +31,7 @@ describe("resolveSpaConfig (headless / node — selector check is permissive)", 
       swapSelector: "main > section",
       viewTransitions: false,
       progressBar: true,
-      components: []
+      islands: []
     });
   });
 });

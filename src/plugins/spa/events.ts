@@ -19,11 +19,11 @@ export function spaEvents(register: RegisterFunction) {
       "A navigation has been intercepted and is starting."
     ),
     "spa:navigated": register<{ url: string }>("The swap completed and the new URL is active."),
-    "spa:component-mount": register<{ name: string; el: Element }>(
-      "A component instance attached to an element."
+    "spa:island-mount": register<{ name: string; el: Element }>(
+      "A island instance attached to an element."
     ),
-    "spa:component-unmount": register<{ name: string; el: Element }>(
-      "A component instance detached from an element."
+    "spa:island-unmount": register<{ name: string; el: Element }>(
+      "A island instance detached from an element."
     )
   };
 }

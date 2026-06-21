@@ -1,14 +1,14 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  createComponent,
+  createIsland,
   extractPageData,
   notifyNavEnd,
   notifyNavStart,
   scanAndMount,
   unmountAll,
   unmountPageSpecific
-} from "../../components";
+} from "../../islands";
 import { createState } from "../../state";
 import type { SpaState } from "../../types";
 
@@ -23,34 +23,32 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("createComponent validation", () => {
-  it("returns a ComponentDef for valid name + hooks", () => {
-    const def = createComponent("counter", { onMount() {} });
+describe("createIsland validation", () => {
+  it("returns a IslandDef for valid name + hooks", () => {
+    const def = createIsland("counter", { onMount() {} });
     expect(def).toEqual({ name: "counter", hooks: expect.any(Object) });
   });
 
   it("throws on an unknown hook key (typo like onMout)", () => {
-    expect(() => createComponent("counter", { onMout() {} } as never)).toThrow(
-      /unknown component hook/
-    );
+    expect(() => createIsland("counter", { onMout() {} } as never)).toThrow(/unknown island hook/);
   });
 
   it("throws on an empty name", () => {
-    expect(() => createComponent("", { onMount() {} })).toThrow(/non-empty string/);
+    expect(() => createIsland("", { onMount() {} })).toThrow(/non-empty string/);
   });
 
   it("throws when a hook value is not a function", () => {
-    expect(() => createComponent("x", { onMount: 5 } as never)).toThrow(/must be a function/);
+    expect(() => createIsland("x", { onMount: 5 } as never)).toThrow(/must be a function/);
   });
 
   it("uses the [web] error prefix", () => {
-    expect(() => createComponent("", {})).toThrow(/^\[web\]/);
+    expect(() => createIsland("", {})).toThrow(/^\[web\]/);
   });
 });
 
-describe("createComponent spec form", () => {
+describe("createIsland spec form", () => {
   it("accepts the plugin-mirror spec keys without flagging them as unknown hooks", () => {
-    const def = createComponent<{ n: number }, { bump(): void }>("c", {
+    const def = createIsland<{ n: number }, { bump(): void }>("c", {
       state: () => ({ n: 0 }),
       render: s => `<output>${s.n}</output>`,
       events: { "click [data-inc]": ctx => ctx.set(s => ({ n: s.n + 1 })) },
@@ -66,23 +64,23 @@ describe("createComponent spec form", () => {
   });
 
   it("still throws on a typo'd hook alongside valid spec keys", () => {
-    expect(() => createComponent("c", { state: () => ({}), onMout() {} } as never)).toThrow(
-      /unknown component hook/
+    expect(() => createIsland("c", { state: () => ({}), onMout() {} } as never)).toThrow(
+      /unknown island hook/
     );
   });
 
   it("throws when a spec extra has the wrong shape (state not a function)", () => {
-    expect(() => createComponent("c", { state: 5 } as never)).toThrow(/must be a function/);
+    expect(() => createIsland("c", { state: 5 } as never)).toThrow(/must be a function/);
   });
 
   it("throws when an events handler is not a function", () => {
-    expect(() => createComponent("c", { events: { click: 1 } } as never)).toThrow(
+    expect(() => createIsland("c", { events: { click: 1 } } as never)).toThrow(
       /must be a function/
     );
   });
 
   it("omits the spec slot entirely for the legacy hooks-only form", () => {
-    const def = createComponent("legacy", { onMount() {} });
+    const def = createIsland("legacy", { onMount() {} });
     expect(def.spec).toBeUndefined();
   });
 });
@@ -101,10 +99,10 @@ describe("extractPageData", () => {
 });
 
 describe("scanAndMount", () => {
-  it("fires onCreate then onMount in order and emits spa:component-mount", () => {
+  it("fires onCreate then onMount in order and emits spa:island-mount", () => {
     const order: string[] = [];
     const state = freshState();
-    state.registeredComponents.set("c", {
+    state.registeredIslands.set("c", {
       name: "c",
       hooks: {
         onCreate() {
@@ -115,21 +113,21 @@ describe("scanAndMount", () => {
         }
       }
     });
-    document.body.innerHTML = `<main><section><div data-component="c"></div></section></main>`;
+    document.body.innerHTML = `<main><section><div data-island="c"></div></section></main>`;
     const emit = vi.fn();
 
     scanAndMount(state, emit, "main > section");
 
     expect(order).toEqual(["onCreate", "onMount"]);
-    const el = document.querySelector("[data-component]");
-    expect(emit).toHaveBeenCalledWith("spa:component-mount", { name: "c", el });
+    const el = document.querySelector("[data-island]");
+    expect(emit).toHaveBeenCalledWith("spa:island-mount", { name: "c", el });
     expect(state.instances.size).toBe(1);
   });
 
-  it("passes the matched route slice (params/meta/locale) to the component context", () => {
+  it("passes the matched route slice (params/meta/locale) to the island context", () => {
     const state = freshState();
     let seen: { params: unknown; meta: unknown; locale: string } | undefined;
-    state.registeredComponents.set("c", {
+    state.registeredIslands.set("c", {
       name: "c",
       hooks: {
         onMount(ctx) {
@@ -137,7 +135,7 @@ describe("scanAndMount", () => {
         }
       }
     });
-    document.body.innerHTML = `<main><section><div data-component="c"></div></section></main>`;
+    document.body.innerHTML = `<main><section><div data-island="c"></div></section></main>`;
 
     scanAndMount(state, vi.fn(), "main > section", {
       params: { id: "abc" },
@@ -152,7 +150,7 @@ describe("scanAndMount", () => {
   it("defaults to an empty route slice when none is passed (params/meta empty)", () => {
     const state = freshState();
     let seen: { params: unknown; meta: unknown } | undefined;
-    state.registeredComponents.set("c", {
+    state.registeredIslands.set("c", {
       name: "c",
       hooks: {
         onMount(ctx) {
@@ -160,7 +158,7 @@ describe("scanAndMount", () => {
         }
       }
     });
-    document.body.innerHTML = `<main><section><div data-component="c"></div></section></main>`;
+    document.body.innerHTML = `<main><section><div data-island="c"></div></section></main>`;
 
     scanAndMount(state, vi.fn(), "main > section");
 
@@ -169,12 +167,12 @@ describe("scanAndMount", () => {
 
   it("classifies elements outside the swap area as persistent", () => {
     const state = freshState();
-    state.registeredComponents.set("nav", { name: "nav", hooks: {} });
-    state.registeredComponents.set("page", { name: "page", hooks: {} });
-    document.body.innerHTML = `<header><div data-component="nav"></div></header><main><section><div data-component="page"></div></section></main>`;
+    state.registeredIslands.set("nav", { name: "nav", hooks: {} });
+    state.registeredIslands.set("page", { name: "page", hooks: {} });
+    document.body.innerHTML = `<header><div data-island="nav"></div></header><main><section><div data-island="page"></div></section></main>`;
     scanAndMount(state, vi.fn(), "main > section");
-    const navEl = document.querySelector('[data-component="nav"]') as Element;
-    const pageEl = document.querySelector('[data-component="page"]') as Element;
+    const navEl = document.querySelector('[data-island="nav"]') as Element;
+    const pageEl = document.querySelector('[data-island="page"]') as Element;
     expect(state.instances.get(navEl)?.persistent).toBe(true);
     expect(state.instances.get(pageEl)?.persistent).toBe(false);
   });
@@ -182,8 +180,8 @@ describe("scanAndMount", () => {
   it("skips already-mounted elements and unregistered names", () => {
     const state = freshState();
     const onMount = vi.fn();
-    state.registeredComponents.set("c", { name: "c", hooks: { onMount } });
-    document.body.innerHTML = `<main><section><div data-component="c"></div><div data-component="missing"></div></section></main>`;
+    state.registeredIslands.set("c", { name: "c", hooks: { onMount } });
+    document.body.innerHTML = `<main><section><div data-island="c"></div><div data-island="missing"></div></section></main>`;
     scanAndMount(state, vi.fn(), "main > section");
     scanAndMount(state, vi.fn(), "main > section"); // second scan: no re-mount
     expect(onMount).toHaveBeenCalledTimes(1);
@@ -192,10 +190,10 @@ describe("scanAndMount", () => {
 });
 
 describe("unmountPageSpecific", () => {
-  it("runs onUnMount then onDestroy, emits spa:component-unmount, keeps persistent", () => {
+  it("runs onUnMount then onDestroy, emits spa:island-unmount, keeps persistent", () => {
     const order: string[] = [];
     const state = freshState();
-    state.registeredComponents.set("page", {
+    state.registeredIslands.set("page", {
       name: "page",
       hooks: {
         onUnMount() {
@@ -206,15 +204,15 @@ describe("unmountPageSpecific", () => {
         }
       }
     });
-    state.registeredComponents.set("nav", { name: "nav", hooks: {} });
-    document.body.innerHTML = `<header><div data-component="nav"></div></header><main><section><div data-component="page"></div></section></main>`;
+    state.registeredIslands.set("nav", { name: "nav", hooks: {} });
+    document.body.innerHTML = `<header><div data-island="nav"></div></header><main><section><div data-island="page"></div></section></main>`;
     const emit = vi.fn();
     scanAndMount(state, vi.fn(), "main > section");
 
     unmountPageSpecific(state, emit);
 
     expect(order).toEqual(["onUnMount", "onDestroy"]);
-    expect(emit).toHaveBeenCalledWith("spa:component-unmount", {
+    expect(emit).toHaveBeenCalledWith("spa:island-unmount", {
       name: "page",
       el: expect.any(Object)
     });
@@ -228,8 +226,8 @@ describe("unmountAll", () => {
   it("destroys persistent + page-specific instances and clears the map", () => {
     const state = freshState();
     const destroy = vi.fn();
-    state.registeredComponents.set("nav", { name: "nav", hooks: { onDestroy: destroy } });
-    document.body.innerHTML = `<header><div data-component="nav"></div></header><main><section></section></main>`;
+    state.registeredIslands.set("nav", { name: "nav", hooks: { onDestroy: destroy } });
+    document.body.innerHTML = `<header><div data-island="nav"></div></header><main><section></section></main>`;
     scanAndMount(state, vi.fn(), "main > section");
     const emit = vi.fn();
 
@@ -238,7 +236,7 @@ describe("unmountAll", () => {
     expect(destroy).toHaveBeenCalledTimes(1);
     expect(state.instances.size).toBe(0);
     expect(emit).toHaveBeenCalledWith(
-      "spa:component-unmount",
+      "spa:island-unmount",
       expect.objectContaining({ name: "nav" })
     );
   });
@@ -247,10 +245,10 @@ describe("unmountAll", () => {
 describe("scanAndMount without a swap area", () => {
   it("treats every matched element as persistent when the swap region is absent", () => {
     const state = freshState();
-    state.registeredComponents.set("c", { name: "c", hooks: {} });
-    document.body.innerHTML = `<div data-component="c"></div>`; // no `main > section`
+    state.registeredIslands.set("c", { name: "c", hooks: {} });
+    document.body.innerHTML = `<div data-island="c"></div>`; // no `main > section`
     scanAndMount(state, vi.fn(), "main > section");
-    const el = document.querySelector('[data-component="c"]') as Element;
+    const el = document.querySelector('[data-island="c"]') as Element;
     expect(state.instances.get(el)?.persistent).toBe(true);
   });
 });
@@ -259,7 +257,7 @@ describe("nav notifications", () => {
   it("notifyNavStart fires onNavStart on all instances; notifyNavEnd only on persistent", () => {
     const order: string[] = [];
     const state = freshState();
-    state.registeredComponents.set("nav", {
+    state.registeredIslands.set("nav", {
       name: "nav",
       hooks: {
         onNavStart() {
@@ -270,7 +268,7 @@ describe("nav notifications", () => {
         }
       }
     });
-    state.registeredComponents.set("page", {
+    state.registeredIslands.set("page", {
       name: "page",
       hooks: {
         onNavStart() {
@@ -281,7 +279,7 @@ describe("nav notifications", () => {
         }
       }
     });
-    document.body.innerHTML = `<header><div data-component="nav"></div></header><main><section><div data-component="page"></div></section></main>`;
+    document.body.innerHTML = `<header><div data-island="nav"></div></header><main><section><div data-island="page"></div></section></main>`;
     scanAndMount(state, vi.fn(), "main > section");
 
     notifyNavStart(state);

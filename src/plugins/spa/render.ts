@@ -48,17 +48,17 @@ export function renderVNode(vnode: VNode, region: Element): void {
 }
 
 /**
- * Commit a component's VNode into its host as a DIFF — the in-interaction render
+ * Commit an island's VNode into its host as a DIFF — the in-interaction render
  * path. Unlike {@link renderVNode} (which RESETS the region: unmount → clear → mount,
  * correct for a navigation swap of static SSR markup), this is a plain Preact
  * `render(vnode, host)` that diffs against Preact's retained vdom, preserving focus,
  * scroll, and uncontrolled input state across re-renders triggered by `ctx.set`.
  *
- * Reached ONLY through the lazy `await import("./render")` gate (the component render
- * scheduler in `components.ts`), so an app whose islands never return a VNode never
+ * Reached ONLY through the lazy `await import("./render")` gate (the island render
+ * scheduler in `islands.ts`), so an app whose islands never return a VNode never
  * pulls Preact's `render` into its main bundle.
  *
- * @param vnode - The VNode produced by a component's `render(state, ctx)`.
+ * @param vnode - The VNode produced by an island's `render(state, ctx)`.
  * @param host - The island's host element to render into.
  * @example
  * ```ts

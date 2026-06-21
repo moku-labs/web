@@ -1,6 +1,6 @@
 /**
- * @file spa plugin — component lifecycle, mounting, the plugin-mirror authoring
- * surface (`createComponent` with a typed `{ state, render, events, api }` spec),
+ * @file spa plugin — island lifecycle, mounting, the plugin-mirror authoring
+ * surface (`createIsland` with a typed `{ state, render, events, api }` spec),
  * the per-instance state + microtask-batched render scheduler, declarative
  * delegated events, and the cross-island api registry.
  * @see README.md
@@ -8,17 +8,17 @@
 
 import {
   type AnyVNode,
-  COMPONENT_HOOK_NAMES,
-  type ComponentContext,
+  ISLAND_HOOK_NAMES,
+  type IslandContext,
   // eslint-disable-next-line unicorn/prevent-abbreviations -- canonical public type name per spec
-  type ComponentDef,
-  type ComponentEventHandler,
-  type ComponentEvents,
-  type ComponentHooks,
-  type ComponentInstance,
-  type ComponentRouteSlice,
-  type ComponentSpec,
-  type ComponentSpecExtras,
+  type IslandDef,
+  type IslandEventHandler,
+  type IslandEvents,
+  type IslandHooks,
+  type IslandInstance,
+  type IslandRouteSlice,
+  type IslandSpec,
+  type IslandSpecExtras,
   type PageData,
   type RenderResult,
   type SpaEmitFunction,
@@ -29,16 +29,16 @@ import {
 const ERROR_PREFIX = "[web]";
 
 /** The set of legal hook names, frozen for O(1) membership checks. */
-const HOOK_NAME_SET: ReadonlySet<string> = new Set(COMPONENT_HOOK_NAMES);
+const HOOK_NAME_SET: ReadonlySet<string> = new Set(ISLAND_HOOK_NAMES);
 
-/** The spec-only keys that select the plugin-mirror form of {@link createComponent}. */
+/** The spec-only keys that select the plugin-mirror form of {@link createIsland}. */
 const SPEC_KEYS: ReadonlySet<string> = new Set(["state", "render", "events", "api"]);
 
 /** Synchronous re-entrancy cap for the render scheduler (a render that calls `ctx.flush`). */
 const MAX_RENDER_DEPTH = 25;
 
-/** The matched-route slice merged onto the component context (params/meta/locale + link builder). */
-export type RouteSlice = ComponentRouteSlice;
+/** The matched-route slice merged onto the island context (params/meta/locale + link builder). */
+export type RouteSlice = IslandRouteSlice;
 
 /**
  * No-op link builder for the {@link EMPTY_ROUTE} slice (used when no route matched).
@@ -63,7 +63,7 @@ const EMPTY_ROUTE: RouteSlice = { params: {}, meta: {}, locale: "", url: noUrl }
 function noop(): void {}
 
 // ─── lazy Preact-render gate ──────────────────────────────────────────────────
-// The component render scheduler reaches Preact's `render` ONLY through this dynamic
+// The island render scheduler reaches Preact's `render` ONLY through this dynamic
 // import, so an app whose islands never return a VNode never pulls Preact's `render`
 // into its main bundle (the browser bundle-assertion gate).
 
@@ -74,7 +74,7 @@ let commitVNodeFunction: typeof import("./render").commitVNode | undefined;
 
 /**
  * Load the lazy `./render` chunk (once) and cache its `commitVNode` for synchronous
- * use by later renders. Awaited by a component's `mountPromise` so the test harness's
+ * use by later renders. Awaited by a island's `mountPromise` so the test harness's
  * `settle()` can deterministically flush a VNode render.
  *
  * @returns A promise that resolves once `commitVNode` is available.
@@ -93,7 +93,7 @@ async function loadRenderChunk(): Promise<void> {
  * a Preact `VNode` → committed through the lazy gate (loading it on demand if needed).
  *
  * @param host - The island host element to render into.
- * @param result - The value returned by the component's `render`.
+ * @param result - The value returned by the island's `render`.
  * @example
  * commitResult(host, h(View, { items }));
  */
@@ -120,7 +120,7 @@ function commitResult(host: Element, result: RenderResult): void {
 }
 
 /**
- * Run a component's `render(state, ctx)` and commit the result now. Guards against
+ * Run a island's `render(state, ctx)` and commit the result now. Guards against
  * synchronous re-entrancy (a render that calls `ctx.flush`) with a depth cap.
  *
  * @param instance - The instance to render.
@@ -128,13 +128,13 @@ function commitResult(host: Element, result: RenderResult): void {
  * @example
  * runRender(instance);
  */
-function runRender(instance: ComponentInstance): void {
+function runRender(instance: IslandInstance): void {
   const render = instance.def.spec?.render;
   if (!render) return;
 
   if (instance.renderDepth > MAX_RENDER_DEPTH) {
     throw new Error(
-      `${ERROR_PREFIX} component "${instance.def.name}" render re-entered ${MAX_RENDER_DEPTH}+ times\n  → a render must not synchronously trigger its own render (avoid ctx.flush() inside render)`
+      `${ERROR_PREFIX} island "${instance.def.name}" render re-entered ${MAX_RENDER_DEPTH}+ times\n  → a render must not synchronously trigger its own render (avoid ctx.flush() inside render)`
     );
   }
 
@@ -154,7 +154,7 @@ function runRender(instance: ComponentInstance): void {
  * @example
  * scheduleRender(instance);
  */
-function scheduleRender(instance: ComponentInstance): void {
+function scheduleRender(instance: IslandInstance): void {
   if (!instance.def.spec?.render || instance.renderScheduled) return;
   instance.renderScheduled = true;
   queueMicrotask(() => {
@@ -166,18 +166,18 @@ function scheduleRender(instance: ComponentInstance): void {
 }
 
 /**
- * Build the single per-instance {@link ComponentContext} reused by every hook, event
+ * Build the single per-instance {@link IslandContext} reused by every hook, event
  * handler, and render. Route fields (`params`/`meta`/`locale`/`url`) and `data` read
  * through the instance so a navigation update is reflected without rebuilding the ctx;
- * `state`/`set`/`flush`/`cleanup`/`component` are bound to the instance + plugin state.
+ * `state`/`set`/`flush`/`cleanup`/`island` are bound to the instance + plugin state.
  *
- * @param state - The plugin state (for the cross-island `component` resolver).
+ * @param state - The plugin state (for the cross-island `island` resolver).
  * @param instance - The instance the context is bound to.
  * @returns The instance-bound context.
  * @example
  * instance.ctx = buildContext(state, instance);
  */
-function buildContext(state: SpaState, instance: ComponentInstance): ComponentContext<object> {
+function buildContext(state: SpaState, instance: IslandInstance): IslandContext<object> {
   return {
     el: instance.el,
     /**
@@ -275,13 +275,13 @@ function buildContext(state: SpaState, instance: ComponentInstance): ComponentCo
     /**
      * Resolve another island's registered api by name (`undefined` when absent).
      *
-     * @param name - The provider island's component name.
+     * @param name - The provider island's island name.
      * @returns The provider's api, or `undefined`.
      * @example
-     * ctx.component("lightbox");
+     * ctx.island("lightbox");
      */
-    component<T = unknown>(name: string): T | undefined {
-      return state.componentApis.get(name) as T | undefined;
+    island<T = unknown>(name: string): T | undefined {
+      return state.islandApis.get(name) as T | undefined;
     }
   };
 }
@@ -307,7 +307,7 @@ function matchTarget(host: Element, event: Event, selector: string): Element | u
 }
 
 /**
- * Attach a component's declarative `events` map: one real listener per event TYPE on
+ * Attach a island's declarative `events` map: one real listener per event TYPE on
  * the host (dispatch walks `closest(selector)` for each registered selector), each
  * removed via the instance's cleanup registry on destroy.
  *
@@ -317,11 +317,11 @@ function matchTarget(host: Element, event: Event, selector: string): Element | u
  * @example
  * attachEvents(instance, { "click [data-action]": (ctx, e, el) => {} });
  */
-function attachEvents(instance: ComponentInstance, events: ComponentEvents<object>): void {
+function attachEvents(instance: IslandInstance, events: IslandEvents<object>): void {
   const host = instance.el;
   const byType = new Map<
     string,
-    Array<{ selector: string; handler: ComponentEventHandler<object> }>
+    Array<{ selector: string; handler: IslandEventHandler<object> }>
   >();
 
   // Group handlers by event type so each type attaches exactly one delegated listener.
@@ -331,7 +331,7 @@ function attachEvents(instance: ComponentInstance, events: ComponentEvents<objec
     const selector = space === -1 ? "" : key.slice(space + 1).trim();
     if (type === "") {
       throw new Error(
-        `${ERROR_PREFIX} component "${instance.def.name}" event key must start with an event type: "${key}"\n  → use "<type>" or "<type> <selector>" (e.g. "click [data-action]")`
+        `${ERROR_PREFIX} island "${instance.def.name}" event key must start with an event type: "${key}"\n  → use "<type>" or "<type> <selector>" (e.g. "click [data-action]")`
       );
     }
     const list = byType.get(type) ?? [];
@@ -357,30 +357,26 @@ function attachEvents(instance: ComponentInstance, events: ComponentEvents<objec
  * Validate a single hook entry: its key must be a known hook name and its value
  * must be a function. Throws fail-fast on the first violation.
  *
- * @param componentName - The owning component name (for error messages).
+ * @param islandName - The owning island name (for error messages).
  * @param source - The raw authoring object being validated.
  * @param key - The hook key to validate.
- * @throws {Error} If `key` is not in `COMPONENT_HOOK_NAMES`.
+ * @throws {Error} If `key` is not in `ISLAND_HOOK_NAMES`.
  * @throws {TypeError} If the hook value is not a function.
  * @example
  * validateHookEntry("counter", source, "onMount");
  */
-function validateHookEntry(
-  componentName: string,
-  source: Record<string, unknown>,
-  key: string
-): void {
+function validateHookEntry(islandName: string, source: Record<string, unknown>, key: string): void {
   // Reject typo'd / unknown hook names so e.g. `onMout` fails immediately.
   if (!HOOK_NAME_SET.has(key)) {
     throw new Error(
-      `${ERROR_PREFIX} unknown component hook "${key}" on "${componentName}"\n  → valid hooks: ${COMPONENT_HOOK_NAMES.join(", ")}\n  → spec keys: state, render, events, api`
+      `${ERROR_PREFIX} unknown island hook "${key}" on "${islandName}"\n  → valid hooks: ${ISLAND_HOOK_NAMES.join(", ")}\n  → spec keys: state, render, events, api`
     );
   }
 
   // Reject non-function values for an otherwise-valid hook name.
   if (typeof source[key] !== "function") {
     throw new TypeError(
-      `${ERROR_PREFIX} component hook "${key}" on "${componentName}" must be a function\n  → provide a function or omit the hook`
+      `${ERROR_PREFIX} island hook "${key}" on "${islandName}" must be a function\n  → provide a function or omit the hook`
     );
   }
 }
@@ -389,17 +385,17 @@ function validateHookEntry(
  * Validate the spec extras (`state`/`render`/`api` must be functions; `events` must be
  * a plain object of functions). Throws fail-fast on the first violation.
  *
- * @param componentName - The owning component name (for error messages).
+ * @param islandName - The owning island name (for error messages).
  * @param extras - The partitioned spec extras to validate.
  * @throws {TypeError} If a present extra has the wrong shape.
  * @example
  * validateSpecExtras("board", { state: () => ({}) });
  */
-function validateSpecExtras(componentName: string, extras: ComponentSpecExtras): void {
+function validateSpecExtras(islandName: string, extras: IslandSpecExtras): void {
   for (const key of ["state", "render", "api"] as const) {
     if (extras[key] !== undefined && typeof extras[key] !== "function") {
       throw new TypeError(
-        `${ERROR_PREFIX} component "${key}" on "${componentName}" must be a function\n  → provide a function or omit it`
+        `${ERROR_PREFIX} island "${key}" on "${islandName}" must be a function\n  → provide a function or omit it`
       );
     }
   }
@@ -408,13 +404,13 @@ function validateSpecExtras(componentName: string, extras: ComponentSpecExtras):
     const isObject = typeof events === "object";
     if (!isObject) {
       throw new TypeError(
-        `${ERROR_PREFIX} component "events" on "${componentName}" must be an object of handlers`
+        `${ERROR_PREFIX} island "events" on "${islandName}" must be an object of handlers`
       );
     }
     for (const [key, handler] of Object.entries(events)) {
       if (typeof handler !== "function") {
         throw new TypeError(
-          `${ERROR_PREFIX} component event "${key}" on "${componentName}" must be a function`
+          `${ERROR_PREFIX} island event "${key}" on "${islandName}" must be a function`
         );
       }
     }
@@ -422,33 +418,33 @@ function validateSpecExtras(componentName: string, extras: ComponentSpecExtras):
 }
 
 /**
- * Create a validated component definition. Accepts either the legacy hooks-only form
- * (`createComponent("counter", { onMount() {} })`) or the plugin-mirror spec form
- * (`createComponent("board", { state, render, events, api, ...hooks })`). Spec-only
+ * Create a validated island definition. Accepts either the legacy hooks-only form
+ * (`createIsland("counter", { onMount() {} })`) or the plugin-mirror spec form
+ * (`createIsland("board", { state, render, events, api, ...hooks })`). Spec-only
  * keys (`state`/`render`/`events`/`api`) are partitioned out before hook-name
  * validation, so a real typo (e.g. `onMout`) still throws immediately while the spec
  * keys are accepted.
  *
- * @param name - Unique component name.
+ * @param name - Unique island name.
  * @param spec - Lifecycle hooks, or the `{ state, render, events, api, ...hooks }` spec.
- * @returns A `ComponentDef` ready to `register`.
+ * @returns A `IslandDef` ready to `register`.
  * @throws {Error} If `name` is empty, a hook key is unknown, or an extra/hook value has the wrong shape.
  * @example
- * const counter = createComponent("counter", { onMount({ el }) { el.textContent = "0"; } });
+ * const counter = createIsland("counter", { onMount({ el }) { el.textContent = "0"; } });
  * @example
- * const list = createComponent<{ items: string[] }>("list", {
+ * const list = createIsland<{ items: string[] }>("list", {
  *   state: () => ({ items: [] }),
  *   render: (s) => h(List, { items: s.items })
  * });
  */
-export function createComponent<S extends object = object, A = unknown>(
+export function createIsland<S extends object = object, A = unknown>(
   name: string,
-  spec: ComponentSpec<S, A>
-): ComponentDef {
+  spec: IslandSpec<S, A>
+): IslandDef {
   // Guard: the name must be a non-empty (post-trim) identifier.
   if (name.trim() === "") {
     throw new Error(
-      `${ERROR_PREFIX} component name must be a non-empty string\n  → pass a unique name to createComponent("name", hooks)`
+      `${ERROR_PREFIX} island name must be a non-empty string\n  → pass a unique name to createIsland("name", hooks)`
     );
   }
 
@@ -464,14 +460,14 @@ export function createComponent<S extends object = object, A = unknown>(
     validateHookEntry(name, source, key);
     hooks[key] = source[key];
   }
-  validateSpecExtras(name, extras as ComponentSpecExtras);
+  validateSpecExtras(name, extras as IslandSpecExtras);
 
   const hasExtras = Object.keys(extras).length > 0;
-  // The legacy and spec forms both produce the opaque ComponentDef token (author
+  // The legacy and spec forms both produce the opaque IslandDef token (author
   // inference lives on the overload signatures; the registry stores the erased form).
   return hasExtras
-    ? { name, hooks: hooks as ComponentHooks<object>, spec: extras as ComponentSpecExtras }
-    : { name, hooks: hooks as ComponentHooks<object> };
+    ? { name, hooks: hooks as IslandHooks<object>, spec: extras as IslandSpecExtras }
+    : { name, hooks: hooks as IslandHooks<object> };
 }
 
 /**
@@ -513,7 +509,7 @@ function currentPageData(): PageData {
  * @example
  * runHook(instance, "onDestroy");
  */
-function runHook(instance: ComponentInstance, hook: keyof ComponentHooks<object>): void {
+function runHook(instance: IslandInstance, hook: keyof IslandHooks<object>): void {
   instance.def.hooks[hook]?.(instance.ctx);
 }
 
@@ -526,7 +522,7 @@ function runHook(instance: ComponentInstance, hook: keyof ComponentHooks<object>
  * @example
  * disposeInstance(state, instance);
  */
-function disposeInstance(state: SpaState, instance: ComponentInstance): void {
+function disposeInstance(state: SpaState, instance: IslandInstance): void {
   for (let index = instance.cleanups.length - 1; index >= 0; index -= 1) {
     try {
       instance.cleanups[index]?.();
@@ -538,24 +534,24 @@ function disposeInstance(state: SpaState, instance: ComponentInstance): void {
   instance.renderScheduled = false;
 
   // Drop this instance's api from the registry only if it still owns the entry.
-  if (instance.api !== undefined && state.componentApis.get(instance.def.name) === instance.api) {
-    state.componentApis.delete(instance.def.name);
+  if (instance.api !== undefined && state.islandApis.get(instance.def.name) === instance.api) {
+    state.islandApis.delete(instance.def.name);
   }
 }
 
 /**
- * Mounts a single `data-component` element: classifies persistent vs page-specific,
+ * Mounts a single `data-island` element: classifies persistent vs page-specific,
  * builds the instance + its bound context, initializes per-instance `state`, registers
  * its `api`, attaches declarative `events`, fires `onCreate` then `onMount` (capturing
  * an async `onMount` + render-chunk load as `mountPromise`), schedules the initial
- * render, records it, and emits `spa:component-mount`. No-ops if the element is already
- * mounted, has no component name, or names an unregistered component.
+ * render, records it, and emits `spa:island-mount`. No-ops if the element is already
+ * mounted, has no island name, or names an unregistered island.
  *
- * @param state - The plugin state (registeredComponents + instances + componentApis).
- * @param emit - The event emitter for spa:component-mount.
+ * @param state - The plugin state (registeredIslands + instances + islandApis).
+ * @param emit - The event emitter for spa:island-mount.
  * @param swapArea - The swap-region element, or null when none was found.
  * @param data - The current page data payload.
- * @param element - The candidate element carrying a `data-component` attribute.
+ * @param element - The candidate element carrying a `data-island` attribute.
  * @param route - The matched-route slice for the current URL (params/meta/locale/url).
  * @example
  * mountElement(state, emit, swapArea, data, element, route);
@@ -571,20 +567,20 @@ function mountElement(
   // Skip elements already bound to a live instance.
   if (state.instances.has(element)) return;
 
-  // Skip elements whose component name is missing or unregistered.
-  const name = element.dataset.component;
+  // Skip elements whose island name is missing or unregistered.
+  const name = element.dataset.island;
   if (!name) return;
-  const definition = state.registeredComponents.get(name);
+  const definition = state.registeredIslands.get(name);
   if (!definition) return;
 
   // Persistent when outside the swap area (or when there is no swap area).
   const isPersistent = swapArea ? !swapArea.contains(element) : true;
-  const instance: ComponentInstance = {
+  const instance: IslandInstance = {
     def: definition,
     el: element,
     persistent: isPersistent,
     // The ctx is bound to this instance right after construction (it reads the fields below).
-    ctx: undefined as unknown as ComponentContext<object>,
+    ctx: undefined as unknown as IslandContext<object>,
     state: undefined,
     api: undefined,
     route,
@@ -609,7 +605,7 @@ function mountElement(
   // 2. Register the island's api under its name (cross-island seam; last-registered-wins).
   if (spec?.api) {
     instance.api = spec.api(instance.ctx);
-    state.componentApis.set(definition.name, instance.api);
+    state.islandApis.set(definition.name, instance.api);
   }
   // 3. Attach declarative delegated events (auto-removed on destroy via the cleanup stack).
   if (spec?.events) attachEvents(instance, spec.events);
@@ -633,18 +629,18 @@ function mountElement(
   instance.mountPromise = pending.length > 0 ? Promise.all(pending).then(() => {}) : undefined;
 
   state.instances.set(element, instance);
-  emit("spa:component-mount", { name: definition.name, el: element });
+  emit("spa:island-mount", { name: definition.name, el: element });
 }
 
 /**
- * Scans the swap region, mounts components for matching `data-component` elements,
+ * Scans the swap region, mounts islands for matching `data-island` elements,
  * classifies persistent (outside swap area) vs page-specific (inside), runs
- * `onCreate`/`onMount` + initial render, and emits `spa:component-mount` per instance.
+ * `onCreate`/`onMount` + initial render, and emits `spa:island-mount` per instance.
  * Already-mounted elements are skipped.
  *
- * @param state - The plugin state (registeredComponents + instances + componentApis).
- * @param emit - The event emitter for spa:component-mount.
- * @param swapSelector - CSS selector bounding page-specific components.
+ * @param state - The plugin state (registeredIslands + instances + islandApis).
+ * @param emit - The event emitter for spa:island-mount.
+ * @param swapSelector - CSS selector bounding page-specific islands.
  * @param route - The matched-route slice for the current URL (params/meta/locale/url).
  * @example
  * scanAndMount(state, emit, "main > section", route);
@@ -663,7 +659,7 @@ export function scanAndMount(
   const data = extractPageData(document);
 
   // Mount each candidate element (the helper skips already-mounted/invalid ones).
-  for (const element of document.querySelectorAll<HTMLElement>("[data-component]")) {
+  for (const element of document.querySelectorAll<HTMLElement>("[data-island]")) {
     mountElement(state, emit, swapArea, data, element, route);
   }
 }
@@ -671,11 +667,11 @@ export function scanAndMount(
 /**
  * Unmounts page-specific instances inside the swap region (runs `onUnMount` then
  * `onDestroy`, then their cleanup disposers + api unregister), removes them from state,
- * and emits `spa:component-unmount`. Persistent instances (outside the swap area) are
+ * and emits `spa:island-unmount`. Persistent instances (outside the swap area) are
  * left in place.
  *
  * @param state - The plugin state holding live instances.
- * @param emit - The event emitter for spa:component-unmount.
+ * @param emit - The event emitter for spa:island-unmount.
  * @example
  * unmountPageSpecific(state, emit);
  */
@@ -688,18 +684,18 @@ export function unmountPageSpecific(state: SpaState, emit: SpaEmitFunction): voi
     runHook(instance, "onDestroy");
     disposeInstance(state, instance);
     state.instances.delete(element);
-    emit("spa:component-unmount", { name: instance.def.name, el: element });
+    emit("spa:island-unmount", { name: instance.def.name, el: element });
   }
 }
 
 /**
  * Disposes ALL live instances (persistent and page-specific) on teardown: runs
  * `onUnMount` then `onDestroy`, then their cleanup disposers + api unregister, emits
- * `spa:component-unmount`, and clears the instance + api maps. Used by the kernel's
+ * `spa:island-unmount`, and clears the instance + api maps. Used by the kernel's
  * `dispose` on plugin stop.
  *
  * @param state - The plugin state holding live instances.
- * @param emit - The event emitter for spa:component-unmount.
+ * @param emit - The event emitter for spa:island-unmount.
  * @example
  * unmountAll(state, emit);
  */
@@ -710,10 +706,10 @@ export function unmountAll(state: SpaState, emit: SpaEmitFunction): void {
     runHook(instance, "onUnMount");
     runHook(instance, "onDestroy");
     disposeInstance(state, instance);
-    emit("spa:component-unmount", { name: instance.def.name, el: element });
+    emit("spa:island-unmount", { name: instance.def.name, el: element });
   }
   state.instances.clear();
-  state.componentApis.clear();
+  state.islandApis.clear();
 }
 
 /**

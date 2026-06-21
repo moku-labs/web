@@ -6,7 +6,7 @@ import {
   scanAndMount,
   unmountAll,
   unmountPageSpecific
-} from "../../components";
+} from "../../islands";
 import { createState } from "../../state";
 
 /** Fresh state with one persistent instance preloaded (no DOM needed). */
@@ -41,7 +41,7 @@ function stateWithInstance() {
   return { state, calls };
 }
 
-describe("components are headless-safe (no document)", () => {
+describe("islands are headless-safe (no document)", () => {
   it("scanAndMount is a no-op without a DOM", () => {
     const state = createState({ global: {}, config: {} });
     expect(() => scanAndMount(state, vi.fn(), "main > section")).not.toThrow();

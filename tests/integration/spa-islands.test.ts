@@ -3,20 +3,20 @@
  * @file Integration scenario 3a — SPA client runtime + island hydration.
  *
  * Drives the real `createApp` in SPA mode under happy-dom: registers an island
- * component, boots the client runtime, asserts the island mounts into its
- * `data-component` element, that client navigation swaps the page region + title
+ * island, boots the client runtime, asserts the island mounts into its
+ * `data-island` element, that client navigation swaps the page region + title
  * and re-mounts islands, and that `stop()` tears the runtime down.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { contentPlugin, createApp, defineRoutes, fileSystemContent, route } from "../../src";
-import { createComponent } from "../../src/plugins/spa";
+import { createIsland } from "../../src/plugins/spa";
 import { FIXTURE_CONTENT_DIR, SITE } from "./helpers/harness";
 
 let mounts = 0;
 let unmounts = 0;
 
 /** A minimal island: flags its element on mount, counts mount/unmount lifecycles. */
-const counter = createComponent("counter", {
+const counter = createIsland("counter", {
   onMount({ el }) {
     mounts += 1;
     (el as HTMLElement).dataset.mounted = "1";
@@ -45,7 +45,7 @@ function makeSpaApp() {
       i18n: { locales: ["en"], defaultLocale: "en" },
       content: { providers: [fileSystemContent({ contentDir: FIXTURE_CONTENT_DIR })] },
       head: {},
-      spa: { progressBar: false, components: [counter] },
+      spa: { progressBar: false, islands: [counter] },
       router: { routes }
     }
   });
@@ -62,7 +62,7 @@ let app: ReturnType<typeof makeSpaApp>;
 beforeEach(() => {
   mounts = 0;
   unmounts = 0;
-  document.body.innerHTML = `<main><section id="page"><div data-component="counter">home</div></section></main>`;
+  document.body.innerHTML = `<main><section id="page"><div data-island="counter">home</div></section></main>`;
   document.head.innerHTML = "<title>Home</title>";
 });
 
@@ -74,11 +74,11 @@ afterEach(async () => {
 });
 
 describe("integration: SPA islands + client navigation", () => {
-  it("mounts a registered island into its data-component element on start", async () => {
+  it("mounts a registered island into its data-island element on start", async () => {
     app = makeSpaApp();
     await app.start();
 
-    const el = document.querySelector<HTMLElement>('[data-component="counter"]');
+    const el = document.querySelector<HTMLElement>('[data-island="counter"]');
     expect(el?.dataset.mounted).toBe("1");
     expect(mounts).toBe(1);
   });
@@ -90,7 +90,7 @@ describe("integration: SPA islands + client navigation", () => {
       "fetch",
       vi.fn(() =>
         Promise.resolve(
-          new Response(pageHtml("About", '<div data-component="counter">about</div>'), {
+          new Response(pageHtml("About", '<div data-island="counter">about</div>'), {
             status: 200
           })
         )
@@ -101,7 +101,7 @@ describe("integration: SPA islands + client navigation", () => {
     await vi.waitFor(() => expect(app.spa.current()).toBe("/about/"));
 
     expect(document.title).toBe("About");
-    const el = document.querySelector<HTMLElement>('[data-component="counter"]');
+    const el = document.querySelector<HTMLElement>('[data-island="counter"]');
     expect(el?.textContent).toContain("about");
     // The freshly-swapped island instance mounted; the previous one unmounted.
     expect(el?.dataset.mounted).toBe("1");

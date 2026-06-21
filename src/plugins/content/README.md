@@ -74,7 +74,7 @@ Per-source options live on the provider, not here. The Node `fileSystemContent(o
 
 ## Lazy iframe embeds
 
-Opt-in rewriting of `::embed` leaf directives into **static click-to-activate facades** — the article never loads the embedded document (no request, no third-party JS, no scroll-jacking) until the reader clicks. The build emits only a `<figure class="lazy-embed">` carrying the target in data attributes plus an activation `<button>`; the companion **`lazyEmbed` SPA island** (exported from both entries, register it in `pluginConfigs.spa.components`) swaps the facade for the real `<iframe loading="lazy">` on click.
+Opt-in rewriting of `::embed` leaf directives into **static click-to-activate facades** — the article never loads the embedded document (no request, no third-party JS, no scroll-jacking) until the reader clicks. The build emits only a `<figure class="lazy-embed">` carrying the target in data attributes plus an activation `<button>`; the companion **`lazyEmbed` SPA island** (exported from both entries, register it in `pluginConfigs.spa.islands`) swaps the facade for the real `<iframe loading="lazy">` on click.
 
 ```md
 <!-- External URL -->
@@ -90,7 +90,7 @@ fileSystemContent({ contentDir: "./content", trustedContent: true, embed: true }
 
 // Client side — register the activator island:
 import { lazyEmbed } from "@moku-labs/web/browser";
-createApp({ pluginConfigs: { spa: { components: [lazyEmbed] } } });
+createApp({ pluginConfigs: { spa: { islands: [lazyEmbed] } } });
 ```
 
 - **`trustedContent: true` is required.** The facade is raw HTML the sanitize pass would strip — and embedding third-party iframes is never safe for untrusted Markdown. `fileSystemContent` rejects the combination at construction.
@@ -100,7 +100,7 @@ createApp({ pluginConfigs: { spa: { components: [lazyEmbed] } } });
   - a **co-located relative path** (`./game/index.html`, `../shared/game/`, `game/index.html`) pointing at a **pre-built** static bundle shipped next to the article — drop it at `content/<slug>/game/` exactly like the `images/` dir. The content-assets build phase copies **every** co-located subdirectory (not just `images/`; `.`/`_`-prefixed dirs are private and skipped) to `dist/<slug>/<dir>/`, and the relative `src` is resolved to the single shared `/<slug>/…` URL so it loads identically from every locale page. Nothing is bundled or transformed — the bundle ships as-is.
   - `javascript:`/`data:`/protocol-relative (`//host`) URLs fail the build.
 - **Sizing (optional):** `width` and `height` (positive integers, **pixels**, set together) reserve the facade box at that aspect ratio via an inline `aspect-ratio` + `max-width` — so a portrait game frame holds its shape with **no layout shift** before activation. Omit both to let consumer CSS size the box.
-- Facade markup: `<figure class="lazy-embed" data-component="lazy-embed" data-embed-src="…" data-embed-title="…"[ data-embed-width="…" data-embed-height="…" style="aspect-ratio: … / …; max-width: …px;"]>…facade inner…</figure>`. On activation the island injects `<iframe class="lazy-embed-frame" loading="lazy" allowfullscreen>` and sets `data-embed-active` on the figure. All visual chrome (`.lazy-embed*`, the activated state) is **consumer CSS** — the framework ships none.
+- Facade markup: `<figure class="lazy-embed" data-island="lazy-embed" data-embed-src="…" data-embed-title="…"[ data-embed-width="…" data-embed-height="…" style="aspect-ratio: … / …; max-width: …px;"]>…facade inner…</figure>`. On activation the island injects `<iframe class="lazy-embed-frame" loading="lazy" allowfullscreen>` and sets `data-embed-active` on the figure. All visual chrome (`.lazy-embed*`, the activated state) is **consumer CSS** — the framework ships none.
 - The `<figure>` data attributes are HTML-escaped; the iframe is granted `fullscreen; autoplay; gamepad`.
 
 ### Customizing the facade (a Preact component)
@@ -130,7 +130,7 @@ fileSystemContent({ contentDir: "./content", trustedContent: true, embed: { faca
 
 ## Folder galleries
 
-Opt-in rewriting of `::gallery` leaf directives into a **swipeable image set built from a co-located folder**. The framework reads the directive's `src` folder (relative to the article, like its `images/` dir), sorts the images, rewrites each to its shared `/<slug>/…` URL (identical from every locale page), and renders them through a **consumer Preact component** — SSR'd to static markup at build time inside a framework-owned `<div class="gallery" data-component="gallery">`. Pair it with a gallery SPA island for paging / keyboard / lightbox; with no island and no CSS the default component is already a plain scrollable strip.
+Opt-in rewriting of `::gallery` leaf directives into a **swipeable image set built from a co-located folder**. The framework reads the directive's `src` folder (relative to the article, like its `images/` dir), sorts the images, rewrites each to its shared `/<slug>/…` URL (identical from every locale page), and renders them through a **consumer Preact component** — SSR'd to static markup at build time inside a framework-owned `<div class="gallery" data-island="gallery">`. Pair it with a gallery SPA island for paging / keyboard / lightbox; with no island and no CSS the default component is already a plain scrollable strip.
 
 ```md
 ::gallery{src="./images/mage-knight/" caption="Our Mage Knight session"}
@@ -143,7 +143,7 @@ fileSystemContent({ contentDir: "./content", trustedContent: true, gallery: true
 - **`trustedContent: true` is required.** The gallery markup is raw HTML the sanitize pass would strip. `fileSystemContent` rejects the combination at construction.
 - **The `src` is a co-located folder**, resolved like the article's `images/` dir; the build copies the folder to `dist/<slug>/<dir>/` (see [content-images](../build/phases/content-images.ts), generalized in v1.11.0). A missing or image-less folder fails the build with the offending path quoted.
 - Folder order = filename sort, so name slides `01-…`, `02-…` to control order.
-- Wrapper markup: `<div class="gallery" data-component="gallery">…component inner…</div>`. All visual chrome (`.gallery*` / `data-*` hooks, the swipe/dot/lightbox behavior) is **consumer CSS + island** — the framework ships none.
+- Wrapper markup: `<div class="gallery" data-island="gallery">…component inner…</div>`. All visual chrome (`.gallery*` / `data-*` hooks, the swipe/dot/lightbox behavior) is **consumer CSS + island** — the framework ships none.
 
 ### Customizing the gallery (a Preact component)
 
@@ -166,7 +166,7 @@ fileSystemContent({ contentDir: "./content", trustedContent: true, gallery: { co
 
 - `GalleryProps` = `{ slides, caption, attributes }` — `slides` is the resolved `{ src, alt }[]` (URLs rewritten, alt = `caption · N`), `attributes` is the full raw directive bag (your custom options, e.g. `::gallery{… layout="dots"}`, live there). Exported type.
 - `GalleryTrack` is the **default** inner content (a plain slide track), exported so you can compose it instead of reimplementing.
-- The component is build-time SSR only — never hydrated. Keep it presentational; interactivity arrives from your gallery island (mount it on `[data-component="gallery"]`).
+- The component is build-time SSR only — never hydrated. Keep it presentational; interactivity arrives from your gallery island (mount it on `[data-island="gallery"]`).
 
 ## Mermaid diagrams
 

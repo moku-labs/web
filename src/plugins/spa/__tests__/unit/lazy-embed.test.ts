@@ -4,13 +4,13 @@ import { lazyEmbed } from "../../lazy-embed";
 
 /** The facade markup the content pipeline's ::embed directive emits. */
 const FACADE_HTML =
-  '<figure class="lazy-embed" data-component="lazy-embed"' +
+  '<figure class="lazy-embed" data-island="lazy-embed"' +
   ' data-embed-src="https://game.example.com/" data-embed-title="My Game">' +
   '<button type="button" class="lazy-embed-button" aria-label="Load embed: My Game">' +
   '<span class="lazy-embed-title">My Game</span>' +
   "</button></figure>";
 
-/** A full component context bound to an element (the additive fields are inert stubs). */
+/** A full island context bound to an element (the additive fields are inert stubs). */
 function stubCtx(el: HTMLElement) {
   return {
     el,
@@ -23,7 +23,7 @@ function stubCtx(el: HTMLElement) {
     set: () => {},
     flush: () => {},
     cleanup: () => {},
-    component: () => undefined
+    island: () => undefined
   };
 }
 
@@ -40,7 +40,7 @@ afterEach(() => {
 });
 
 describe("spa/lazy-embed island", () => {
-  it("is named to match the facade's data-component", () => {
+  it("is named to match the facade's data-island", () => {
     expect(lazyEmbed.name).toBe("lazy-embed");
   });
 
@@ -63,7 +63,7 @@ describe("spa/lazy-embed island", () => {
   it("activates on a click anywhere on the facade (so custom inner markup works)", () => {
     // A consumer facade with NO .lazy-embed-button — just a div.
     const figure = mountFacade(
-      '<figure class="lazy-embed" data-component="lazy-embed"' +
+      '<figure class="lazy-embed" data-island="lazy-embed"' +
         ' data-embed-src="https://game.example.com/" data-embed-title="My Game">' +
         '<div class="poster">click me</div></figure>'
     );
@@ -87,7 +87,7 @@ describe("spa/lazy-embed island", () => {
 
   it("does nothing when the facade has no data-embed-src", () => {
     const figure = mountFacade(
-      '<figure class="lazy-embed" data-component="lazy-embed">' +
+      '<figure class="lazy-embed" data-island="lazy-embed">' +
         '<button type="button" class="lazy-embed-button">x</button></figure>'
     );
 

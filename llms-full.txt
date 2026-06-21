@@ -21,7 +21,7 @@ Two published entries; pick by target:
 | `./browser` | **client/browser bundle** | ESM-only | isomorphic surface, node-free, env pre-wired |
 
 - **`.`** — unchanged. Add `contentPlugin`/`buildPlugin`/`deployPlugin`, wire `dotenv`/`processEnv`/`cloudflareBindings` for `env`.
-- **`./browser`** — exports the SAME `createApp` / `createPlugin` over the SAME isomorphic default set (`site`, `i18n`, `router`, `head`, `spa` + `log`/`env` core), PLUS `dataPlugin`, `defineRoutes`, `route`, `createUrls`, `createComponent` (spa islands), `browserEnv`, the SEO head primitives (`meta`, `og`, `twitter`, `jsonLd`, `canonical`, `hreflang`, `feedLink`, `buildArticleHead`), and the browser-relevant type namespaces (`Data`, `Env`, `Head`, `Log`, `Router`, `Spa`). It EXCLUDES everything node-only: `contentPlugin`, `buildPlugin`, `deployPlugin`, the node env providers `dotenv`/`processEnv`/`cloudflareBindings`, and the `Build`/`Content`/`Deploy` type namespaces.
+- **`./browser`** — exports the SAME `createApp` / `createPlugin` over the SAME isomorphic default set (`site`, `i18n`, `router`, `head`, `spa` + `log`/`env` core), PLUS `dataPlugin`, `defineRoutes`, `route`, `createUrls`, `createIsland` (spa islands), `browserEnv`, the SEO head primitives (`meta`, `og`, `twitter`, `jsonLd`, `canonical`, `hreflang`, `feedLink`, `buildArticleHead`), and the browser-relevant type namespaces (`Data`, `Env`, `Head`, `Log`, `Router`, `Spa`). It EXCLUDES everything node-only: `contentPlugin`, `buildPlugin`, `deployPlugin`, the node env providers `dotenv`/`processEnv`/`cloudflareBindings`, and the `Build`/`Content`/`Deploy` type namespaces.
 - **env is pre-wired:** `./browser` sets `browserEnv()` as the default `env` provider, so env works with ZERO consumer config in the browser — you do NOT pass `pluginConfigs.env.providers`. It resolves from `import.meta.env` and `globalThis.__ENV__`.
 - **Guarantee:** importing `@moku-labs/web/browser` can NEVER drag node/native code into a client bundle, regardless of the consumer's bundler or tree-shaking — its static import graph references zero node-only modules. This is STRONGER and more reliable than the previous guidance of "import `@moku-labs/web` and rely on `sideEffects: false` tree-shaking" (which is fragile: building entries together can merge node code into a shared chunk).
 - A CI gate (`bun run check:bundle`) asserts the built browser bundle has zero static node/native imports and stays under a gzip size budget (currently ~50 kB gzip, under the 60 kB gz budget).
@@ -131,11 +131,11 @@ BUILD (router.mode !== "ssg")              ON DISK                      CLIENT N
 Default plugin, `depends: [router, head]`, inert on Node (`onStart` no-ops without `document`).
 On `app.start()` in the browser, it mounts islands onto the SSR'd DOM and intercepts navigation.
 
-- Islands: `createComponent(name, hooks)` with lifecycle `onCreate` / `onMount` / `onNavStart` / `onNavEnd` / `onUnMount` / `onDestroy` (ctx: `{ el, data }`, where `data` is the page payload from `script#__DATA__`). Match elements via `data-component="name"`. Components OUTSIDE the swap region are persistent across navigations.
-- `app.spa.register(component)`, `app.spa.navigate(path)`, `app.spa.current()`.
-- Config: `spa: { swapSelector?: "main > section", viewTransitions?: false, progressBar?: true, components?: [] }`.
+- Islands: `createIsland(name, hooks)` with lifecycle `onCreate` / `onMount` / `onNavStart` / `onNavEnd` / `onUnMount` / `onDestroy` (ctx: `{ el, data }`, where `data` is the page payload from `script#__DATA__`). Match elements via `data-island="name"`. Components OUTSIDE the swap region are persistent across navigations.
+- `app.spa.register(island)`, `app.spa.navigate(path)`, `app.spa.current()`.
+- Config: `spa: { swapSelector?: "main > section", viewTransitions?: false, progressBar?: true, islands?: [] }`.
 - Navigation strategy: when `router.mode() !== "ssg"` AND `data` is composed → DATA path (match → `data.at` → `route.render`, Preact render lazy-loaded in its own chunk); otherwise HTML-over-fetch; failure → `location.href`. `spa` imports neither `data` nor its types (captures the reader via a structural by-name `ctx.require`).
-- Events: `spa:navigate`, `spa:navigated`, `spa:component-mount`, `spa:component-unmount`.
+- Events: `spa:navigate`, `spa:navigated`, `spa:island-mount`, `spa:island-unmount`.
 - The browser runtime is just your own `createApp(...).start()` over the defaults (+ `dataPlugin` for DATA nav), imported from the `./browser` entry (see §0). There is no framework `hydrate()` / `./client` export.
 
 ## 5. head — SEO `<head>` composition

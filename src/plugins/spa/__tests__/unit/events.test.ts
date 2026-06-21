@@ -8,8 +8,8 @@ describe("spaEvents", () => {
     expect(Object.keys(events)).toEqual([
       "spa:navigate",
       "spa:navigated",
-      "spa:component-mount",
-      "spa:component-unmount"
+      "spa:island-mount",
+      "spa:island-unmount"
     ]);
     expect(register).toHaveBeenCalledTimes(4);
   });

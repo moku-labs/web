@@ -115,7 +115,7 @@ describe("resolveSpaConfig", () => {
       swapSelector: "main > section",
       viewTransitions: false,
       progressBar: true,
-      components: []
+      islands: []
     });
   });
 
@@ -141,10 +141,10 @@ describe("resolveSpaConfig", () => {
 });
 
 describe("kernel.init", () => {
-  it("registers config components and seeds currentUrl", () => {
-    const { state, kernel } = setup({ components: [{ name: "c", hooks: {} }] });
+  it("registers config islands and seeds currentUrl", () => {
+    const { state, kernel } = setup({ islands: [{ name: "c", hooks: {} }] });
     kernel.init();
-    expect(state.registeredComponents.has("c")).toBe(true);
+    expect(state.registeredIslands.has("c")).toBe(true);
     expect(state.currentUrl).toBe(`${location.pathname}${location.search}`);
   });
 });
@@ -360,24 +360,21 @@ describe("kernel.register + scan", () => {
     const { state, emit, kernel } = setup();
     const onMount = vi.fn();
     kernel.register({ name: "c", hooks: { onMount } });
-    document.body.innerHTML = `<main><section><div data-component="c"></div></section></main>`;
+    document.body.innerHTML = `<main><section><div data-island="c"></div></section></main>`;
     kernel.scan();
     expect(onMount).toHaveBeenCalledTimes(1);
     expect(state.instances.size).toBe(1);
-    expect(emit).toHaveBeenCalledWith(
-      "spa:component-mount",
-      expect.objectContaining({ name: "c" })
-    );
+    expect(emit).toHaveBeenCalledWith("spa:island-mount", expect.objectContaining({ name: "c" }));
   });
 });
 
-describe("component nav lifecycle during processNav", () => {
+describe("island nav lifecycle during processNav", () => {
   it("fires onNavStart on nav begin and onNavEnd for persistent on complete", async () => {
     const order: string[] = [];
     const { state, kernel } = setup();
     kernel.init();
-    // Persistent component lives OUTSIDE the swap region (in <header>).
-    state.registeredComponents.set("nav", {
+    // Persistent island lives OUTSIDE the swap region (in <header>).
+    state.registeredIslands.set("nav", {
       name: "nav",
       hooks: {
         onNavStart() {
@@ -388,7 +385,7 @@ describe("component nav lifecycle during processNav", () => {
         }
       }
     });
-    document.body.innerHTML = `<header><div data-component="nav"></div></header><main><section id="page">old</section></main>`;
+    document.body.innerHTML = `<header><div data-island="nav"></div></header><main><section id="page">old</section></main>`;
     kernel.scan();
     vi.stubGlobal(
       "fetch",

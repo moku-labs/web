@@ -32,8 +32,8 @@ import { EmbedFacadeButton } from "./embed-facade";
 /** CSS class on the `<figure>` facade wrapping each embed. */
 const EMBED_FIGURE_CLASS = "lazy-embed";
 
-/** `data-component` name binding the facade to the `lazyEmbed` SPA island. */
-const EMBED_COMPONENT_NAME = "lazy-embed";
+/** `data-island` name binding the facade to the `lazyEmbed` SPA island. */
+const EMBED_ISLAND_NAME = "lazy-embed";
 
 /** Optional facade dimensions (integer pixels) used to reserve the box. */
 type EmbedDimensions = { width: number; height: number };
@@ -190,7 +190,7 @@ function embedFacadeHtml(
     : "";
   const inner = renderToString(h(facade, props));
   return (
-    `<figure class="${EMBED_FIGURE_CLASS}" data-component="${EMBED_COMPONENT_NAME}"` +
+    `<figure class="${EMBED_FIGURE_CLASS}" data-island="${EMBED_ISLAND_NAME}"` +
     ` data-embed-src="${safeSource}" data-embed-title="${safeTitle}"${sizing}>` +
     `${inner}</figure>`
   );
