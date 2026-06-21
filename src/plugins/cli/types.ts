@@ -186,6 +186,20 @@ export type CliRenderer = {
    */
   check(ok: boolean, label: string, detail?: string): void;
   /**
+   * Mark the build TUI as externally driven. When `on`, the per-phase build tree and the BUILD
+   * summary block are suppressed, so an external dev driver (e.g. the worker's `dev({ onChange })`
+   * loop, which calls `update()` and renders its own concise rebuild line) is the sole source of
+   * rebuild output — no duplicate full TUI on each incremental rebuild. Off by default; a standalone
+   * `build()` / `serve()` keeps the full TUI.
+   *
+   * @param on - Whether an external driver owns the dev TUI.
+   * @returns Nothing.
+   * @example
+   * render.setDriven(true);
+   */
+  setDriven(on: boolean): void;
+
+  /**
    * Stop any running animation (the live `serve()` idle pulse, a phase/rebuild spinner)
    * and release the renderer's interval timer. Called by `serve()`'s SIGINT/SIGTERM
    * teardown so the persistent idle-pulse ticker never outlives the dev server. A no-op

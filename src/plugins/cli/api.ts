@@ -299,13 +299,22 @@ export function createApi(ctx: CliPluginContext): Api {
      * @example
      * await api.update(["src/islands/board.ts"]);
      */
-    update(changes, options = {}) {
+    async update(changes, options = {}) {
       const overrides = devBuildOverrides({
         og: options.og ?? false,
         sitemap: options.sitemap ?? false,
         feeds: options.feeds ?? false
       });
-      return ctx.require(buildPlugin).run({ skipClean: true, overrides, changed: changes });
+
+      // The external driver owns the dev TUI (it renders its own concise rebuild line), so suppress
+      // our per-phase build tree + BUILD summary for this incremental build — they'd be duplicate
+      // noise on every rebuild. Restored in `finally` so a later standalone build renders normally.
+      ctx.state.render.setDriven(true);
+      try {
+        return await ctx.require(buildPlugin).run({ skipClean: true, overrides, changed: changes });
+      } finally {
+        ctx.state.render.setDriven(false);
+      }
     },
 
     /**
