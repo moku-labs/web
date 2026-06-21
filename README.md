@@ -171,7 +171,7 @@ There are two entry points, and the difference is a hard guarantee, not a tree-s
 | Entry | Format | For | Includes |
 |---|---|---|---|
 | **`@moku-labs/web`** | dual ESM + CJS | Node SSG builds | the full surface — add `content` / `build` / `deploy` / `cli` and wire `dotenv()` / `processEnv()` |
-| **`@moku-labs/web/browser`** | ESM-only | client bundles | the same `createApp` over the same isomorphic defaults, plus `dataPlugin`, the route DSL, `createComponent`, `browserEnv`, and the SEO head primitives — **with all node-only code excluded** (`build` / `deploy` / `cli` and the `dotenv` / `processEnv` / `fileSystemContent` providers), and `browserEnv()` pre-wired as the default `env` provider |
+| **`@moku-labs/web/browser`** | ESM-only | client bundles | the same `createApp` over the same isomorphic defaults, plus `dataPlugin`, the route DSL, `createIsland`, `browserEnv`, and the SEO head primitives — **with all node-only code excluded** (`build` / `deploy` / `cli` and the `dotenv` / `processEnv` / `fileSystemContent` providers), and `browserEnv()` pre-wired as the default `env` provider |
 
 Importing `@moku-labs/web/browser` can **never** drag node/native code into a client bundle, regardless of bundler or tree-shaking — its static import graph references zero node-only modules. This is stronger and more reliable than importing the main entry and relying on `"sideEffects": false`, where building entries together can merge node code into a shared chunk. (The browser entry keeps the `contentPlugin` *shell* so build-only loaders can `ctx.require(contentPlugin)`; the node Markdown source lives in `fileSystemContent`, which the entry does **not** export.) CI proves it:
 

@@ -3,7 +3,7 @@
  *
  * Rewrites `::gallery{src="./images/dir/" caption="…"}` leaf directives into a
  * static swipeable image set at the mdast stage (BEFORE the remark-rehype bridge):
- * a framework-owned `<div class="gallery" data-component="gallery">` carrying the
+ * a framework-owned `<div class="gallery" data-island="gallery">` carrying the
  * island hook, wrapping inner content rendered (at build time, to static markup)
  * by a Preact component — the built-in {@link GalleryTrack} by default, or a
  * consumer component via `gallery.component`.
@@ -15,7 +15,7 @@
  * transform reads `<contentDir>/<slug>/<src>` from disk, sorts its images, and
  * resolves each to its shared `/<slug>/<dir>/<file>` URL (identical from every
  * locale page, mirroring co-located images). The companion gallery SPA island
- * (consumer-provided) wires swipe/keyboard/lightbox on `[data-component="gallery"]`.
+ * (consumer-provided) wires swipe/keyboard/lightbox on `[data-island="gallery"]`.
  */
 import { readdirSync } from "node:fs";
 import path from "node:path";
@@ -36,8 +36,8 @@ import { GalleryTrack } from "./gallery-default";
 /** CSS class on the `<div>` wrapping each gallery. */
 const GALLERY_WRAPPER_CLASS = "gallery";
 
-/** `data-component` name binding the gallery to its SPA island. */
-const GALLERY_COMPONENT_NAME = "gallery";
+/** `data-island` name binding the gallery to its SPA island. */
+const GALLERY_ISLAND_NAME = "gallery";
 
 /** Image file extensions a gallery folder expands over. */
 const IMAGE_EXTENSIONS = new Set([".webp", ".jpg", ".jpeg", ".png", ".gif", ".avif"]);
@@ -154,7 +154,7 @@ function collectAttributes(
 
 /**
  * Build the static gallery HTML for one directive: the framework-owned `<div>`
- * (island hook in `data-component`) wrapping the component's inner content, SSR'd
+ * (island hook in `data-island`) wrapping the component's inner content, SSR'd
  * to static markup.
  *
  * @param component - The gallery component (default {@link GalleryTrack}).
@@ -175,8 +175,7 @@ function galleryHtml(
 ): string {
   const inner = renderToString(h(component, { slides, caption, attributes }));
   return (
-    `<div class="${GALLERY_WRAPPER_CLASS}" data-component="${GALLERY_COMPONENT_NAME}">` +
-    `${inner}</div>`
+    `<div class="${GALLERY_WRAPPER_CLASS}" data-island="${GALLERY_ISLAND_NAME}">` + `${inner}</div>`
   );
 }
 

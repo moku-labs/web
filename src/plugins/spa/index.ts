@@ -1,9 +1,9 @@
 /**
  * @file spa — Complex Plugin (WIRING ONLY, ≤30 lines). All logic lives in the
- * domain files (kernel/router/head/progress/components/lifecycle); index wires.
+ * domain files (kernel/router/head/progress/islands/lifecycle); index wires.
  *
  * Depends: router, head.
- * Emits: spa:navigate, spa:navigated, spa:component-mount, spa:component-unmount.
+ * Emits: spa:navigate, spa:navigated, spa:island-mount, spa:island-unmount.
  * @see README.md
  */
 import { createPlugin } from "../../config";
@@ -18,9 +18,9 @@ import { createState, defaultSpaConfig } from "./state";
 /**
  * SPA plugin — progressive client-side navigation layered over the static site:
  * swaps a page region on navigation, with an optional progress bar and View
- * Transitions. Register interactive islands with {@link createComponent}. Depends
- * on router and head; emits `spa:navigate`, `spa:navigated`, `spa:component-mount`,
- * and `spa:component-unmount`.
+ * Transitions. Register interactive islands with {@link createIsland}. Depends
+ * on router and head; emits `spa:navigate`, `spa:navigated`, `spa:island-mount`,
+ * and `spa:island-unmount`.
  *
  * @example Enable view transitions and a custom swap region
  * ```ts
@@ -50,5 +50,5 @@ export const spaPlugin = createPlugin("spa", {
   onStop: disposeSpa // disposeSpa runs the captured kernel.dispose() in try/catch/finally
 });
 
-export { createComponent } from "./components";
+export { createIsland } from "./islands";
 export { lazyEmbed } from "./lazy-embed";

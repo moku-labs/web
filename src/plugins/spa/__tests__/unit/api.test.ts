@@ -30,9 +30,9 @@ describe("spa api", () => {
     expect(log.warn).not.toHaveBeenCalled();
 
     // Second registration of the same name warns.
-    state.registeredComponents.set("c", def);
+    state.registeredIslands.set("c", def);
     createApi(ctx).register(def);
-    expect(log.warn).toHaveBeenCalledWith("spa:component-collision", { name: "c" });
+    expect(log.warn).toHaveBeenCalledWith("spa:island-collision", { name: "c" });
   });
 
   it("navigate delegates to the kernel and current reads state", () => {

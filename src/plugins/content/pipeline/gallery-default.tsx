@@ -4,7 +4,7 @@
  * The built-in inner content of a gallery: a horizontal track of the resolved
  * slides. It is a plain Preact component rendered to **static markup at build
  * time** (no client JS, no hydration) inside the framework-owned
- * `<div data-component="gallery">` wrapper. Consumers swap it for their own via
+ * `<div data-island="gallery">` wrapper. Consumers swap it for their own via
  * `content` `gallery.component`, or compose it (import + wrap). All visual chrome
  * (`.gallery-*` classes / `data-*` hooks) is consumer CSS + a consumer island; the
  * default track alone is already a usable, scrollable strip with no styling.

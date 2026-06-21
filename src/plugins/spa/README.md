@@ -2,19 +2,19 @@
 
 > **Isomorphic default** — the client runtime: island hydration, intercepted navigation, document-head sync, and a progress bar (inert on Node).
 
-`spa` layers progressive client-side navigation over the static site. It intercepts in-app links, swaps a single page region without a full reload, syncs the document `<head>`, drives an in-house top progress bar, and manages component (island) lifecycles. It is a default plugin — mounted automatically at **`app.spa`** by `createApp`, so consumers reach its registration/control surface (`register`/`navigate`/`current`) without importing `spaPlugin`. Internally it depends on [`router`](../router/README.md) and [`head`](../head/README.md) (resolved via `ctx.require` in `onInit`) and optionally captures the [`data`](../data/README.md) reader by name to enable client DATA rendering. It emits four notification-only events (`spa:navigate`, `spa:navigated`, `spa:component-mount`, `spa:component-unmount`) and listens to nothing.
+`spa` layers progressive client-side navigation over the static site. It intercepts in-app links, swaps a single page region without a full reload, syncs the document `<head>`, drives an in-house top progress bar, and manages island (island) lifecycles. It is a default plugin — mounted automatically at **`app.spa`** by `createApp`, so consumers reach its registration/control surface (`register`/`navigate`/`current`) without importing `spaPlugin`. Internally it depends on [`router`](../router/README.md) and [`head`](../head/README.md) (resolved via `ctx.require` in `onInit`) and optionally captures the [`data`](../data/README.md) reader by name to enable client DATA rendering. It emits four notification-only events (`spa:navigate`, `spa:navigated`, `spa:island-mount`, `spa:island-unmount`) and listens to nothing.
 
 `spa` is the **one plugin that genuinely owns a browser resource**, so it is the only default that needs `onStart`/`onStop`: `onStart` boots navigation listeners + scroll restoration + island mounting; `onStop` tears them down. Because `onStart` is a no-op when `typeof document === "undefined"`, the plugin is inert in the Node SSG/build pipeline and boots only in a browser — the isomorphic guarantee. The single most important design decision is the **pure `createSpaKernel` factory**: built once in `onInit` and stored on `ctx.state.kernel`, it closes over injected state/config/emit/deps only (never the Moku ctx, never module singletons), so it is unit-testable with a mock state and a spy emit. `index.ts` is wiring only (≤30 lines) — all logic lives in the domain files.
 
 > [!TIP]
-> To ship the client runtime, import `createApp` + `createComponent` from the node-free `@moku-labs/web/browser` entry rather than the full `.` entry. `./browser`'s static import graph references zero node-only modules, so it can never drag native code into a client bundle (a stronger guarantee than tree-shaking the `.` entry), and it pre-wires `browserEnv()` so env works with zero config.
+> To ship the client runtime, import `createApp` + `createIsland` from the node-free `@moku-labs/web/browser` entry rather than the full `.` entry. `./browser`'s static import graph references zero node-only modules, so it can never drag native code into a client bundle (a stronger guarantee than tree-shaking the `.` entry), and it pre-wires `browserEnv()` so env works with zero config.
 
 ## Example
 ```ts
 // Browser bundle: import from the node-free "./browser" entry (env is pre-wired).
-import { createApp, createComponent, defineRoutes, route } from "@moku-labs/web/browser";
+import { createApp, createIsland, defineRoutes, route } from "@moku-labs/web/browser";
 
-const counter = createComponent("counter", {
+const counter = createIsland("counter", {
   onMount({ el }) {
     el.textContent = "0";
     el.dataset.ready = "";
@@ -27,7 +27,7 @@ const counter = createComponent("counter", {
 const app = createApp({
   pluginConfigs: {
     router: { routes: defineRoutes({ home: route("/").render(() => <Home />) }) },
-    spa: { swapSelector: "main > section", components: [counter] }
+    spa: { swapSelector: "main > section", islands: [counter] }
   }
 });
 
@@ -43,23 +43,23 @@ The surface mounted at `app.spa` is the **registration / control** side. The DOM
 
 | Method | Signature | Notes |
 |---|---|---|
-| `register` | `(component: ComponentDef) => void` | Register a component (keyed by name, last-registered-wins). A duplicate name logs a `spa:component-collision` warning via `ctx.log.warn` before overwriting. |
+| `register` | `(island: IslandDef) => void` | Register a island (keyed by name, last-registered-wins). A duplicate name logs a `spa:island-collision` warning via `ctx.log.warn` before overwriting. |
 | `navigate` | `(path: string) => void` | Programmatically navigate (pathname, optionally with search/hash). Delegates to the kernel's `processNav`; no-op without a DOM or before boot. |
 | `current` | `() => string` | Read the current resolved URL (`pathname + search`). Returns a copy of `ctx.state.currentUrl`; no raw state is exposed. |
 
-### Exported helper: `createComponent(name, hooks)`
+### Exported helper: `createIsland(name, hooks)`
 
-`createComponent(name: string, hooks: ComponentHooks): ComponentDef` is exported from both the `.` and `./browser` entries (and re-exported here from `index.ts`). It builds a validated component definition fail-fast at registration: an empty `name`, an unknown hook key (e.g. `onMout`, checked against `COMPONENT_HOOK_NAMES`), or a non-function hook value throws an actionable `[web] …` error immediately. Pass the result to `app.spa.register(...)` or to `pluginConfigs.spa.components`.
+`createIsland(name: string, hooks: IslandHooks): IslandDef` is exported from both the `.` and `./browser` entries (and re-exported here from `index.ts`). It builds a validated island definition fail-fast at registration: an empty `name`, an unknown hook key (e.g. `onMout`, checked against `ISLAND_HOOK_NAMES`), or a non-function hook value throws an actionable `[web] …` error immediately. Pass the result to `app.spa.register(...)` or to `pluginConfigs.spa.islands`.
 
 ### Exported island: `lazyEmbed`
 
-The companion of the content pipeline's `::embed` directive (see the content plugin's "Lazy iframe embeds"): a ready-made component, exported from both entries, that mounts on the emitted `[data-component="lazy-embed"]` facades and swaps them for a real `<iframe loading="lazy">` on click. Add it to `pluginConfigs.spa.components` (or `app.spa.register(lazyEmbed)`); style the `.lazy-embed*` classes yourself.
+The companion of the content pipeline's `::embed` directive (see the content plugin's "Lazy iframe embeds"): a ready-made island, exported from both entries, that mounts on the emitted `[data-island="lazy-embed"]` facades and swaps them for a real `<iframe loading="lazy">` on click. Add it to `pluginConfigs.spa.islands` (or `app.spa.register(lazyEmbed)`); style the `.lazy-embed*` classes yourself.
 
 ### Navigation: HTML-over-fetch, or client DATA render
 
 Every navigation entry point (Navigation API, History fallback, `navigate()`) funnels through one strategy in the kernel:
 
-1. **Client DATA path** — *only* when `router.mode() !== "ssg"` and the optional [`data`](../data/README.md) plugin is composed. `spa` runs `router.match(path)` → `data.at(path)` (fetch the page's PERSISTED JSON as `unknown`, used DIRECTLY as `ctx.data` — there is NO validation step) → the matched route's OWN `render(ctx)` (the SAME component the build used for SSG) → Preact-render into the swap region, then re-mounts islands. `route.load` does NOT run on the client. The Preact `render` layer is lazy-loaded (`./render`) in its own chunk, so an app without `data` ships zero render layer. The route's `.layout()` is intentionally NOT re-applied — the chrome (TopBar/TabNav/Footer) is persistent SSG output; only the inner swap region is replaced.
+1. **Client DATA path** — *only* when `router.mode() !== "ssg"` and the optional [`data`](../data/README.md) plugin is composed. `spa` runs `router.match(path)` → `data.at(path)` (fetch the page's PERSISTED JSON as `unknown`, used DIRECTLY as `ctx.data` — there is NO validation step) → the matched route's OWN `render(ctx)` (the SAME island the build used for SSG) → Preact-render into the swap region, then re-mounts islands. `route.load` does NOT run on the client. The Preact `render` layer is lazy-loaded (`./render`) in its own chunk, so an app without `data` ships zero render layer. The route's `.layout()` is intentionally NOT re-applied — the chrome (TopBar/TabNav/Footer) is persistent SSG output; only the inner swap region is replaced.
 2. **HTML-over-fetch** (the default + fallback) — fetch the page, swap `swapSelector`, head-sync from the fetched `<head>`. Any DATA-path miss / non-JSON / throw falls back here.
 3. **`location.href`** — a failed fetch falls back to a full browser navigation.
 
@@ -76,12 +76,12 @@ Every navigation entry point (Navigation API, History fallback, `navigate()`) fu
 | `swapSelector` | `string` | `"main > section"` | CSS selector for the DOM region replaced on each navigation. |
 | `viewTransitions` | `boolean` | `false` | Opt-in `document.startViewTransition` wrapping; instant swap when unsupported or under `prefers-reduced-motion`. |
 | `progressBar` | `boolean` | `true` | Toggle the in-house top progress bar shown during navigation. |
-| `components` | `ComponentDef[]` | `[]` | Components to auto-register at init (in addition to runtime `register`). |
+| `islands` | `IslandDef[]` | `[]` | Islands to auto-register at init (in addition to runtime `register`). |
 
 **Validation (`onInit`, Part-3 errors):**
 
 - `swapSelector` must be a non-empty string and a syntactically valid CSS selector — otherwise an actionable `[web] spa.swapSelector …` error is thrown.
-- `components` entries must each pass `createComponent` validation (every hook key in `COMPONENT_HOOK_NAMES`; every hook value a function).
+- `islands` entries must each pass `createIsland` validation (every hook key in `ISLAND_HOOK_NAMES`; every hook value a function).
 
 ## Dependencies
 
@@ -101,14 +101,14 @@ Every navigation entry point (Navigation API, History fallback, `navigate()`) fu
 |---|---|---|
 | `spa:navigate` | `{ from: string; to: string }` | A navigation has been intercepted and is starting. |
 | `spa:navigated` | `{ url: string }` | The swap completed and the new URL is active. |
-| `spa:component-mount` | `{ name: string; el: Element }` | A component instance attached to an element. |
-| `spa:component-unmount` | `{ name: string; el: Element }` | A component instance detached from an element. |
+| `spa:island-mount` | `{ name: string; el: Element }` | A island instance attached to an element. |
+| `spa:island-unmount` | `{ name: string; el: Element }` | A island instance detached from an element. |
 
 ## Design notes
 
-### Component lifecycle
+### Island lifecycle
 
-A component is a `{ name, hooks }` definition (`ComponentDef`) created via `createComponent` and matched at mount time against the `data-component` attribute of elements inside the swap region. Each mounted element gets a `ComponentInstance`; every hook receives a `ComponentContext` (`{ el, data }`, where `data` is the page payload parsed from the inline `script#__DATA__`, or `{}` when absent/invalid).
+A island is a `{ name, hooks }` definition (`IslandDef`) created via `createIsland` and matched at mount time against the `data-island` attribute of elements inside the swap region. Each mounted element gets a `IslandInstance`; every hook receives a `IslandContext` (`{ el, data }`, where `data` is the page payload parsed from the inline `script#__DATA__`, or `{}` when absent/invalid).
 
 Instances are classified as **persistent** (outside the swap area — survive navigation, receive `onNavStart`/`onNavEnd`, never `onUnMount` on nav) or **page-specific** (inside the swap area — full unmount/destroy/create/mount cycle on every navigation).
 
@@ -124,9 +124,9 @@ Instances are classified as **persistent** (outside the swap area — survive na
 Hook order on a page-specific swap is `onCreate → onMount` on mount, then `onUnMount → onDestroy` on teardown; persistent instances see `onNavStart` at nav begin and `onNavEnd` at nav complete. On `dispose` (plugin stop) ALL instances run `onUnMount → onDestroy`. Prefer **data-attributes over CSS classes** to reflect state in the DOM:
 
 ```ts
-import { createComponent } from "@moku-labs/web";
+import { createIsland } from "@moku-labs/web";
 
-const article = createComponent("article", {
+const article = createIsland("article", {
   onCreate({ el }) { el.dataset.ready = ""; },
   onNavStart({ el }) { el.dataset.loading = ""; },   // marks an in-flight navigation
   onNavEnd({ el }) { delete el.dataset.loading; },
@@ -137,12 +137,12 @@ const article = createComponent("article", {
 
 ### Lifecycle and teardown
 
-`onInit` builds the single shared kernel, validates config, registers `config.components`, and seeds `currentUrl` from the document location (or `""` under SSR). `onStart` captures the kernel teardown + a `log` reference, then boots the browser runtime (router listeners + initial scan); a double-boot throws.
+`onInit` builds the single shared kernel, validates config, registers `config.islands`, and seeds `currentUrl` from the document location (or `""` under SSR). `onStart` captures the kernel teardown + a `log` reference, then boots the browser runtime (router listeners + initial scan); a double-boot throws.
 
 Per spec/08 §4, `onStop` receives **`{ global }` only** — no `state`, `log`, `emit`, or `require`. The handles it needs are therefore captured into factory-closure variables during `onStart`, then run inside `try/catch/finally` and cleared after (idempotent; mirrors `onStart`).
 
 > [!NOTE]
-> **Single app per process.** Because the teardown/log handles live in module scope, running two apps in one process would share them. This is the spec-sanctioned pattern for resource-managing plugins; all *kernel data* (`registeredComponents`, `instances`, `currentUrl`, …) still lives in `createState`, never module scope.
+> **Single app per process.** Because the teardown/log handles live in module scope, running two apps in one process would share them. This is the spec-sanctioned pattern for resource-managing plugins; all *kernel data* (`registeredIslands`, `instances`, `currentUrl`, …) still lives in `createState`, never module scope.
 
 ### Navigation interception
 
@@ -156,10 +156,10 @@ Head-sync re-applies the composed `<head>` from the fetched document — title, 
 
 | File | Responsibility |
 |---|---|
-| `index.ts` | Wiring only (≤30 lines): `depends`, config/state/events, `onInit`/`onStart`/`onStop`, re-exports `createComponent`. |
+| `index.ts` | Wiring only (≤30 lines): `depends`, config/state/events, `onInit`/`onStart`/`onStop`, re-exports `createIsland`. |
 | `kernel.ts` | The pure `createSpaKernel` factory + `initSpa` onInit helper (navigation strategy, DATA path, swap orchestration). |
 | `router.ts` | Navigation interception (Navigation API + History fallback), link classification, scroll save/restore, `performNavigation`/`runSwap`/`swapRegion`. |
-| `components.ts` | `createComponent`, instance mount/unmount, hook dispatch, `script#__DATA__` extraction. |
+| `islands.ts` | `createIsland`, instance mount/unmount, hook dispatch, `script#__DATA__` extraction. |
 | `head.ts` | Client head-sync over `head`'s composition (`syncHead`). |
 | `progress.ts` | In-house top progress bar (`createProgressBar`). |
 | `render.ts` | Lazy-loaded Preact render layer (`renderVNode`) — its own chunk, reached only on the DATA path. |
@@ -167,7 +167,7 @@ Head-sync re-applies the composed `<head>` from the fetched document — title, 
 | `state.ts` | `createState`, `defaultSpaConfig`, `resolveSpaConfig` (validation). |
 | `api.ts` | `createApi` — the `register`/`navigate`/`current` surface. |
 | `events.ts` | Event descriptor registration (`spaEvents`). |
-| `types.ts` | Config/state/API/component/kernel type definitions. |
+| `types.ts` | Config/state/API/island/kernel type definitions. |
 
 ---
 

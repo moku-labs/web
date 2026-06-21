@@ -1,13 +1,13 @@
 // @vitest-environment happy-dom
 /**
  * @file Unit tests for `@moku-labs/web/testing` (the island test harness) — which
- * double as end-to-end coverage of the plugin-mirror component API: typed per-instance
+ * double as end-to-end coverage of the plugin-mirror island API: typed per-instance
  * state, the ctx.set → render scheduler, declarative delegated events + auto-teardown,
  * ctx.cleanup, the cross-island api seam, route/nav, and emit capture.
  */
 import { h } from "preact";
 import { afterEach, describe, expect, it } from "vitest";
-import { createComponent } from "../../src/plugins/spa/components";
+import { createIsland } from "../../src/plugins/spa/islands";
 import { mountIsland, renderIsland } from "../../src/testing";
 
 afterEach(() => {
@@ -19,7 +19,7 @@ type CounterApi = { bump: () => void };
 
 /** A string-render island exercising state + render + events + api + async-ish onMount. */
 function makeCounter() {
-  return createComponent<CounterState, CounterApi>("counter", {
+  return createIsland<CounterState, CounterApi>("counter", {
     state: () => ({ count: 0, label: "idle" }),
     onMount: ctx => ctx.set({ label: "ready" }),
     render: s =>
@@ -56,7 +56,7 @@ describe("mountIsland — state, render & events", () => {
 
   it("batches multiple ctx.set calls in one tick into a single render", async () => {
     let renders = 0;
-    const counted = createComponent<{ n: number }, { add(): void }>("counted", {
+    const counted = createIsland<{ n: number }, { add(): void }>("counted", {
       state: () => ({ n: 0 }),
       render: s => {
         renders += 1;
@@ -78,7 +78,7 @@ describe("mountIsland — state, render & events", () => {
   });
 
   it("commits a VNode render through the lazy Preact gate after settle()", async () => {
-    const list = createComponent<{ items: string[] }>("vlist", {
+    const list = createIsland<{ items: string[] }>("vlist", {
       state: () => ({ items: [] }),
       onMount: ctx => ctx.set({ items: ["a", "b", "c"] }),
       render: s => h("ul", {}, ...s.items.map(item => h("li", { "data-item": "" }, item)))
@@ -93,7 +93,7 @@ describe("mountIsland — teardown & cross-island api", () => {
   it("runs ctx.cleanup and removes delegated listeners on unmount", () => {
     let clicks = 0;
     let disposed = 0;
-    const island = createComponent("teardown", {
+    const island = createIsland("teardown", {
       onMount: ctx => ctx.cleanup(() => (disposed += 1)),
       events: { "click [data-x]": () => (clicks += 1) }
     });
@@ -109,37 +109,37 @@ describe("mountIsland — teardown & cross-island api", () => {
     expect(clicks).toBe(1); // listener was removed on destroy
   });
 
-  it("resolves a stubbed sibling api via ctx.component (options.components)", () => {
+  it("resolves a stubbed sibling api via ctx.island (options.islands)", () => {
     let pong = "";
-    const consumer = createComponent("consumer", {
+    const consumer = createIsland("consumer", {
       onMount: ctx => {
-        pong = ctx.component<{ ping(): string }>("provider")?.ping() ?? "";
+        pong = ctx.island<{ ping(): string }>("provider")?.ping() ?? "";
       }
     });
-    mountIsland(consumer, { components: { provider: { ping: () => "pong" } } });
+    mountIsland(consumer, { islands: { provider: { ping: () => "pong" } } });
     expect(pong).toBe("pong");
   });
 
   it("registers the island's own api so it resolves by name", () => {
-    const provider = createComponent<object, { ping(): string }>("provider", {
+    const provider = createIsland<object, { ping(): string }>("provider", {
       api: () => ({ ping: () => "pong" })
     });
     const handle = mountIsland<object, { ping(): string }>(provider);
     expect(handle.api?.ping()).toBe("pong");
   });
 
-  it("captures spa:component-mount / -unmount emits", () => {
-    const handle = mountIsland(createComponent("plain", {}));
-    expect(handle.emitted.map(entry => entry.event)).toContain("spa:component-mount");
+  it("captures spa:island-mount / -unmount emits", () => {
+    const handle = mountIsland(createIsland("plain", {}));
+    expect(handle.emitted.map(entry => entry.event)).toContain("spa:island-mount");
     handle.unmount();
-    expect(handle.emitted.map(entry => entry.event)).toContain("spa:component-unmount");
+    expect(handle.emitted.map(entry => entry.event)).toContain("spa:island-unmount");
   });
 });
 
 describe("mountIsland — route & navigation", () => {
   it("passes the route slice and fires onNavEnd on a persistent island", () => {
     const seen: string[] = [];
-    const nav = createComponent("nav", {
+    const nav = createIsland("nav", {
       onMount: ctx => seen.push(`mount:${ctx.locale}:${ctx.params.id ?? ""}`),
       onNavEnd: ctx => seen.push(`navend:${ctx.params.id ?? ""}`)
     });

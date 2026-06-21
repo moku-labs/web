@@ -12,6 +12,7 @@ import { headPlugin } from "../head";
 import { routerPlugin } from "../router";
 import { isClientOnlyRoute } from "../router/iso-match";
 import type { RouteContext, RouteDefinition, RouteState } from "../router/types";
+import { syncHead } from "./head";
 import {
   notifyNavEnd,
   notifyNavStart,
@@ -19,8 +20,7 @@ import {
   scanAndMount,
   unmountAll,
   unmountPageSpecific
-} from "./components";
-import { syncHead } from "./head";
+} from "./islands";
 import { createProgressBar, type ProgressBar } from "./progress";
 import {
   attachRouter,
@@ -33,7 +33,7 @@ import {
 import { resolveSpaConfig } from "./state";
 import type {
   // eslint-disable-next-line unicorn/prevent-abbreviations -- canonical public type name per spec
-  ComponentDef,
+  IslandDef,
   SpaConfig,
   SpaContext,
   SpaEmitFunction,
@@ -49,15 +49,15 @@ export type SpaEmit = SpaEmitFunction;
 const ERROR_PREFIX = "[web]";
 
 /**
- * Registers a component definition into state (last-registered-wins).
+ * Registers a island definition into state (last-registered-wins).
  *
- * @param state - The plugin state holding registeredComponents.
- * @param component - The component definition to register.
+ * @param state - The plugin state holding registeredIslands.
+ * @param island - The island definition to register.
  * @example
- * registerComponent(state, counter);
+ * registerIsland(state, counter);
  */
-export function registerComponent(state: SpaState, component: ComponentDef): void {
-  state.registeredComponents.set(component.name, component);
+export function registerIsland(state: SpaState, island: IslandDef): void {
+  state.registeredIslands.set(island.name, island);
 }
 
 /**
@@ -148,15 +148,15 @@ export function createSpaKernel(
   };
 
   /**
-   * Build the matched-route slice (params/meta/locale/url) for the component context at `path`,
+   * Build the matched-route slice (params/meta/locale/url) for the island context at `path`,
    * so islands read their route's params/meta directly. An unmatched path yields an empty slice.
    *
    * @param path - The URL (pathname + search) to match.
    * @returns The route slice for the matched route.
    * @example
-   * scanAndMount(state, emit, resolved.swapSelector, componentRouteContext(pathname));
+   * scanAndMount(state, emit, resolved.swapSelector, islandRouteContext(pathname));
    */
-  const componentRouteContext = (path: string): RouteSlice => {
+  const islandRouteContext = (path: string): RouteSlice => {
     const matchPath = path.split("?")[0] ?? path;
     const hit = deps.router.match(matchPath);
     const locale =
@@ -194,7 +194,7 @@ export function createSpaKernel(
       resolved.swapSelector,
       resolved.viewTransitions,
       () => {
-        const routeSlice = componentRouteContext(pathname);
+        const routeSlice = islandRouteContext(pathname);
         scanAndMount(state, emit, resolved.swapSelector, routeSlice);
         notifyNavEnd(state, routeSlice);
       },
@@ -211,7 +211,7 @@ export function createSpaKernel(
   };
 
   /**
-   * Begin a navigation: start progress, notify components, emit navigate.
+   * Begin a navigation: start progress, notify islands, emit navigate.
    *
    * @param pathname - The destination pathname.
    * @example
@@ -350,7 +350,7 @@ export function createSpaKernel(
     // Sync the document head and tear down the outgoing page-specific islands.
     syncDataHead(deps.head, route, routeContext);
     unmountPageSpecific(state, emit);
-    const routeSlice = componentRouteContext(pathname);
+    const routeSlice = islandRouteContext(pathname);
 
     /**
      * Render the VNode into the region and re-mount its islands in one paint — the
@@ -418,7 +418,7 @@ export function createSpaKernel(
    * await bootRender("/b/abc123");
    */
   const bootRender = async (pathname: string): Promise<void> => {
-    const routeSlice = componentRouteContext(pathname);
+    const routeSlice = islandRouteContext(pathname);
     const resolvedRender = await resolveDataRender(pathname);
     if (resolvedRender === false) {
       scanAndMount(state, emit, resolved.swapSelector, routeSlice);
@@ -466,13 +466,13 @@ export function createSpaKernel(
 
   return {
     /**
-     * Register config components and seed currentUrl from the document.
+     * Register config islands and seed currentUrl from the document.
      *
      * @example
      * kernel.init();
      */
     init(): void {
-      for (const component of resolved.components) registerComponent(state, component);
+      for (const island of resolved.islands) registerIsland(state, island);
       state.currentUrl = currentLocationUrl();
     },
     /**
@@ -504,19 +504,19 @@ export function createSpaKernel(
       if (hit?.route._handlers.render && isClientOnlyRoute(deps.router.mode(), hit.route)) {
         void bootRender(state.currentUrl);
       } else {
-        scanAndMount(state, emit, resolved.swapSelector, componentRouteContext(state.currentUrl));
+        scanAndMount(state, emit, resolved.swapSelector, islandRouteContext(state.currentUrl));
       }
       state.started = true;
     },
     /**
-     * Register a component definition (last-registered-wins).
+     * Register a island definition (last-registered-wins).
      *
-     * @param component - The component definition to register.
+     * @param island - The island definition to register.
      * @example
      * kernel.register(counter);
      */
-    register(component): void {
-      registerComponent(state, component);
+    register(island): void {
+      registerIsland(state, island);
     },
     /**
      * Process a navigation to `path` (fetch then swap; full reload on error).
@@ -530,13 +530,13 @@ export function createSpaKernel(
       navigate(path).catch(() => {});
     },
     /**
-     * Scan the swap region and mount components for matching elements.
+     * Scan the swap region and mount islands for matching elements.
      *
      * @example
      * kernel.scan();
      */
     scan(): void {
-      scanAndMount(state, emit, resolved.swapSelector, componentRouteContext(state.currentUrl));
+      scanAndMount(state, emit, resolved.swapSelector, islandRouteContext(state.currentUrl));
     },
     /**
      * Tear down router listeners, dispose all instances, reset boot state.
@@ -557,7 +557,7 @@ export function createSpaKernel(
 
 /**
  * Builds the shared kernel from the plugin context, stores it on `ctx.state`,
- * and runs its init step (validate config, register config.components, seed
+ * and runs its init step (validate config, register config.islands, seed
  * currentUrl). Captures the OPTIONAL `data` reader when the `data` plugin is
  * composed (enabling client DATA navigation) — resolved by instance via
  * `ctx.require(dataPlugin)`, guarded by `ctx.has("data")` so `data` stays optional

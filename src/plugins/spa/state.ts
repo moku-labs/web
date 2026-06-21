@@ -5,8 +5,8 @@
 
 import type {
   // eslint-disable-next-line unicorn/prevent-abbreviations -- canonical public type name per spec
-  ComponentDef,
-  ComponentInstance,
+  IslandDef,
+  IslandInstance,
   ResolvedSpaConfig,
   SpaConfig,
   SpaState
@@ -23,7 +23,7 @@ export const defaultSpaConfig: SpaConfig = {
   swapSelector: "main > section",
   viewTransitions: false,
   progressBar: true,
-  components: []
+  islands: []
 };
 
 /**
@@ -47,8 +47,8 @@ function isValidSelector(selector: string): boolean {
 
 /**
  * Validates the spa config and applies defaults (Part-3 errors on an empty or
- * syntactically-invalid `swapSelector`). Component-hook validation runs later in
- * `createComponent` when the components are registered.
+ * syntactically-invalid `swapSelector`). Island-hook validation runs later in
+ * `createIsland` when the islands are registered.
  *
  * @param config - The raw spa config to validate.
  * @returns The fully-resolved config with defaults applied.
@@ -82,7 +82,7 @@ export function resolveSpaConfig(config: SpaConfig): ResolvedSpaConfig {
     swapSelector,
     viewTransitions: config.viewTransitions ?? false,
     progressBar: config.progressBar ?? true,
-    components: config.components ?? []
+    islands: config.islands ?? []
   };
 }
 
@@ -103,9 +103,9 @@ export function createState(_ctx: {
   readonly config: Readonly<SpaConfig>;
 }): SpaState {
   return {
-    registeredComponents: new Map<string, ComponentDef>(),
-    instances: new Map<Element, ComponentInstance>(),
-    componentApis: new Map<string, unknown>(),
+    registeredIslands: new Map<string, IslandDef>(),
+    instances: new Map<Element, IslandInstance>(),
+    islandApis: new Map<string, unknown>(),
     currentUrl: "",
     // eslint-disable-next-line unicorn/no-null -- `destroyRouter` is `(() => void) | null` until the router attaches
     destroyRouter: null,

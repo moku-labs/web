@@ -44,7 +44,7 @@ describe("content/pipeline/embed", () => {
   it("rewrites ::embed to a facade figure with data attributes and a button", () => {
     const [html] = transform('::embed{src="https://game.example.com/" title="My Game"}');
 
-    expect(html).toContain('<figure class="lazy-embed" data-component="lazy-embed"');
+    expect(html).toContain('<figure class="lazy-embed" data-island="lazy-embed"');
     expect(html).toContain('data-embed-src="https://game.example.com/"');
     expect(html).toContain('data-embed-title="My Game"');
     expect(html).toContain('<button type="button" class="lazy-embed-button"');
@@ -161,7 +161,7 @@ describe("content/pipeline/embed — custom facade component", () => {
     expect(html).toContain('data-poster="/p.jpg"');
     expect(html).toContain("Game 400x711");
     // Framework still owns the figure wrapper, island hooks, and reserved-box sizing:
-    expect(html).toContain('<figure class="lazy-embed" data-component="lazy-embed"');
+    expect(html).toContain('<figure class="lazy-embed" data-island="lazy-embed"');
     expect(html).toContain('data-embed-src="https://g.dev/"');
     expect(html).toContain('style="aspect-ratio: 400 / 711; max-width: 400px;"');
   });

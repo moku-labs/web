@@ -23,13 +23,13 @@ import {
   scanAndMount,
   unmountAll,
   unmountPageSpecific
-} from "./plugins/spa/components";
+} from "./plugins/spa/islands";
 import { createState } from "./plugins/spa/state";
 import type {
-  ComponentContext,
+  IslandContext,
   // eslint-disable-next-line unicorn/prevent-abbreviations -- canonical public type name per spec
-  ComponentDef,
-  ComponentRender,
+  IslandDef,
+  IslandRender,
   PageData,
   RenderResult
 } from "./plugins/spa/types";
@@ -37,7 +37,7 @@ import type {
 /** The swap selector the harness uses to bound page-specific islands. */
 const SWAP_SELECTOR = "main > section";
 
-/** One captured spa emit (the kernel's `spa:component-mount` / `-unmount`). */
+/** One captured spa emit (the kernel's `spa:island-mount` / `-unmount`). */
 export interface CapturedEmit {
   /** The event name. */
   readonly event: string;
@@ -113,7 +113,7 @@ export interface IslandHandle<S extends object = object, A = unknown> {
    * handle.unmount();
    */
   unmount(): void;
-  /** Captured `spa:component-mount` / `-unmount` emits, in order. */
+  /** Captured `spa:island-mount` / `-unmount` emits, in order. */
   readonly emitted: ReadonlyArray<CapturedEmit>;
 }
 
@@ -135,8 +135,8 @@ export interface MountIslandOptions {
   url?: (name: string, params?: Record<string, string>) => string;
   /** Mount OUTSIDE the swap area so the instance is persistent (gets `onNavEnd`). */
   persistent?: boolean;
-  /** Stubbed sibling-island apis resolved by `ctx.component(name)`. */
-  components?: Record<string, unknown>;
+  /** Stubbed sibling-island apis resolved by `ctx.island(name)`. */
+  islands?: Record<string, unknown>;
 }
 
 /**
@@ -159,7 +159,7 @@ function parseEventSpec(spec: string): { type: string; selector: string } {
  * Mount ONE island headlessly through the REAL spa kernel internals under a DOM. The
  * unit + light-integration tier: no `createApp`, no router, no network.
  *
- * @param definition - The component definition under test (from `createComponent`).
+ * @param definition - The island definition under test (from `createIsland`).
  * @param options - Host HTML/element, route slice, page data, persistence, stub apis.
  * @returns A handle exposing the instance's `state`/`api` + event/nav/flush drivers.
  * @example
@@ -168,21 +168,21 @@ function parseEventSpec(spec: string): { type: string; selector: string } {
  * expect(h.el.querySelector("[aria-current]")).toBeTruthy();
  */
 export function mountIsland<S extends object = object, A = unknown>(
-  definition: ComponentDef,
+  definition: IslandDef,
   options: MountIslandOptions = {}
 ): IslandHandle<S, A> {
   // 1. Fresh isolated kernel state (mirrors the framework's own freshState()).
   const state = createState({ global: {}, config: {} });
-  state.registeredComponents.set(definition.name, definition);
-  if (options.components) {
-    for (const [name, api] of Object.entries(options.components)) {
-      state.componentApis.set(name, api);
+  state.registeredIslands.set(definition.name, definition);
+  if (options.islands) {
+    for (const [name, api] of Object.entries(options.islands)) {
+      state.islandApis.set(name, api);
     }
   }
 
   // 2. Build the DOM: a swap region + the host (created, or the provided element).
   const host = options.el ?? document.createElement("div");
-  host.dataset.component = definition.name;
+  host.dataset.island = definition.name;
   if (options.html !== undefined) host.innerHTML = options.html;
 
   const dataScript = options.data
@@ -404,8 +404,8 @@ function stubUrl(name: string): string {
  * expect(r.find("[data-board]")).toBeTruthy();
  */
 export function renderIsland<S extends object>(
-  render: ComponentRender<S>,
-  input: { state: S; ctx?: Partial<ComponentContext<S>> }
+  render: IslandRender<S>,
+  input: { state: S; ctx?: Partial<IslandContext<S>> }
 ): RenderIslandResult {
   const host = document.createElement("div");
   document.body.append(host);
@@ -422,9 +422,9 @@ export function renderIsland<S extends object>(
     set: noopStub,
     flush: noopStub,
     cleanup: noopStub,
-    component: noopStub
-  } as unknown as ComponentContext<S>;
-  const ctx = { ...baseContext, ...input.ctx } as ComponentContext<S>;
+    island: noopStub
+  } as unknown as IslandContext<S>;
+  const ctx = { ...baseContext, ...input.ctx } as IslandContext<S>;
 
   commit(host, render(input.state, ctx));
 

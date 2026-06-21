@@ -20,17 +20,17 @@ import type { SpaApi, SpaContext } from "./types";
 export function createApi(ctx: SpaContext): SpaApi {
   return {
     /**
-     * Register a component definition (last-registered-wins); warns on collision.
+     * Register a island definition (last-registered-wins); warns on collision.
      *
-     * @param component - The component definition created via `createComponent`.
+     * @param island - The island definition created via `createIsland`.
      * @example
      * app.spa.register(counter);
      */
-    register(component) {
-      if (ctx.state.registeredComponents.has(component.name)) {
-        ctx.log.warn("spa:component-collision", { name: component.name });
+    register(island) {
+      if (ctx.state.registeredIslands.has(island.name)) {
+        ctx.log.warn("spa:island-collision", { name: island.name });
       }
-      ctx.state.kernel?.register(component);
+      ctx.state.kernel?.register(island);
     },
     /**
      * Programmatically navigate to a path (client runtime; no-op without a DOM).
@@ -56,13 +56,13 @@ export function createApi(ctx: SpaContext): SpaApi {
      * Resolve a registered island's api by name (the cross-island seam). Returns
      * `undefined` when no provider with that name is currently registered.
      *
-     * @param name - The provider island's component name.
+     * @param name - The provider island's island name.
      * @returns The provider's api, or `undefined`.
      * @example
-     * app.spa.component("lightbox");
+     * app.spa.island("lightbox");
      */
-    component<T = unknown>(name: string): T | undefined {
-      return ctx.state.componentApis.get(name) as T | undefined;
+    island<T = unknown>(name: string): T | undefined {
+      return ctx.state.islandApis.get(name) as T | undefined;
     }
   };
 }

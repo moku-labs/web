@@ -288,7 +288,7 @@ export type GalleryProps = {
 /**
  * A consumer-supplied gallery component: a Preact function component over
  * {@link GalleryProps}, rendered (at build time, to static markup) as the inner
- * content — inside the framework-owned `<div data-component="gallery">` that carries
+ * content — inside the framework-owned `<div data-island="gallery">` that carries
  * the island hook. Defaults to the built-in `GalleryTrack`.
  */
 export type GalleryComponent = FunctionComponent<GalleryProps>;
