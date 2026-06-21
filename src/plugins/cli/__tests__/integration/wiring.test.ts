@@ -84,16 +84,17 @@ describe("cli wiring (createApp → start → app.cli → stop)", () => {
     vi.restoreAllMocks();
   });
 
-  it("starts, mounts app.cli with exactly build/serve/preview/deploy, and stops", async () => {
+  it("starts, mounts app.cli with exactly build/update/serve/preview/deploy, and stops", async () => {
     const app = buildApp(tmp);
     await app.start();
 
     expect(typeof app.cli.build).toBe("function");
+    expect(typeof app.cli.update).toBe("function");
     expect(typeof app.cli.serve).toBe("function");
     expect(typeof app.cli.preview).toBe("function");
     expect(typeof app.cli.deploy).toBe("function");
     expect(Object.keys(app.cli).toSorted()).toEqual(
-      ["build", "deploy", "preview", "serve"].toSorted()
+      ["build", "deploy", "preview", "serve", "update"].toSorted()
     );
 
     await app.stop();

@@ -2,7 +2,7 @@
 
 > **Node-only** — the developer CLI for `@moku-labs/web`: `build` · `serve` · `preview` · `deploy`, each rendered through the animated **Velocity** Panel UI — a `▟▙ moku web` lockup + version/runtime banner, a live phase tree, boxed result panels, and a breathing live-reload pulse.
 
-`cli` mounts exactly four methods at `app.cli` (`build`/`serve`/`preview`/`deploy`). Each one renders the `▟▙ moku web` lockup + a version/runtime banner, then does its work — running the SSG build, serving `dist/` in-process with live reload, previewing the built output with Cloudflare-Pages clean URLs, or scaffolding + deploying. There is **no argv parser, no `run()` dispatcher, and no framework bin**: the consumer drives the plugin from one thin per-command script (`scripts/{build,serve,preview,deploy}.ts`), each naming its command by *being* it.
+`cli` mounts exactly five methods at `app.cli` (`build`/`update`/`serve`/`preview`/`deploy`). The four script-driven verbs each render the `▟▙ moku web` lockup + a version/runtime banner, then do their work — running the SSG build, serving `dist/` in-process with live reload, previewing the built output with Cloudflare-Pages clean URLs, or scaffolding + deploying. The fifth, `update(changes)`, is the headless **incremental** rebuild an external dev driver calls per change (e.g. the `@moku-labs/worker` dev session) — no header, no per-command script. There is **no argv parser, no `run()` dispatcher, and no framework bin**: the consumer drives the script-verbs from one thin per-command script (`scripts/{build,serve,preview,deploy}.ts`), each naming its command by *being* it.
 
 It `depends` on the node-only `build` and `deploy` plugins (which makes `cli` node-only too) and PULLs their APIs at call time via `ctx.require(buildPlugin)` / `ctx.require(deployPlugin)`. Live progress rides on **hooks** over those plugins' events, so the renderer updates as a build runs without polling. `cli` owns no long-lived resource at plugin scope, so it has **no `onStart`/`onStop`** — `onInit` does synchronous config validation only. The dev server, preview server, and file watcher are created *inside* `serve()`/`preview()` and torn down on SIGINT/SIGTERM within that same call, so app `stop()` has nothing to clean up.
 
@@ -45,6 +45,15 @@ const summary = await app.cli.build();
 console.log(`${summary.pageCount} pages in ${summary.durationMs}ms`);
 ```
 
+### `update(changes, options?): Promise<BuildSummary>`
+
+Incremental dev rebuild from a set of changed paths — the fast counterpart to `build()` for a long-lived **external** dev driver (e.g. an `@moku-labs/worker` dev session that composes this web client via `server.cli.dev({ onChange: c => web.cli.update(c) })`). Reuses the `build` plugin's incremental engine: skips the destructive clean, scopes the rebuild to `changes` (re-reads only changed Markdown, reuses cached page renders whose data is unchanged), and applies the same dev overrides `serve()` uses (minify off; OG/sitemap/feeds off unless re-enabled via `options.{og,sitemap,feeds}`). An unclassifiable path conservatively forces a full rebuild. Unlike `build()` it renders **no** command header (the external driver owns the per-change TUI) and **skips** the not-found assertion (it's a per-change dev rebuild, not a release build). Returns the same `{ outDir, pageCount, durationMs }` summary.
+
+```ts
+await app.cli.update(["src/islands/board.ts"]);          // changed-scoped, dev-fast rebuild
+await app.cli.update(["content/post/en.md"], { feeds: true }); // re-enable feeds for this rebuild
+```
+
 ### `serve(options?): Promise<void>`
 
 The dev loop. Builds once, serves `dist/` in-process via the `Bun.serve` seam, injects a tiny live-reload SSE client into HTML responses (when `liveReload`), watches `watchDirs` recursively, and on a change runs a **debounced** rebuild (`debounceMs`) before rendering the reload line and pushing a browser reload over SSE. Resolves when SIGINT/SIGTERM tears the server + watchers down. `options.port` overrides `config.port`; `options.open` is reserved (not yet implemented).
@@ -83,6 +92,7 @@ await app.cli.deploy({ branch: "preview/landing", yes: true });  // forces the d
 | Method | Replaces | Behavior |
 |---|---|---|
 | `cli.build()` | `scripts/build.ts` | `build.run()` → assert `dist/404.html` → boxed BUILD panel |
+| `cli.update(changes)` | — (external dev driver) | `build.run({ skipClean, changed, overrides })` — incremental, dev-fast; no header, no 404 assert |
 | `cli.serve()` | `scripts/dev.ts` | build once → in-process static server (live-reload SSE) + watch → debounced rebuild |
 | `cli.preview()` | `scripts/serve.ts` | static server for `dist/`, CF-Pages clean URLs, no reload injection |
 | `cli.deploy()` | `scripts/deploy.ts` | TTY-only confirm → `deploy.init({ ci: true })` → `deploy.run()` (CI auto-proceeds) |

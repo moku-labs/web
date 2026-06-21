@@ -13,7 +13,7 @@ import { deployPlugin } from "../deploy";
 import { runDeployWizard } from "./deploy-wizard";
 import { cliError, ERROR_PREFIX } from "./errors";
 import { runPreviewServer } from "./preview";
-import { runDevServer } from "./serve";
+import { devBuildOverrides, runDevServer } from "./serve";
 import type { Api, Config, State } from "./types";
 
 /** Lowest valid TCP port. */
@@ -281,6 +281,31 @@ export function createApi(ctx: CliPluginContext): Api {
       }
 
       return result;
+    },
+
+    /**
+     * Incremental dev rebuild from a set of changed paths — the fast counterpart to
+     * `build()` for an external dev driver (e.g. the worker's `dev({ onChange })`). Skips
+     * the destructive clean, scopes the rebuild to `changes`, and applies the same dev
+     * overrides `serve()` uses (minify off; OG/sitemap/feeds off unless re-enabled). Renders
+     * no header and skips the not-found assertion — the driver owns the dev TUI and the cold
+     * build already asserted. Live per-phase progress still streams via the build hooks (as
+     * the cold `build()` does today).
+     *
+     * @param changes - The paths changed since the last build (incremental rebuild hint).
+     * @param options - Optional per-session dev-output opt-ins (default all off).
+     * @returns The rebuild summary (`outDir`, `pageCount`, `durationMs`).
+     * @throws {Error} When the underlying incremental build fails.
+     * @example
+     * await api.update(["src/islands/board.ts"]);
+     */
+    update(changes, options = {}) {
+      const overrides = devBuildOverrides({
+        og: options.og ?? false,
+        sitemap: options.sitemap ?? false,
+        feeds: options.feeds ?? false
+      });
+      return ctx.require(buildPlugin).run({ skipClean: true, overrides, changed: changes });
     },
 
     /**
