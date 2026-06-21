@@ -233,6 +233,10 @@ export function createPanelRenderer(options: PanelOptions = {}): CliRenderer {
   let idle = false;
   let idleStartedAt = 0;
   let serveMode = false;
+  // When on, the per-phase build tree + BUILD summary are suppressed: an EXTERNAL dev driver
+  // (e.g. the worker's `dev({ onChange })` loop) owns the rebuild TUI and renders its own concise
+  // line, so the full build TUI would just be duplicate noise on every incremental rebuild.
+  let driven = false;
   let ticker: ReturnType<typeof setInterval> | undefined;
 
   /**
@@ -417,8 +421,9 @@ export function createPanelRenderer(options: PanelOptions = {}): CliRenderer {
      * render.phase({ phase: "pages", status: "done", durationMs: 12 });
      */
     phase(phase) {
-      // Suppressed during a rebuild: the compact rebuild line stands in for the phase tree.
-      if (rebuilding) return;
+      // Suppressed during a rebuild (the compact rebuild line stands in) or when an external driver
+      // owns the dev TUI (it renders its own rebuild line).
+      if (rebuilding || driven) return;
 
       // Plain/CI: emit one line per completed phase (skip the "start" row — no duplication).
       if (!color) {
@@ -459,8 +464,9 @@ export function createPanelRenderer(options: PanelOptions = {}): CliRenderer {
      * render.built({ outDir: "dist", pageCount: 12, durationMs: 840 });
      */
     built(summary) {
-      // Suppressed during a rebuild: a rebuild settles with the compact reload line.
-      if (rebuilding) return;
+      // Suppressed during a rebuild (settles with the compact reload line) or when an external
+      // driver owns the dev TUI.
+      if (rebuilding || driven) return;
 
       // Finalize the live tree (repaint rows only — no trailing build bar) before the summary.
       if (color && phaseOpen) {
@@ -686,6 +692,21 @@ export function createPanelRenderer(options: PanelOptions = {}): CliRenderer {
       if (detail !== undefined) {
         for (const line of detail.split("\n")) write(`      ${palette.dim(line)}`);
       }
+    },
+
+    /**
+     * Mark the build TUI as externally driven: when `on`, the per-phase build tree and the BUILD
+     * summary are suppressed so an external dev driver (e.g. the worker's `dev({ onChange })` loop,
+     * which calls `update()` and renders its own concise rebuild line) is the sole source of rebuild
+     * output. Off by default; a standalone `build()` / `serve()` renders the full TUI as before.
+     *
+     * @param on - Whether an external driver owns the dev TUI.
+     * @example
+     * render.setDriven(true);  // before an externally-driven update()
+     * render.setDriven(false); // after it settles
+     */
+    setDriven(on) {
+      driven = on;
     },
 
     /**

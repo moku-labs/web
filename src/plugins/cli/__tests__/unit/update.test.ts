@@ -29,6 +29,23 @@ describe("cli update()", () => {
     expect(calls.some(call => call[0] === "header")).toBe(false);
   });
 
+  it("suppresses the build TUI for the rebuild: setDriven(true) before, setDriven(false) after", async () => {
+    const { ctx, render } = makeCtx();
+    await createApi(ctx).update(["src/a.ts"]);
+    const calls = (render as ReturnType<typeof makeCtx>["render"] & { calls: unknown[][] }).calls;
+    const setDriven = calls.filter(call => call[0] === "setDriven").map(call => call[1]);
+    expect(setDriven).toEqual([true, false]);
+  });
+
+  it("restores setDriven(false) even when the incremental build throws", async () => {
+    const { ctx, render, build } = makeCtx();
+    build.run.mockRejectedValueOnce(new Error("boom"));
+    await expect(createApi(ctx).update(["src/a.ts"])).rejects.toThrow("boom");
+    const calls = (render as ReturnType<typeof makeCtx>["render"] & { calls: unknown[][] }).calls;
+    const setDriven = calls.filter(call => call[0] === "setDriven").map(call => call[1]);
+    expect(setDriven).toEqual([true, false]);
+  });
+
   it("does NOT assert the not-found page (dev rebuild) — resolves with no 404 on disk", async () => {
     // makeCtx's default outDir ("dist") has no 404.html, so build() would throw ERR_CLI_NOT_FOUND;
     // update() must skip that assertion and resolve.

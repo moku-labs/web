@@ -158,6 +158,20 @@ describe("cli panel renderer (plain mode)", () => {
     expect(out.join("\n")).toContain("rebuilt 4 pages");
   });
 
+  it("suppresses the phase tree + BUILD box entirely while externally driven (setDriven)", () => {
+    const { render, out } = capture();
+    render.setDriven(true);
+    render.phase({ phase: "bundle", status: "start" });
+    render.phase({ phase: "bundle", status: "done", durationMs: 34 });
+    render.built({ outDir: "dist/client", pageCount: 1, durationMs: 38 });
+    // The driver owns the dev TUI: nothing is drawn (no step rows, no BUILD box).
+    expect(out.join("\n")).toBe("");
+    // Turning it back off restores normal rendering.
+    render.setDriven(false);
+    render.built({ outDir: "dist/client", pageCount: 1, durationMs: 38 });
+    expect(out.join("\n")).toContain("BUILD");
+  });
+
   it("renders a heading + check lines (✓/✗ with optional fix detail)", () => {
     const { render, out } = capture();
     render.heading("Diagnostics");
