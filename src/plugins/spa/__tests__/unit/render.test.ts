@@ -2,7 +2,7 @@
 import type { VNode } from "preact";
 import { h } from "preact";
 import { describe, expect, it } from "vitest";
-import { renderVNode } from "../../render";
+import { commitVNode, renderVNode } from "../../render";
 
 /** A `data-page`-tagged div VNode, typed as the plain VNode `renderVNode` accepts. */
 function page(n: number): VNode {
@@ -31,5 +31,20 @@ describe("spa/render renderVNode", () => {
     renderVNode(page(3), region);
     expect(region.textContent).toContain("page 3");
     expect(region.querySelector("[data-page='3']")).not.toBeNull();
+  });
+});
+
+describe("spa/render commitVNode", () => {
+  it("diffs a vnode into the host across consecutive in-interaction renders (no append)", () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+
+    commitVNode(page(1), host);
+    expect(host.querySelector("[data-page='1']")?.textContent).toBe("page 1");
+
+    // A second commit DIFFS the retained vdom (it does not reset/clear) — one node, updated.
+    commitVNode(page(2), host);
+    expect(host.querySelector("[data-page='2']")?.textContent).toBe("page 2");
+    expect(host.querySelectorAll("[data-page]")).toHaveLength(1);
   });
 });

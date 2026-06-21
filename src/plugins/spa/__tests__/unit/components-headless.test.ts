@@ -9,11 +9,12 @@ import {
 } from "../../components";
 import { createState } from "../../state";
 
-/** Fresh state with one page-specific instance preloaded (no DOM needed). */
+/** Fresh state with one persistent instance preloaded (no DOM needed). */
 function stateWithInstance() {
   const state = createState({ global: {}, config: {} });
   const calls: string[] = [];
   const el = { tagName: "DIV" } as unknown as Element;
+  const route = { params: {}, meta: {}, locale: "", url: () => "" };
   state.instances.set(el, {
     def: {
       name: "x",
@@ -25,7 +26,17 @@ function stateWithInstance() {
       }
     },
     el,
-    persistent: true
+    persistent: true,
+    ctx: { el } as never,
+    state: undefined,
+    api: undefined,
+    route,
+    data: {},
+    cleanups: [],
+    flush: () => {},
+    renderScheduled: false,
+    renderDepth: 0,
+    mountPromise: undefined
   });
   return { state, calls };
 }

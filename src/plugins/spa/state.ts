@@ -105,6 +105,7 @@ export function createState(_ctx: {
   return {
     registeredComponents: new Map<string, ComponentDef>(),
     instances: new Map<Element, ComponentInstance>(),
+    componentApis: new Map<string, unknown>(),
     currentUrl: "",
     // eslint-disable-next-line unicorn/no-null -- `destroyRouter` is `(() => void) | null` until the router attaches
     destroyRouter: null,

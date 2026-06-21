@@ -10,18 +10,28 @@ const FACADE_HTML =
   '<span class="lazy-embed-title">My Game</span>' +
   "</button></figure>";
 
-/** Render the facade into the document and mount the island on it. */
-function mountFacade(html: string = FACADE_HTML): HTMLElement {
-  document.body.innerHTML = html;
-  const figure = document.querySelector("figure") as HTMLElement;
-  lazyEmbed.hooks.onMount?.({
-    el: figure,
+/** A full component context bound to an element (the additive fields are inert stubs). */
+function stubCtx(el: HTMLElement) {
+  return {
+    el,
     data: {},
     params: {},
     meta: {},
     locale: "",
-    url: () => ""
-  });
+    url: () => "",
+    state: {},
+    set: () => {},
+    flush: () => {},
+    cleanup: () => {},
+    component: () => undefined
+  };
+}
+
+/** Render the facade into the document and mount the island on it. */
+function mountFacade(html: string = FACADE_HTML): HTMLElement {
+  document.body.innerHTML = html;
+  const figure = document.querySelector("figure") as HTMLElement;
+  lazyEmbed.hooks.onMount?.(stubCtx(figure));
   return figure;
 }
 
@@ -89,14 +99,7 @@ describe("spa/lazy-embed island", () => {
   it("stops activating after onDestroy unbinds the handler", () => {
     const figure = mountFacade();
 
-    lazyEmbed.hooks.onDestroy?.({
-      el: figure,
-      data: {},
-      params: {},
-      meta: {},
-      locale: "",
-      url: () => ""
-    });
+    lazyEmbed.hooks.onDestroy?.(stubCtx(figure));
     (figure.querySelector("button") as HTMLButtonElement).click();
 
     expect(figure.querySelector("iframe")).toBeNull();

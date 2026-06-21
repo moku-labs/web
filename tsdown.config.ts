@@ -28,5 +28,16 @@ export default defineConfig([
     clean: false,
     sourcemap: false,
     tsconfig: "tsconfig.build.json"
+  },
+  {
+    // ESM-only, devDep-only test harness (`@moku-labs/web/testing`). Built as its own
+    // pass so it is NEVER part of the `.`/`./browser` graphs — test-only code (and its
+    // static Preact import for `renderIsland`) can never reach a client or Node bundle.
+    entry: { testing: "src/testing.ts" },
+    format: ["esm"],
+    dts: true,
+    clean: false,
+    sourcemap: false,
+    tsconfig: "tsconfig.build.json"
   }
 ]);
