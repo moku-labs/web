@@ -35,6 +35,7 @@ import {
   type RouterHandlers,
   runSwap,
   type SwapTransition,
+  saveScrollPosition,
   swapRegion
 } from "./router";
 import { resolveSpaConfig } from "./state";
@@ -521,6 +522,28 @@ export function createSpaKernel(
     await performNavigation(pathname, handlers, signal);
   };
 
+  /**
+   * Programmatic navigation entry (`app.spa.navigate` / `ctx.navigate`). A link click or the
+   * Navigation API commits the address bar before the interceptor calls {@link navigate}; a
+   * programmatic call does NOT, so it must commit the URL itself first — otherwise the content
+   * swaps but the address bar (and the back button / refresh / deep link) stays on the old URL.
+   * `history.pushState` updates the URL WITHOUT firing a `navigate` event, so it can't
+   * double-trigger the interceptor. The current scroll is saved first so a later back restores it.
+   *
+   * @param path - The destination path (pathname + optional search).
+   * @param scroll - The optional per-call scroll override.
+   * @example
+   * navigateProgrammatic("/board/abc/issue/1", "preserve");
+   */
+  const navigateProgrammatic = (path: string, scroll?: ScrollMode): void => {
+    if (typeof document === "undefined") return;
+    if (path !== currentLocationUrl()) {
+      saveScrollPosition(currentLocationUrl());
+      history.pushState({}, "", path);
+    }
+    navigate(path, true, undefined, scroll).catch(() => {});
+  };
+
   return {
     /**
      * Register config islands and seed currentUrl from the document.
@@ -534,10 +557,9 @@ export function createSpaKernel(
       // Bind the island-context navigator (read by `ctx.navigate` through state — the same
       // decoupled seam `islandApis` uses, so islands.ts never imports the kernel). A forward
       // nav (scrollToTop=true); the per-call `options.scroll` flows through as the override.
-      // eslint-disable-next-line jsdoc/require-jsdoc -- inline navigator binding (delegates to the kernel's navigate)
+      // eslint-disable-next-line jsdoc/require-jsdoc -- inline navigator binding (delegates to navigateProgrammatic)
       state.navigate = (path: string, options?: NavigateOptions): void => {
-        if (typeof document === "undefined") return;
-        navigate(path, true, undefined, options?.scroll).catch(() => {});
+        navigateProgrammatic(path, options?.scroll);
       };
     },
     /**
@@ -593,8 +615,7 @@ export function createSpaKernel(
      * kernel.processNav("/about");
      */
     processNav(path, options?: NavigateOptions): void {
-      if (typeof document === "undefined") return;
-      navigate(path, true, undefined, options?.scroll).catch(() => {});
+      navigateProgrammatic(path, options?.scroll);
     },
     /**
      * Scan the swap region and mount islands for matching elements.
