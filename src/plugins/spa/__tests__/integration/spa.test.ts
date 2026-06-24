@@ -194,6 +194,10 @@ describe("spa integration", () => {
     expect(document.querySelector("#page")?.textContent).toBe("rendered:from-data");
     expect(document.title).toBe("Doc");
     expect(fetchSpy).toHaveBeenCalledWith("/_data/doc/index.json"); // data fetch, not HTML page
+    // Programmatic navigation must commit the ADDRESS BAR too (not just the internal currentUrl) —
+    // a link click / the Navigation API does this for the interceptor, but app.spa.navigate /
+    // ctx.navigate bypass it, so the kernel pushState's itself. Else back/refresh/deep-link break.
+    expect(location.pathname).toBe("/doc/");
   });
 
   it("type-level: app.spa is SpaApi with register/navigate/current", () => {
