@@ -12,7 +12,7 @@ import { routerPlugin } from "../router";
 import { createApi } from "./api";
 import { spaEvents } from "./events";
 import { initSpa } from "./kernel";
-import { captureTeardown, disposeSpa } from "./lifecycle";
+import { bindKernelNavigators, captureTeardown, disposeSpa } from "./lifecycle";
 import { createState, defaultSpaConfig } from "./state";
 
 /**
@@ -46,8 +46,10 @@ export const spaPlugin = createPlugin("spa", {
   onStart(ctx) {
     captureTeardown(ctx);
     ctx.state.kernel?.boot();
+    // Bind the module-level navigate/hardNavigate to this booted app (single-app-per-document).
+    if (ctx.state.kernel) bindKernelNavigators(ctx.state.kernel);
   },
-  onStop: disposeSpa // disposeSpa runs the captured kernel.dispose() in try/catch/finally
+  onStop: disposeSpa // disposeSpa runs the captured kernel.dispose() + unbinds the navigators
 });
 
 export {
@@ -59,3 +61,4 @@ export {
 } from "./channel";
 export { createIsland } from "./islands";
 export { lazyEmbed } from "./lazy-embed";
+export { hardNavigate, navigate } from "./lifecycle";

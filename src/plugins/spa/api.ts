@@ -44,6 +44,17 @@ export function createApi(ctx: SpaContext): SpaApi {
       ctx.state.kernel?.processNav(path, options);
     },
     /**
+     * Cross a boundary the SPA cannot swap (different layout / auth split) with a REAL
+     * full-page load — detaches the interceptor first so the navigation isn't intercepted.
+     *
+     * @param url - The destination URL.
+     * @example
+     * app.spa.hardNavigate("/signin/");
+     */
+    hardNavigate(url) {
+      ctx.state.kernel?.hardNavigate(url);
+    },
+    /**
      * Read the current resolved URL.
      *
      * @returns The current pathname + search.

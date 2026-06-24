@@ -529,6 +529,16 @@ export interface SpaKernel {
    */
   processNav(path: string, options?: NavigateOptions): void;
   /**
+   * Cross a boundary the SPA cannot swap (different layout / auth split) with a REAL
+   * full-page load — detaches the interceptor first so the navigation isn't caught.
+   *
+   * @param url - The destination URL.
+   * @returns void
+   * @example
+   * kernel.hardNavigate("/signin/");
+   */
+  hardNavigate(url: string): void;
+  /**
    * Query the swap region and mount islands for matching elements.
    *
    * @returns void
@@ -591,6 +601,17 @@ export type SpaApi = {
    * app.spa.navigate("/about");
    */
   navigate(path: string, options?: NavigateOptions): void;
+  /**
+   * Cross a boundary the SPA cannot swap (a different layout, the auth split) with a REAL
+   * full-page navigation. Detaches the SPA interceptor first, so the navigation is a true
+   * document load (rendering the destination's own layout) rather than an intercepted swap.
+   *
+   * @param url - The destination URL (internal path or absolute).
+   * @returns void
+   * @example
+   * app.spa.hardNavigate("/signin/"); // sign-out / 401: leave the app chrome for the auth split
+   */
+  hardNavigate(url: string): void;
   /**
    * Read the current resolved URL.
    *

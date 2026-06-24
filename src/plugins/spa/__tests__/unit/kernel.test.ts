@@ -345,6 +345,26 @@ describe("double-boot guard", () => {
     kernel.dispose();
   });
 
+  it("hardNavigate detaches the interceptor, then does a real location.assign", () => {
+    const { state, kernel } = setup();
+    kernel.init();
+    kernel.boot();
+    expect(state.destroyRouter).not.toBeNull(); // the click/Navigation interceptor is attached
+
+    const original = globalThis.location;
+    const assign = vi.fn();
+    Object.defineProperty(globalThis, "location", {
+      value: { assign, pathname: "/", search: "" },
+      configurable: true
+    });
+    kernel.hardNavigate("/signin/");
+
+    // The interceptor is removed FIRST (so the assign is a real load, not a swap), then assign runs.
+    expect(state.destroyRouter).toBeNull();
+    expect(assign).toHaveBeenCalledWith("/signin/");
+    Object.defineProperty(globalThis, "location", { value: original, configurable: true });
+  });
+
   it("boot is a no-op without a DOM (typeof document guard)", () => {
     const { state, kernel } = setup();
     kernel.init();

@@ -8,17 +8,19 @@ function makeCtx() {
   const state = createState({ global: {}, config: {} });
   const register = vi.fn();
   const processNav = vi.fn();
+  const hardNavigate = vi.fn();
   state.kernel = {
     init() {},
     boot() {},
     register,
     processNav,
+    hardNavigate,
     scan() {},
     dispose() {}
   };
   const log = { warn: vi.fn() } as unknown as SpaContext["log"];
   const ctx = { state, log } as unknown as SpaContext;
-  return { ctx, state, register, processNav, log };
+  return { ctx, state, register, processNav, hardNavigate, log };
 }
 
 describe("spa api", () => {
@@ -42,5 +44,11 @@ describe("spa api", () => {
     expect(processNav).toHaveBeenCalledWith("/about", undefined);
     state.currentUrl = "/now";
     expect(api.current()).toBe("/now");
+  });
+
+  it("hardNavigate delegates to the kernel", () => {
+    const { ctx, hardNavigate } = makeCtx();
+    createApi(ctx).hardNavigate("/signin/");
+    expect(hardNavigate).toHaveBeenCalledWith("/signin/");
   });
 });
