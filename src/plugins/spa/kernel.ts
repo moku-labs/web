@@ -11,7 +11,13 @@ import { dataPlugin } from "../data";
 import { headPlugin } from "../head";
 import { routerPlugin } from "../router";
 import { isClientOnlyRoute } from "../router/iso-match";
-import type { RouteContext, RouteDefinition, RouteState } from "../router/types";
+import type {
+  RouteContext,
+  RouteDefinition,
+  RouteState,
+  ScrollMode,
+  TransitionMode
+} from "../router/types";
 import { syncHead } from "./head";
 import {
   notifyNavEnd,
@@ -28,12 +34,14 @@ import {
   performNavigation,
   type RouterHandlers,
   runSwap,
+  type SwapTransition,
   swapRegion
 } from "./router";
 import { resolveSpaConfig } from "./state";
 import type {
   // eslint-disable-next-line unicorn/prevent-abbreviations -- canonical public type name per spec
   IslandDef,
+  NavigateOptions,
   SpaConfig,
   SpaContext,
   SpaEmitFunction,
@@ -118,6 +126,51 @@ export function createSpaKernel(
   // (just before the View Transition snapshot). `true` for forward navs (scroll to top),
   // `false` for traverse (back/forward keeps its restored position). Set by `navigate`.
   let pendingScrollToTop = true;
+  // View-Transition intent for the in-flight navigation's swap. Resolved per-nav from the
+  // destination route's `.transition()` (falling back to the app default), set by `navigate`.
+  let pendingTransition: SwapTransition = resolveTransition(resolved.defaultTransition);
+
+  /**
+   * Resolve a {@link TransitionMode} into the runtime {@link SwapTransition} the swap
+   * consumes: `"none"` ⇒ disabled; `"crossfade"` ⇒ enabled, no named types (default root
+   * crossfade); any other mode ⇒ enabled with that name as the View-Transition type. The
+   * app-wide `viewTransitions` enabled flag gates everything: when it is off AND the route
+   * declares no transition, no transition runs.
+   *
+   * @param mode - The effective transition mode for this navigation.
+   * @returns The resolved swap descriptor (enabled + named types).
+   * @example
+   * pendingTransition = resolveTransition("slide");
+   */
+  function resolveTransition(mode: TransitionMode): SwapTransition {
+    if (mode === "none") return { enabled: false, types: [] };
+    if (mode === "crossfade") return { enabled: true, types: [] };
+    return { enabled: true, types: [mode] };
+  }
+
+  /**
+   * Resolve the per-navigation scroll + transition intent from the DESTINATION route,
+   * falling back to the app-wide defaults. A route's `.scroll()`/`.transition()` win; an
+   * explicit per-call `scrollOverride` (from `ctx.navigate`/`app.spa.navigate`) wins over
+   * the route. `forwardScrollToTop` carries the navigation-type intent (forward ⇒ `true`,
+   * traverse ⇒ `false`); a `"preserve"` resolution forces no scroll-to-top either way.
+   *
+   * @param pathname - The destination pathname (search stripped for matching).
+   * @param forwardScrollToTop - Whether this nav would scroll to top by default (forward vs traverse).
+   * @param scrollOverride - An explicit per-call scroll override, if any.
+   * @example
+   * applyNavIntent("/board/abc/issue/1", true, undefined);
+   */
+  const applyNavIntent = (
+    pathname: string,
+    forwardScrollToTop: boolean,
+    scrollOverride: ScrollMode | undefined
+  ): void => {
+    const route = deps.router.match(pathname.split("?")[0] ?? pathname)?.route;
+    const scrollMode: ScrollMode = scrollOverride ?? route?._scroll ?? resolved.scrollRestoration;
+    pendingScrollToTop = forwardScrollToTop && scrollMode !== "preserve";
+    pendingTransition = resolveTransition(route?._transition ?? resolved.defaultTransition);
+  };
 
   /**
    * Apply the in-flight navigation's scroll intent — the swap's `beforeCapture` hook.
@@ -192,7 +245,7 @@ export function createSpaKernel(
     const swapped = swapRegion(
       doc,
       resolved.swapSelector,
-      resolved.viewTransitions,
+      pendingTransition,
       () => {
         const routeSlice = islandRouteContext(pathname);
         scanAndMount(state, emit, resolved.swapSelector, routeSlice);
@@ -369,7 +422,7 @@ export function createSpaKernel(
       scanAndMount(state, emit, resolved.swapSelector, routeSlice);
       notifyNavEnd(state, routeSlice);
     };
-    runSwap(renderAndMount, resolved.viewTransitions, applyPendingScroll);
+    runSwap(renderAndMount, pendingTransition, applyPendingScroll);
 
     // Record the new URL and announce the completed navigation.
     state.currentUrl = pathname;
@@ -441,6 +494,8 @@ export function createSpaKernel(
    *   (default `true`; forward navs). Traverse passes `false` to keep its restored scroll.
    * @param signal - Aborts when this navigation is superseded (`navEvent.signal`);
    *   a superseded navigation never applies its swap (no stale last-write-wins).
+   * @param scrollOverride - An explicit per-call scroll override (from `ctx.navigate`/
+   *   `app.spa.navigate`); wins over the destination route's `.scroll()` + the app default.
    * @returns A promise resolving once the swap (or fallback) is dispatched.
    * @example
    * await navigate("/en/world/");
@@ -448,11 +503,13 @@ export function createSpaKernel(
   const navigate: NavigateFunction = async (
     pathname: string,
     scrollToTop = true,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    scrollOverride?: ScrollMode
   ): Promise<void> => {
-    // Record the scroll intent for this navigation's swap (read by `applyPendingScroll`,
-    // run just before the snapshot). Forward navs scroll to top; traverse keeps its scroll.
-    pendingScrollToTop = scrollToTop;
+    // Record the scroll + transition intent for this navigation's swap from the destination
+    // route (`.scroll()`/`.transition()`) + app defaults, with an explicit per-call scroll
+    // override winning. Read by `applyPendingScroll` (just before the snapshot) + the swap.
+    applyNavIntent(pathname, scrollToTop, scrollOverride);
     // Announce the nav (progress bar + onNavStart + `spa:navigate`) NOW, before either path
     // runs its fetch. The DATA path awaits the persisted JSON inside `resolveDataRender`; doing
     // this here — not in `commitDataRender`, which runs AFTER that fetch — means the user sees
@@ -474,6 +531,14 @@ export function createSpaKernel(
     init(): void {
       for (const island of resolved.islands) registerIsland(state, island);
       state.currentUrl = currentLocationUrl();
+      // Bind the island-context navigator (read by `ctx.navigate` through state — the same
+      // decoupled seam `islandApis` uses, so islands.ts never imports the kernel). A forward
+      // nav (scrollToTop=true); the per-call `options.scroll` flows through as the override.
+      // eslint-disable-next-line jsdoc/require-jsdoc -- inline navigator binding (delegates to the kernel's navigate)
+      state.navigate = (path: string, options?: NavigateOptions): void => {
+        if (typeof document === "undefined") return;
+        navigate(path, true, undefined, options?.scroll).catch(() => {});
+      };
     },
     /**
      * Boot navigation interception + initial scan (throws if already started).
@@ -519,15 +584,17 @@ export function createSpaKernel(
       registerIsland(state, island);
     },
     /**
-     * Process a navigation to `path` (fetch then swap; full reload on error).
+     * Process a navigation to `path` (fetch then swap; full reload on error). An optional
+     * per-call `scroll` override flows through to the swap's scroll intent.
      *
      * @param path - The target path to navigate to.
+     * @param options - Optional per-navigation overrides (e.g. `{ scroll: "preserve" }`).
      * @example
      * kernel.processNav("/about");
      */
-    processNav(path): void {
+    processNav(path, options?: NavigateOptions): void {
       if (typeof document === "undefined") return;
-      navigate(path).catch(() => {});
+      navigate(path, true, undefined, options?.scroll).catch(() => {});
     },
     /**
      * Scan the swap region and mount islands for matching elements.

@@ -46,7 +46,15 @@ export { browserEnv } from "@moku-labs/common/browser";
 
 // ─── Consumer helpers: route DSL, SPA islands, SEO <head> primitives ──────────
 export { createUrls, defineRoutes, route } from "./plugins/router";
-export { createIsland, lazyEmbed } from "./plugins/spa";
+export {
+  type Channel,
+  type ChannelKeepAlive,
+  type ChannelOptions,
+  type ChannelReconnect,
+  createChannel,
+  createIsland,
+  lazyEmbed
+} from "./plugins/spa";
 export {
   buildArticleHead,
   canonical,

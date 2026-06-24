@@ -3,6 +3,7 @@
  * @see README.md
  */
 
+import type { TransitionMode } from "../router/types";
 import type {
   // eslint-disable-next-line unicorn/prevent-abbreviations -- canonical public type name per spec
   IslandDef,
@@ -18,10 +19,26 @@ const ERROR_PREFIX = "[web]";
 /** Last-resort `swapSelector` when neither config nor defaults supply one. */
 const FALLBACK_SWAP_SELECTOR = "main > section";
 
+/**
+ * Resolve the `viewTransitions` config value into the default {@link TransitionMode}:
+ * `true` → `"crossfade"`, `false` → `"none"`, a named mode → itself.
+ *
+ * @param raw - The raw `viewTransitions` config value (boolean or named mode).
+ * @returns The resolved default transition mode.
+ * @example
+ * resolveDefaultTransition(true); // "crossfade"
+ */
+function resolveDefaultTransition(raw: boolean | TransitionMode): TransitionMode {
+  if (raw === true) return "crossfade";
+  if (raw === false) return "none";
+  return raw;
+}
+
 /** Default SPA config (declared as a value — no inline assertion). */
 export const defaultSpaConfig: SpaConfig = {
   swapSelector: "main > section",
   viewTransitions: false,
+  scrollRestoration: "top",
   progressBar: true,
   islands: []
 };
@@ -77,10 +94,18 @@ export function resolveSpaConfig(config: SpaConfig): ResolvedSpaConfig {
     );
   }
 
+  // Resolve the View-Transition default. `viewTransitions` accepts a boolean (legacy:
+  // true → "crossfade", false → "none") OR a named mode. The resolved form splits into an
+  // `enabled` flag (false ⇒ never run a transition) + a `defaultTransition` mode applied to
+  // any route that does not declare its own `.transition()`.
+  const defaultTransition = resolveDefaultTransition(config.viewTransitions ?? false);
+
   // Fill the remaining optional fields from their per-key defaults.
   return {
     swapSelector,
-    viewTransitions: config.viewTransitions ?? false,
+    viewTransitions: defaultTransition !== "none",
+    defaultTransition,
+    scrollRestoration: config.scrollRestoration ?? "top",
     progressBar: config.progressBar ?? true,
     islands: config.islands ?? []
   };
@@ -110,6 +135,8 @@ export function createState(_ctx: {
     // eslint-disable-next-line unicorn/no-null -- `destroyRouter` is `(() => void) | null` until the router attaches
     destroyRouter: null,
     started: false,
+    // eslint-disable-next-line unicorn/no-null -- `navigate` is bound by the kernel at init
+    navigate: null,
     // eslint-disable-next-line unicorn/no-null -- `kernel` is `SpaKernel | null` until onInit builds it
     kernel: null
   };

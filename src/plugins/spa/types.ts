@@ -6,7 +6,15 @@
 import type { Log } from "@moku-labs/common";
 import type { EmitFn as EmitFunction } from "@moku-labs/core";
 import type { Api as HeadApi } from "../head/types";
-import type { RouterApi } from "../router/types";
+import type { RouterApi, ScrollMode, TransitionMode } from "../router/types";
+
+export type { ScrollMode, TransitionMode } from "../router/types";
+
+/** Per-navigation options for the programmatic navigators (`ctx.navigate` / `app.spa.navigate`). */
+export interface NavigateOptions {
+  /** Override the scroll behaviour for this single navigation (else the route/app default). */
+  scroll?: ScrollMode;
+}
 
 /** Payload map for the events `spa` emits, used to type the kernel's `emit` closure. */
 export type SpaEvents = {
@@ -83,10 +91,21 @@ export type SpaConfig = {
    */
   swapSelector?: string;
   /**
-   * Use the View Transitions API for cross-fade swaps when available.
-   * Falls back to an instant swap when unsupported. Defaults to `false`.
+   * The app-wide default View-Transition behaviour for navigations. Accepts a
+   * boolean (legacy: `true` → `"crossfade"`, `false` → `"none"`) OR a named
+   * {@link TransitionMode} (`"none" | "crossfade" | "slide" | "morph"`). A route's
+   * `.transition()` overrides this per-route. Falls back to an instant swap when the
+   * View Transitions API is unsupported or under `prefers-reduced-motion`. Defaults
+   * to `false` (`"none"`).
    */
-  viewTransitions?: boolean;
+  viewTransitions?: boolean | TransitionMode;
+  /**
+   * The app-wide default scroll behaviour for forward navigations: `"top"` (reset to
+   * the top, the default) or `"preserve"` (keep the current scroll). A route's
+   * `.scroll()` overrides this per-route. Traverse (back/forward) always restores its
+   * saved position regardless. Defaults to `"top"`.
+   */
+  scrollRestoration?: ScrollMode;
   /**
    * Show the in-house top progress bar during navigation. Defaults to `true`.
    */
@@ -102,8 +121,12 @@ export type SpaConfig = {
 export interface ResolvedSpaConfig {
   /** CSS selector for the swapped page region. */
   swapSelector: string;
-  /** Whether View Transitions are enabled. */
+  /** Whether View Transitions are enabled at all (false ⇒ always instant swap). */
   viewTransitions: boolean;
+  /** The app-wide default transition mode applied when a route declares none. */
+  defaultTransition: TransitionMode;
+  /** The app-wide default scroll behaviour applied when a route declares none. */
+  scrollRestoration: ScrollMode;
   /** Whether the progress bar is enabled. */
   progressBar: boolean;
   /** Pre-registered islands. */
@@ -115,10 +138,15 @@ export interface ResolvedSpaConfig {
  * - a Preact `VNode` — committed into the host through the lazy Preact gate (`commitVNode`);
  * - a `Node` — replaces the host's children;
  * - a `string` — set as the host's `innerHTML`;
+ * - `null` — render NOTHING but stay mountable: the host's Preact tree is unmounted via
+ *   `render(null, host)` (NOT `innerHTML = ""`), so a later non-empty render re-commits
+ *   cleanly. This is the correct "empty" for a persistent render-island (e.g. a closed
+ *   overlay panel) — returning `""` instead corrupts Preact's retained vdom and the panel
+ *   never re-opens;
  * - `void`/`undefined` — the render mutated the DOM itself (DOM-only islands → no Preact loaded).
  */
 // biome-ignore lint/suspicious/noConfusingVoidType: a render may legitimately return nothing (DOM-only islands)
-export type RenderResult = AnyVNode | Node | string | void;
+export type RenderResult = AnyVNode | Node | string | null | void;
 
 /**
  * A Preact `VNode` of ANY props shape. A render returns `h(Component, props)`, i.e. a
@@ -218,6 +246,21 @@ export interface IslandContext<S = undefined> {
   readonly locale: string;
   /** Build a link to a named route by pattern substitution (same output as `app.router.toUrl`). */
   readonly url: (name: string, params?: Record<string, string>) => string;
+  /**
+   * Programmatically navigate the SPA to an internal path (same swap pipeline as a
+   * link click; no-op without a DOM). Build `path` from the route map's `urls`/`ctx.url`,
+   * never a literal. Pass `{ scroll: "preserve" }` to keep the current scroll for this nav.
+   *
+   * An ALWAYS-PRESENT member (like `set`/`flush`/`cleanup`) so every island can navigate
+   * without an `app` handle — no synthesized anchor click.
+   *
+   * @param path - The internal destination path (e.g. `ctx.url("board", { id })`).
+   * @param options - Optional per-navigation overrides (e.g. `{ scroll: "preserve" }`).
+   * @returns void
+   * @example
+   * ctx.navigate(ctx.url("issue", { id, issueId }));
+   */
+  readonly navigate: (path: string, options?: NavigateOptions) => void;
   /** The live per-instance state (the object returned by `spec.state`). `undefined` for legacy hooks-only islands. */
   readonly state: S;
   /**
@@ -479,11 +522,12 @@ export interface SpaKernel {
    * Process a navigation to `path`: fetch then swap then head-sync then emit.
    *
    * @param path - The target path to navigate to.
+   * @param options - Optional per-navigation overrides (e.g. `{ scroll: "preserve" }`).
    * @returns void
    * @example
    * kernel.processNav("/about");
    */
-  processNav(path: string): void;
+  processNav(path: string, options?: NavigateOptions): void;
   /**
    * Query the swap region and mount islands for matching elements.
    *
@@ -516,6 +560,12 @@ export interface SpaState {
   destroyRouter: (() => void) | null;
   /** Whether the browser runtime has been booted. */
   started: boolean;
+  /**
+   * The kernel's programmatic navigator, bound at init (null until then). The island
+   * context's `ctx.navigate` reads through this — the same decoupled seam `islandApis`
+   * uses — so `islands.ts` never imports the kernel.
+   */
+  navigate: ((path: string, options?: NavigateOptions) => void) | null;
   /** The single shared SPA kernel instance (null until onInit builds it). */
   kernel: SpaKernel | null;
 }
@@ -535,11 +585,12 @@ export type SpaApi = {
    * Programmatically navigate to a path (client runtime; no-op without a DOM).
    *
    * @param path - Target path (pathname, optionally with search/hash).
+   * @param options - Optional per-navigation overrides (e.g. `{ scroll: "preserve" }`).
    * @returns void
    * @example
    * app.spa.navigate("/about");
    */
-  navigate(path: string): void;
+  navigate(path: string, options?: NavigateOptions): void;
   /**
    * Read the current resolved URL.
    *

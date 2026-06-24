@@ -18,8 +18,27 @@ describe("route() fluent builder", () => {
     expect(r.head(() => ({ title: "t" }))).toBe(r);
     expect(r.generate(() => [])).toBe(r);
     expect(r.meta({ activeTab: "blog" })).toBe(r);
+    expect(r.transition("slide")).toBe(r);
+    expect(r.scroll("preserve")).toBe(r);
     expect(r.toJson(() => ({}))).toBe(r);
     expect(r.toFile(() => "x.html")).toBe(r);
+  });
+
+  it("captures .transition()/.scroll() as typed _transition/_scroll fields (not in _meta)", () => {
+    const r = route("/board/{id}/issue/{issueId}")
+      .transition("morph")
+      .scroll("preserve")
+      .meta({ focus: "issue" });
+    expect(r._transition).toBe("morph");
+    expect(r._scroll).toBe("preserve");
+    // The directives are NOT smuggled into the free-form meta bag.
+    expect(r._meta).toEqual({ focus: "issue" });
+  });
+
+  it("leaves _transition/_scroll undefined when not declared (app default applies)", () => {
+    const r = route("/");
+    expect(r._transition).toBeUndefined();
+    expect(r._scroll).toBeUndefined();
   });
 
   it("captures handlers into the _handlers bag", () => {

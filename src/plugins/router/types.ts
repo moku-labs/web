@@ -181,6 +181,29 @@ export interface HeadConfig {
 }
 
 /**
+ * Named view-transition behaviour for a navigation TO a route — a closed, typed
+ * vocabulary the SPA kernel interprets (NOT free-form app data, so it earns a
+ * first-class `.transition()` method instead of a `.meta()` key):
+ * - `"none"` — swap with no View Transition (instant);
+ * - `"crossfade"` — the default root crossfade (`startViewTransition(swap)`);
+ * - `"slide"` / `"morph"` — a named transition; the kernel tags the transition with
+ *   `types: ["slide"|"morph"]` so consumer CSS can target `:active-view-transition-type(slide)`
+ *   (and shared `view-transition-name`s morph one element into another).
+ *
+ * A route's `.transition()` OVERRIDES the app-wide default (`spa.viewTransitions`).
+ */
+export type TransitionMode = "none" | "crossfade" | "slide" | "morph";
+
+/**
+ * Scroll behaviour for a navigation TO a route — a closed, typed vocabulary the SPA
+ * kernel interprets (a first-class `.scroll()` method, not a `.meta()` key):
+ * - `"top"` — reset to the top of the page on the swap (the default for forward navs);
+ * - `"preserve"` — keep the current scroll position (e.g. opening an overlay/issue route
+ *   over a board that must stay still). A route's `.scroll()` OVERRIDES `spa.scrollRestoration`.
+ */
+export type ScrollMode = "top" | "preserve";
+
+/**
  * Fluent route builder. Each chain method returns the same builder with a
  * (possibly widened) state generic. Only `.load()` widens the data type `D`.
  */
@@ -213,6 +236,24 @@ export interface RouteBuilder<S extends RouteState> extends RouteDefinition {
    * projected verbatim into `clientManifest()` and shipped to the browser.
    */
   meta(meta: Record<string, unknown>): RouteBuilder<S>;
+  /**
+   * Declare the view-transition behaviour for navigations TO this route — a typed
+   * framework directive (the SPA kernel reads it), overriding the app-wide
+   * `spa.viewTransitions` default. See {@link TransitionMode}.
+   *
+   * @example
+   * route("/board/{id}/issue/{issueId}").transition("morph"); // card → panel
+   */
+  transition(mode: TransitionMode): RouteBuilder<S>;
+  /**
+   * Declare the scroll behaviour for navigations TO this route — a typed framework
+   * directive (the SPA kernel reads it), overriding the app-wide
+   * `spa.scrollRestoration` default. See {@link ScrollMode}.
+   *
+   * @example
+   * route("/board/{id}/issue/{issueId}").scroll("preserve"); // overlay: don't move the board
+   */
+  scroll(mode: ScrollMode): RouteBuilder<S>;
   /** Attach a JSON serializer for the route's data. */
   toJson(handler: (ctx: RouteContext<S>) => unknown): RouteBuilder<S>;
   /** Override the output file-path producer. */
@@ -247,6 +288,10 @@ export interface RouteDefinition {
   readonly pattern: string;
   /** Metadata bag accumulated from `.meta()` (named `_meta` to avoid clashing with the `.meta()` builder method). */
   readonly _meta: Record<string, unknown>;
+  /** Named view-transition behaviour from `.transition()` (read by the SPA kernel); undefined → app default. */
+  readonly _transition?: TransitionMode;
+  /** Scroll behaviour from `.scroll()` (read by the SPA kernel); undefined → app default. */
+  readonly _scroll?: ScrollMode;
   /** Build-time handler bag (load/render/head/generate/toJson/toFile). */
   readonly _handlers: RouteHandlers;
 }

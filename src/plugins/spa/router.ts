@@ -3,8 +3,22 @@
  * @see README.md
  */
 
+import type { ScrollMode } from "../router/types";
+
 /** Teardown handle returned by the router attach step. */
 export type RouterTeardown = () => void;
+
+/**
+ * The resolved View-Transition descriptor for one swap. `enabled` gates whether a
+ * View Transition wraps the swap at all; `types` carries the named transition(s)
+ * (e.g. `["slide"]`) — empty for the default root crossfade.
+ */
+export interface SwapTransition {
+  /** Whether to wrap the swap in a View Transition (false ⇒ instant swap). */
+  enabled: boolean;
+  /** Named transition types for this swap (empty ⇒ default root crossfade). */
+  types: string[];
+}
 
 /**
  * A navigation strategy: perform a navigation to `pathname`, resolving once the
@@ -28,7 +42,8 @@ export type RouterTeardown = () => void;
 export type NavigateFunction = (
   pathname: string,
   scrollToTop?: boolean,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  scrollOverride?: ScrollMode
 ) => Promise<void>;
 
 /**
@@ -250,32 +265,67 @@ function prefersReducedMotion(): boolean {
  * Because the swap is post-fetch, doing it here also avoids the visible "scroll up,
  * THEN the page loads" pause that scrolling in the router (pre-fetch) produced.
  *
+ * Named transitions (`transition.types`, e.g. `["slide"]`) are exposed to CSS two ways
+ * for the transition's lifetime, so a consumer can style the motion per navigation:
+ *   • a `:root[data-view-transition~="slide"]` attribute (works on EVERY View-Transitions
+ *     engine, including those without the `types` dictionary form);
+ *   • the standards-track `types` option (`:active-view-transition-type(slide)`) when the
+ *     engine supports the `startViewTransition({ update, types })` dictionary form.
+ * Empty `types` ⇒ the default root crossfade. A shared `view-transition-name` left on an
+ * element across the swap (e.g. a card and the panel it opens) morphs one into the other.
+ *
  * @param doSwap - The synchronous DOM mutation to perform.
- * @param viewTransitions - Whether to wrap the swap in `startViewTransition`.
+ * @param transition - The resolved {@link SwapTransition} (enabled + named types).
  * @param beforeCapture - Optional hook run synchronously just before the swap/capture
  *   (e.g. scroll to the destination position).
  * @example
- * runSwap(() => current.replaceWith(next), true, () => scrollTo({ top: 0, behavior: "instant" }));
+ * runSwap(() => current.replaceWith(next), { enabled: true, types: ["slide"] });
  */
 export function runSwap(
   doSwap: () => void,
-  viewTransitions: boolean,
+  transition: SwapTransition,
   beforeCapture?: () => void
 ): void {
   const reduced = prefersReducedMotion();
   const docWithVt = document as Document & {
-    startViewTransition?: (cb: () => void) => unknown;
+    startViewTransition?: (
+      cb: (() => void) | { update: () => void; types?: string[] }
+    ) => { finished?: Promise<unknown> } | undefined;
   };
   const canUseViewTransitions =
-    viewTransitions && !reduced && typeof docWithVt.startViewTransition === "function";
+    transition.enabled && !reduced && typeof docWithVt.startViewTransition === "function";
   // Set the destination scroll BEFORE the "old" snapshot is captured (see above): no
   // scroll delta to animate → the sticky header holds, and no pre-fetch scroll pause.
   beforeCapture?.();
-  if (canUseViewTransitions) {
-    docWithVt.startViewTransition(doSwap);
-  } else {
+  if (!canUseViewTransitions) {
     doSwap();
+    return;
   }
+
+  const root = typeof document === "undefined" ? undefined : document.documentElement;
+  const hasTypes = transition.types.length > 0;
+  // Expose the named transition to CSS for the swap's duration (cleared once it settles).
+  if (hasTypes && root) root.dataset.viewTransition = transition.types.join(" ");
+  // eslint-disable-next-line jsdoc/require-jsdoc -- inline marker cleanup once the transition settles
+  const clearMarker = (): void => {
+    if (hasTypes && root) delete root.dataset.viewTransition;
+  };
+
+  let result: { finished?: Promise<unknown> } | undefined;
+  if (hasTypes) {
+    try {
+      // Standards-track dictionary form: also drives `:active-view-transition-type(...)`.
+      result = docWithVt.startViewTransition({ update: doSwap, types: transition.types });
+    } catch {
+      // Older engine without the dictionary form — the data-attribute marker still drives CSS.
+      result = docWithVt.startViewTransition(doSwap);
+    }
+  } else {
+    result = docWithVt.startViewTransition(doSwap);
+  }
+  // Clear the marker once the transition settles (both fulfil + reject paths); the `.catch`
+  // keeps the promise non-floating without a `void` operator.
+  Promise.resolve(result?.finished).then(clearMarker).catch(clearMarker);
 }
 
 /**
@@ -290,18 +340,18 @@ export function runSwap(
  *
  * @param doc - The fetched document (DOMParser-parsed) holding the new region.
  * @param swapSelector - CSS selector for the region to replace.
- * @param viewTransitions - Whether to wrap the swap in `startViewTransition`.
+ * @param transition - The resolved {@link SwapTransition} (enabled + named types).
  * @param onSwapped - Callback run after the DOM mutation (mount/notify/scroll).
  * @param beforeCapture - Optional hook run synchronously just before the swap/capture
  *   (forwarded to {@link runSwap} — e.g. scroll to the destination position).
  * @returns `true` when the swap was dispatched, `false` when either document lacks the region.
  * @example
- * swapRegion(doc, "main > section", false, () => mountNew());
+ * swapRegion(doc, "main > section", { enabled: false, types: [] }, () => mountNew());
  */
 export function swapRegion(
   doc: Document,
   swapSelector: string,
-  viewTransitions: boolean,
+  transition: SwapTransition,
   onSwapped: () => void,
   beforeCapture?: () => void
 ): boolean {
@@ -313,7 +363,7 @@ export function swapRegion(
       currentContent.replaceWith(newContent);
       onSwapped();
     },
-    viewTransitions,
+    transition,
     beforeCapture
   );
   return true;

@@ -85,6 +85,41 @@ describe("createIsland spec form", () => {
   });
 });
 
+describe("ctx.navigate", () => {
+  it("delegates to the kernel navigator bound on state (with options)", () => {
+    const state = freshState();
+    const navigate = vi.fn();
+    state.navigate = navigate;
+    state.registeredIslands.set("c", {
+      name: "c",
+      hooks: {
+        onMount(ctx) {
+          ctx.navigate("/board/abc", { scroll: "preserve" });
+        }
+      }
+    });
+    document.body.innerHTML = `<main><section><div data-island="c"></div></section></main>`;
+
+    scanAndMount(state, vi.fn(), "main > section");
+
+    expect(navigate).toHaveBeenCalledWith("/board/abc", { scroll: "preserve" });
+  });
+
+  it("is a safe no-op before the kernel binds state.navigate", () => {
+    const state = freshState();
+    state.registeredIslands.set("c", {
+      name: "c",
+      hooks: {
+        onMount(ctx) {
+          ctx.navigate("/x");
+        }
+      }
+    });
+    document.body.innerHTML = `<main><section><div data-island="c"></div></section></main>`;
+    expect(() => scanAndMount(state, vi.fn(), "main > section")).not.toThrow();
+  });
+});
+
 describe("extractPageData", () => {
   it("parses the inline script#__DATA__ payload", () => {
     document.body.innerHTML = `<script id="__DATA__" type="application/json">{"a":1}</script>`;

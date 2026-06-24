@@ -36,11 +36,12 @@ export function createApi(ctx: SpaContext): SpaApi {
      * Programmatically navigate to a path (client runtime; no-op without a DOM).
      *
      * @param path - Target path (pathname, optionally with search/hash).
+     * @param options - Optional per-navigation overrides (e.g. `{ scroll: "preserve" }`).
      * @example
      * app.spa.navigate("/about");
      */
-    navigate(path) {
-      ctx.state.kernel?.processNav(path);
+    navigate(path, options) {
+      ctx.state.kernel?.processNav(path, options);
     },
     /**
      * Read the current resolved URL.

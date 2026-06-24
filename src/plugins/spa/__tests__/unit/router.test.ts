@@ -372,9 +372,12 @@ describe("swapRegion / runSwap (View Transitions)", () => {
     vi.stubGlobal("matchMedia", () => ({ matches: false }));
 
     let ran = false;
-    runSwap(() => {
-      ran = true;
-    }, true);
+    runSwap(
+      () => {
+        ran = true;
+      },
+      { enabled: true, types: [] }
+    );
     expect(startViewTransition).toHaveBeenCalledTimes(1);
     expect(ran).toBe(true);
     delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
@@ -384,9 +387,12 @@ describe("swapRegion / runSwap (View Transitions)", () => {
     delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
     let ran = false;
     expect(() =>
-      runSwap(() => {
-        ran = true;
-      }, true)
+      runSwap(
+        () => {
+          ran = true;
+        },
+        { enabled: true, types: [] }
+      )
     ).not.toThrow();
     expect(ran).toBe(true);
   });
@@ -405,7 +411,7 @@ describe("swapRegion / runSwap (View Transitions)", () => {
 
     runSwap(
       () => order.push("swap"),
-      true,
+      { enabled: true, types: [] },
       () => order.push("beforeCapture")
     );
     // beforeCapture (e.g. scroll to top) must precede the capture, so scrollY=0 is baked
@@ -419,10 +425,79 @@ describe("swapRegion / runSwap (View Transitions)", () => {
     const order: string[] = [];
     runSwap(
       () => order.push("swap"),
-      true,
+      { enabled: true, types: [] },
       () => order.push("beforeCapture")
     );
     expect(order).toEqual(["beforeCapture", "swap"]);
+  });
+
+  it("a named transition drives the dictionary form + a :root data-view-transition marker", async () => {
+    let resolveFinished!: () => void;
+    const finished = new Promise<void>(r => {
+      resolveFinished = r;
+    });
+    const startViewTransition = vi.fn((arg: unknown) => {
+      // The named path uses the dictionary form { update, types }.
+      (arg as { update: () => void }).update();
+      return { finished };
+    });
+    (
+      document as unknown as { startViewTransition: typeof startViewTransition }
+    ).startViewTransition = startViewTransition;
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+
+    runSwap(() => {}, { enabled: true, types: ["slide"] });
+    // The dictionary form was used with the named type.
+    expect(startViewTransition).toHaveBeenCalledWith(expect.objectContaining({ types: ["slide"] }));
+    // The CSS marker is present for the transition's lifetime…
+    expect(document.documentElement.dataset.viewTransition).toBe("slide");
+    // …and cleared once it settles.
+    resolveFinished();
+    await finished;
+    await Promise.resolve();
+    expect(document.documentElement.dataset.viewTransition).toBeUndefined();
+    delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
+  });
+
+  it("a disabled transition does an instant swap and sets no marker", () => {
+    const startViewTransition = vi.fn();
+    (
+      document as unknown as { startViewTransition: typeof startViewTransition }
+    ).startViewTransition = startViewTransition;
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    let ran = false;
+    runSwap(
+      () => {
+        ran = true;
+      },
+      { enabled: false, types: [] }
+    );
+    expect(ran).toBe(true);
+    expect(startViewTransition).not.toHaveBeenCalled();
+    expect(document.documentElement.dataset.viewTransition).toBeUndefined();
+    delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
+  });
+
+  it("falls back to the bare callback form when the dictionary form throws (older engines)", () => {
+    const startViewTransition = vi.fn((arg: unknown) => {
+      if (typeof arg !== "function") throw new TypeError("no dictionary form");
+      (arg as () => void)();
+      return {};
+    });
+    (
+      document as unknown as { startViewTransition: typeof startViewTransition }
+    ).startViewTransition = startViewTransition;
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    let ran = false;
+    runSwap(
+      () => {
+        ran = true;
+      },
+      { enabled: true, types: ["slide"] }
+    );
+    expect(ran).toBe(true); // the swap still happened via the bare form
+    expect(startViewTransition).toHaveBeenCalledTimes(2); // dictionary (threw) → bare
+    delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
   });
 
   it("swapRegion replaces the matched region, runs onSwapped, and reports success", () => {
@@ -432,7 +507,7 @@ describe("swapRegion / runSwap (View Transitions)", () => {
       "text/html"
     );
     const onSwapped = vi.fn();
-    expect(swapRegion(doc, "main > section", false, onSwapped)).toBe(true);
+    expect(swapRegion(doc, "main > section", { enabled: false, types: [] }, onSwapped)).toBe(true);
     expect(document.querySelector("#page")?.textContent).toBe("new");
     expect(onSwapped).toHaveBeenCalledTimes(1);
   });
@@ -441,7 +516,7 @@ describe("swapRegion / runSwap (View Transitions)", () => {
     document.body.innerHTML = `<div>no region</div>`;
     const doc = new DOMParser().parseFromString(`<main><section>x</section></main>`, "text/html");
     const onSwapped = vi.fn();
-    expect(swapRegion(doc, "main > section", false, onSwapped)).toBe(false);
+    expect(swapRegion(doc, "main > section", { enabled: false, types: [] }, onSwapped)).toBe(false);
     expect(onSwapped).not.toHaveBeenCalled();
   });
 
@@ -449,7 +524,7 @@ describe("swapRegion / runSwap (View Transitions)", () => {
     document.body.innerHTML = `<main><section id="page">old</section></main>`;
     const doc = new DOMParser().parseFromString(`<div>no region</div>`, "text/html");
     const onSwapped = vi.fn();
-    expect(swapRegion(doc, "main > section", false, onSwapped)).toBe(false);
+    expect(swapRegion(doc, "main > section", { enabled: false, types: [] }, onSwapped)).toBe(false);
     expect(onSwapped).not.toHaveBeenCalled();
     expect(document.querySelector("#page")?.textContent).toBe("old");
   });
