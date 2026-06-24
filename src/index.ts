@@ -48,7 +48,9 @@ export {
   type ChannelReconnect,
   createChannel,
   createIsland,
-  lazyEmbed
+  hardNavigate,
+  lazyEmbed,
+  navigate
 } from "./plugins/spa";
 export {
   buildArticleHead,

@@ -141,6 +141,7 @@ route("/board/{id}/issue/{issueId}")
 - **`viewTransitions`** accepts `boolean` (`true` → `"crossfade"`, `false` → `"none"`) **or** a named `TransitionMode` (`"none" | "crossfade" | "slide" | "morph"`). A named transition tags the swap so your CSS can target it two ways — `:root[data-view-transition~="slide"]` (every View-Transitions engine) and the standards-track `:active-view-transition-type(slide)` — and a shared `view-transition-name` left across the swap morphs one element into another. Reduced-motion and unsupported browsers fall back to an instant swap.
 - **`scrollRestoration`** is `"top"` (reset, the default) or `"preserve"` (keep the current scroll — e.g. opening an overlay route over content that must stay still). Back/forward always restores its saved position.
 - **`ctx.navigate(path, options?)`** — every island can navigate programmatically with no `app` handle (an always-present context member, like `ctx.set`/`ctx.url`). `app.spa.navigate` takes the same optional `{ scroll }`.
+- **`navigate(path, options?)` / `hardNavigate(url)`** — importable from `@moku-labs/web/browser` for module-scope callers (shared chrome/nav helpers with no `app` or island `ctx`); they bind to the single booted app and no-op before `app.start()`. `hardNavigate` (also `app.spa.hardNavigate`) does a REAL full-page load for crossing a boundary the SPA can't swap — a different layout or an auth split — by detaching the SPA's own interceptor first, so `location.assign` isn't caught and converted to a region swap.
 
 ```ts
 createIsland("issue", {

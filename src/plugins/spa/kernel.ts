@@ -618,6 +618,24 @@ export function createSpaKernel(
       navigateProgrammatic(path, options?.scroll);
     },
     /**
+     * Cross a boundary the SPA cannot swap (a different layout, the auth split) with a REAL
+     * full-page navigation. The click / Navigation-API interceptor catches even
+     * `location.assign`, converting it to a region swap — so this DETACHES that interceptor
+     * first (the same teardown `dispose` runs) and only THEN assigns, guaranteeing a true
+     * document load that renders the destination's own layout. No-op headless.
+     *
+     * @param url - The destination URL (internal path or absolute).
+     * @example
+     * kernel.hardNavigate("/signin/");
+     */
+    hardNavigate(url): void {
+      if (typeof document === "undefined") return;
+      state.destroyRouter?.();
+      // eslint-disable-next-line unicorn/no-null -- `destroyRouter` is `(() => void) | null`
+      state.destroyRouter = null;
+      location.assign(url);
+    },
+    /**
      * Scan the swap region and mount islands for matching elements.
      *
      * @example

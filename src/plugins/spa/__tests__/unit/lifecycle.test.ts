@@ -1,12 +1,19 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { captureTeardown, disposeSpa } from "../../lifecycle";
+import {
+  bindKernelNavigators,
+  captureTeardown,
+  disposeSpa,
+  hardNavigate,
+  navigate
+} from "../../lifecycle";
 import type { SpaContext, SpaKernel } from "../../types";
 
 const makeKernel = (dispose: () => void): SpaKernel => ({
   init() {},
   boot() {},
   register() {},
+  hardNavigate() {},
   processNav() {},
   scan() {},
   dispose
@@ -39,6 +46,32 @@ describe("lifecycle capture/dispose", () => {
     captureTeardown(makeCtx({ error }, kernel));
     expect(() => disposeSpa()).not.toThrow();
     expect(error).toHaveBeenCalledWith("spa:teardown-failed", {}, expect.any(Error));
+  });
+
+  it("module navigate/hardNavigate delegate to the bound kernel, and no-op once unbound", () => {
+    const processNav = vi.fn();
+    const hardNav = vi.fn();
+    const kernel = { ...makeKernel(vi.fn()), processNav, hardNavigate: hardNav };
+    bindKernelNavigators(kernel);
+
+    navigate("/board/abc", { scroll: "preserve" });
+    expect(processNav).toHaveBeenCalledWith("/board/abc", { scroll: "preserve" });
+    hardNavigate("/signin/");
+    expect(hardNav).toHaveBeenCalledWith("/signin/");
+
+    // disposeSpa() unbinds → both become no-ops (a stopped app leaves no dangling navigator).
+    disposeSpa();
+    navigate("/x");
+    hardNavigate("/y");
+    expect(processNav).toHaveBeenCalledTimes(1);
+    expect(hardNav).toHaveBeenCalledTimes(1);
+  });
+
+  it("module navigate/hardNavigate are a no-op before any app binds (pre-boot)", () => {
+    expect(() => {
+      navigate("/x");
+      hardNavigate("/y");
+    }).not.toThrow();
   });
 
   it("captureTeardown is a no-op without a DOM", () => {
