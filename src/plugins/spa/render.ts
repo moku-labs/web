@@ -58,14 +58,20 @@ export function renderVNode(vnode: VNode, region: Element): void {
  * scheduler in `islands.ts`), so an app whose islands never return a VNode never
  * pulls Preact's `render` into its main bundle.
  *
- * @param vnode - The VNode produced by an island's `render(state, ctx)`.
+ * Pass `null` to render NOTHING while keeping the host mountable: Preact's
+ * `render(null, host)` unmounts the retained vdom AND resets its pointer, so a later
+ * non-empty `commitVNode` re-mounts cleanly. (A persistent render-island that instead set
+ * `host.innerHTML = ""` to "go empty" would desync Preact's retained vdom and never re-commit.)
+ *
+ * @param vnode - The VNode produced by an island's `render(state, ctx)`, or `null` to unmount.
  * @param host - The island's host element to render into.
  * @example
  * ```ts
  * const { commitVNode } = await import("./render");
  * commitVNode(h(BoardView, { snapshot }), host);
+ * commitVNode(null, host); // close/empty: unmount but stay re-mountable
  * ```
  */
-export function commitVNode(vnode: AnyVNode, host: Element): void {
+export function commitVNode(vnode: AnyVNode | null, host: Element): void {
   render(vnode, host);
 }

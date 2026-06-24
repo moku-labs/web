@@ -89,8 +89,10 @@ async function loadRenderChunk(): Promise<void> {
 
 /**
  * Commit a {@link RenderResult} into a host: `string` → `innerHTML`, `Node` →
- * `replaceChildren`, `void`/`undefined` → no-op (the render mutated the DOM itself), and
- * a Preact `VNode` → committed through the lazy gate (loading it on demand if needed).
+ * `replaceChildren`, `null` → Preact unmount via the lazy gate (`render(null, host)` —
+ * stays re-mountable, the correct "empty" for a persistent render-island), `void`/`undefined`
+ * → no-op (the render mutated the DOM itself), and a Preact `VNode` → committed through the
+ * lazy gate (loading it on demand if needed).
  *
  * @param host - The island host element to render into.
  * @param result - The value returned by the island's `render`.
@@ -108,8 +110,11 @@ function commitResult(host: Element, result: RenderResult): void {
     host.replaceChildren(result);
     return;
   }
-  // Otherwise a Preact VNode → commit via the lazy gate (load on demand if not yet cached).
-  const vnode = result as AnyVNode;
+  // `null` (render nothing, stay mountable) or a Preact VNode → commit through the lazy gate.
+  // `null` routes through Preact's `render(null, host)` — NOT `innerHTML = ""` — so the host's
+  // retained vdom is unmounted cleanly and a later non-empty render re-commits (the bug where
+  // a persistent panel that went empty via `""` never re-opened).
+  const vnode = result as AnyVNode | null;
   if (commitVNodeFunction) {
     commitVNodeFunction(vnode, host);
     return;
@@ -229,6 +234,18 @@ function buildContext(state: SpaState, instance: IslandInstance): IslandContext<
      */
     get url(): (name: string, params?: Record<string, string>) => string {
       return instance.route.url;
+    },
+    /**
+     * Programmatically navigate the SPA (delegates to the kernel's navigator through
+     * `state.navigate` — the same decoupled seam as `island`). No-op before the kernel binds.
+     *
+     * @param path - The internal destination path.
+     * @param options - Optional per-navigation overrides (e.g. `{ scroll: "preserve" }`).
+     * @example
+     * ctx.navigate(ctx.url("issue", { id, issueId }));
+     */
+    navigate(path, options): void {
+      state.navigate?.(path, options);
     },
     /**
      * The live per-instance state (`undefined` for legacy hooks-only islands).

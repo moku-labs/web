@@ -114,6 +114,8 @@ describe("resolveSpaConfig", () => {
     expect(resolveSpaConfig({})).toEqual({
       swapSelector: "main > section",
       viewTransitions: false,
+      defaultTransition: "none",
+      scrollRestoration: "top",
       progressBar: true,
       islands: []
     });

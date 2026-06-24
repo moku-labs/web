@@ -39,7 +39,7 @@ describe("spa api", () => {
     const { ctx, state, processNav } = makeCtx();
     const api = createApi(ctx);
     api.navigate("/about");
-    expect(processNav).toHaveBeenCalledWith("/about");
+    expect(processNav).toHaveBeenCalledWith("/about", undefined);
     state.currentUrl = "/now";
     expect(api.current()).toBe("/now");
   });

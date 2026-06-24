@@ -50,5 +50,12 @@ export const spaPlugin = createPlugin("spa", {
   onStop: disposeSpa // disposeSpa runs the captured kernel.dispose() in try/catch/finally
 });
 
+export {
+  type Channel,
+  type ChannelKeepAlive,
+  type ChannelOptions,
+  type ChannelReconnect,
+  createChannel
+} from "./channel";
 export { createIsland } from "./islands";
 export { lazyEmbed } from "./lazy-embed";

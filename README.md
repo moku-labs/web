@@ -125,6 +125,51 @@ const app = createApp({
 await app.start();   // spa mounts islands onto the SSR'd DOM and intercepts navigation
 ```
 
+### Per-route transitions, scroll, and programmatic nav
+
+The *behaviour* of a navigation is declared on the **route** (a typed framework directive, not free-form `.meta()`), with an app-wide default on the `spa` plugin. Both `.transition()` and `.scroll()` override the default for navigations **to** that route:
+
+```ts
+spa: { islands, viewTransitions: "crossfade", scrollRestoration: "top" } // app defaults
+
+route("/board/{id}").transition("slide")                 // board↔board slides
+route("/board/{id}/issue/{issueId}")
+  .transition("morph")                                   // the card morphs into the panel
+  .scroll("preserve")                                    // overlay: don't move the board behind it
+```
+
+- **`viewTransitions`** accepts `boolean` (`true` → `"crossfade"`, `false` → `"none"`) **or** a named `TransitionMode` (`"none" | "crossfade" | "slide" | "morph"`). A named transition tags the swap so your CSS can target it two ways — `:root[data-view-transition~="slide"]` (every View-Transitions engine) and the standards-track `:active-view-transition-type(slide)` — and a shared `view-transition-name` left across the swap morphs one element into another. Reduced-motion and unsupported browsers fall back to an instant swap.
+- **`scrollRestoration`** is `"top"` (reset, the default) or `"preserve"` (keep the current scroll — e.g. opening an overlay route over content that must stay still). Back/forward always restores its saved position.
+- **`ctx.navigate(path, options?)`** — every island can navigate programmatically with no `app` handle (an always-present context member, like `ctx.set`/`ctx.url`). `app.spa.navigate` takes the same optional `{ scroll }`.
+
+```ts
+createIsland("issue", {
+  // `null` renders nothing but stays mountable (Preact unmount, not innerHTML="") —
+  // the correct "empty" for a persistent overlay panel, so it re-opens cleanly:
+  render: (s) => (s.open ? h(IssuePanel, { issue: s.issue }) : null),
+  events: { "click [data-close]": (ctx) => ctx.navigate(ctx.url("board", { id: ctx.params.id })) },
+});
+```
+
+### Live realtime channels
+
+`createChannel` is a self-healing client WebSocket primitive for islands that consume a server push stream (e.g. a Durable Object). It owns reconnect-with-backoff, an optional keepalive, a pre-seed buffer that closes the connect→load race, refcounted `subscribe` (first in connects, last out disconnects), and an optimistic `deliverLocal` echo — browser-only and tree-shaken away unless used:
+
+```ts
+import { createChannel } from "@moku-labs/web/browser";
+
+const board = createChannel<BoardPatch>({
+  url: (id) => `${location.origin.replace(/^http/, "ws")}/ws/board/${id}`,
+  keepAlive: { send: "ping", ignore: "pong" },
+  bufferUntilSeed: true,
+});
+// island onMount:
+const off = board.subscribe(boardId, (patch) => applyPatch(ctx, patch));
+ctx.cleanup(off);
+const snapshot = await getBoard(boardId);
+board.seed(boardId);   // flush anything that arrived during the load
+```
+
 ## How it works
 
 ### Three layers, one `createApp`

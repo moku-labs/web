@@ -8,7 +8,15 @@
  * `pattern`, `_meta`, and `_handlers` live, so a built route is directly usable as
  * a `RouteMap` element while still offering the typed fluent chain.
  */
-import type { RouteBuilder, RouteHandlers, RouteMap, RouteState, Urls } from "../types";
+import type {
+  RouteBuilder,
+  RouteHandlers,
+  RouteMap,
+  RouteState,
+  ScrollMode,
+  TransitionMode,
+  Urls
+} from "../types";
 import { buildUrl } from "./compile";
 
 /** Mutable handler/meta carrier shared by every method of one builder instance. */
@@ -17,6 +25,10 @@ interface MutableRoute {
   readonly pattern: string;
   /** Accumulated metadata bag. */
   readonly _meta: Record<string, unknown>;
+  /** Named view-transition behaviour from `.transition()` (undefined → app default). */
+  _transition?: TransitionMode;
+  /** Scroll behaviour from `.scroll()` (undefined → app default). */
+  _scroll?: ScrollMode;
   /** Accumulated build-time handlers. */
   readonly _handlers: Record<string, unknown>;
 }
@@ -187,9 +199,27 @@ export function route<P extends string>(pattern: P): RouteBuilder<RouteState<P>>
   };
 
   // Compose the chainable surface: carrier fields, handler setters, and the meta merger.
+  // `_transition`/`_scroll` are exposed as getters (not snapshot values) so a later
+  // `.transition()`/`.scroll()` mutation of the carrier is reflected when the route is read.
   const builder = {
     pattern: carrier.pattern,
     _meta: carrier._meta,
+    /**
+     * The named view-transition behaviour set via `.transition()` (live read).
+     *
+     * @returns The transition mode, or undefined when unset (app default applies).
+     */
+    get _transition(): TransitionMode | undefined {
+      return carrier._transition;
+    },
+    /**
+     * The scroll behaviour set via `.scroll()` (live read).
+     *
+     * @returns The scroll mode, or undefined when unset (app default applies).
+     */
+    get _scroll(): ScrollMode | undefined {
+      return carrier._scroll;
+    },
     _handlers: carrier._handlers as RouteHandlers,
     ...createBuilderMethods(set),
     /**
@@ -206,6 +236,38 @@ export function route<P extends string>(pattern: P): RouteBuilder<RouteState<P>>
      */
     meta(meta: Record<string, unknown>) {
       Object.assign(carrier._meta, meta);
+      return builder;
+    },
+    /**
+     * Declare the view-transition behaviour for navigations TO this route — a typed
+     * framework directive read by the SPA kernel, overriding the app-wide
+     * `spa.viewTransitions` default.
+     *
+     * @param mode - The {@link TransitionMode} (`none`/`crossfade`/`slide`/`morph`).
+     * @returns The same builder for chaining.
+     * @example
+     * ```ts
+     * route("/board/{id}/issue/{issueId}").transition("morph");
+     * ```
+     */
+    transition(mode: TransitionMode) {
+      carrier._transition = mode;
+      return builder;
+    },
+    /**
+     * Declare the scroll behaviour for navigations TO this route — a typed framework
+     * directive read by the SPA kernel, overriding the app-wide `spa.scrollRestoration`
+     * default.
+     *
+     * @param mode - The {@link ScrollMode} (`top`/`preserve`).
+     * @returns The same builder for chaining.
+     * @example
+     * ```ts
+     * route("/board/{id}/issue/{issueId}").scroll("preserve");
+     * ```
+     */
+    scroll(mode: ScrollMode) {
+      carrier._scroll = mode;
       return builder;
     }
   } as unknown as RouteBuilder<RouteState<P>>;

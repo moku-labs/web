@@ -200,7 +200,7 @@ describe("spa integration", () => {
     const { createApp } = makeCore();
     app = makeApp(createApp);
     expectTypeOf(app.spa).toMatchTypeOf<SpaApi>();
-    expectTypeOf(app.spa.navigate).parameters.toEqualTypeOf<[string]>();
+    expectTypeOf(app.spa.navigate).parameter(0).toEqualTypeOf<string>();
     expectTypeOf(app.spa.current).returns.toEqualTypeOf<string>();
     expectTypeOf(app.spa.register).parameter(0).toMatchTypeOf<{ name: string }>();
   });
