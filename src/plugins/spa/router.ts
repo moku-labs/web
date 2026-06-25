@@ -290,7 +290,7 @@ export function runSwap(
   const docWithVt = document as Document & {
     startViewTransition?: (
       cb: (() => void) | { update: () => void; types?: string[] }
-    ) => { finished?: Promise<unknown> } | undefined;
+    ) => { finished?: Promise<unknown>; ready?: Promise<unknown> } | undefined;
   };
   const canUseViewTransitions =
     transition.enabled && !reduced && typeof docWithVt.startViewTransition === "function";
@@ -311,7 +311,7 @@ export function runSwap(
     if (hasTypes && root) delete root.dataset.viewTransition;
   };
 
-  let result: { finished?: Promise<unknown> } | undefined;
+  let result: { finished?: Promise<unknown>; ready?: Promise<unknown> } | undefined;
   if (hasTypes) {
     try {
       // Standards-track dictionary form: also drives `:active-view-transition-type(...)`.
@@ -326,6 +326,11 @@ export function runSwap(
   // Clear the marker once the transition settles (both fulfil + reject paths); the `.catch`
   // keeps the promise non-floating without a `void` operator.
   Promise.resolve(result?.finished).then(clearMarker).catch(clearMarker);
+  // A transition superseded BEFORE it paints (rapid / overlapping navigation) rejects `ready` with
+  // `AbortError: "Transition was skipped"` — even though `finished` still resolves and the swap still
+  // applies. The skip is benign, so own that one rejection HERE rather than leaking an "Uncaught (in
+  // promise)" to every consumer's console. (Nothing else reads `ready`; this purely marks it handled.)
+  Promise.resolve(result?.ready).catch(() => {});
 }
 
 /**

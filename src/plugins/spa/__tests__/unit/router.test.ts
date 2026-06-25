@@ -383,6 +383,45 @@ describe("swapRegion / runSwap (View Transitions)", () => {
     delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
   });
 
+  it("swallows a superseded transition's `ready` AbortError (no unhandled rejection)", async () => {
+    // A transition preempted before it paints rejects `ready` with AbortError while `finished` still
+    // resolves. runSwap must attach a handler to `ready` so it never surfaces as an "Uncaught (in
+    // promise)" — otherwise every consumer leaks this on rapid/overlapping navigation.
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+
+    const skipError = Object.assign(new Error("Transition was skipped"), { name: "AbortError" });
+    const ready = Promise.reject(skipError);
+    const finished = Promise.resolve();
+    const startViewTransition = vi.fn((cb: () => void) => {
+      cb();
+      return { finished, ready };
+    });
+    (
+      document as unknown as { startViewTransition: typeof startViewTransition }
+    ).startViewTransition = startViewTransition;
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+
+    let ran = false;
+    runSwap(
+      () => {
+        ran = true;
+      },
+      { enabled: true, types: [] }
+    );
+
+    // Let the microtask + macrotask queues drain so any unhandled-rejection detection would fire.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    process.off("unhandledRejection", onUnhandled);
+    delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
+
+    expect(ran).toBe(true); // the swap still applied
+    expect(unhandled).toHaveLength(0); // the `ready` rejection was owned by runSwap
+  });
+
   it("does an instant swap (no throw) when View Transitions are unsupported", () => {
     delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
     let ran = false;
