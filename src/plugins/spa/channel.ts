@@ -51,6 +51,20 @@ export interface ChannelOptions<T> {
    * order) on seed, closing the connect→load race. Defaults to `false` (deliver live).
    */
   bufferUntilSeed?: boolean;
+  /**
+   * Guard called on every socket close before the reconnect backoff is scheduled. Return `false`
+   * to suppress reconnection (e.g. stop on a terminal close code like `4401` for 401 Unauthorized
+   * / channel-not-found). The default — when omitted — always reconnects. The guard receives the
+   * `CloseEvent`, so callers can inspect `event.code` / `event.reason` / `event.wasClean`.
+   *
+   * @param event - The `CloseEvent` from the closed socket.
+   * @returns `true` (or `undefined`) to reconnect; `false` to stop permanently.
+   * @example
+   * ```ts
+   * shouldReconnect: (event) => event.code !== 4401
+   * ```
+   */
+  shouldReconnect?: (event: CloseEvent) => boolean;
 }
 
 /** A live realtime channel (the surface returned by {@link createChannel}). */
@@ -211,11 +225,14 @@ export function createChannel<T>(options: ChannelOptions<T>): Channel<T> {
     ws.addEventListener("open", () => {
       reconnectAttempts = 0;
     });
-    ws.addEventListener("close", () => {
+    ws.addEventListener("close", (event: Event) => {
       // Only this socket's close matters — a stale close after we moved on must not reconnect.
       if (socket !== ws || desiredId === undefined) return;
       socket = undefined;
-      if (reconnectCfg) scheduleReconnect();
+      if (!reconnectCfg) return;
+      // Honour the caller's reconnect guard — false means "stop, don't retry" (e.g. on 401).
+      if (options.shouldReconnect?.(event as CloseEvent) === false) return;
+      scheduleReconnect();
     });
   }
 
