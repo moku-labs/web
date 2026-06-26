@@ -38,9 +38,9 @@ class MockSocket {
   fireMessage(data: string): void {
     for (const l of this.listeners.message ?? []) l({ data });
   }
-  fireClose(): void {
+  fireClose(code?: number): void {
     this.readyState = MockSocket.CLOSED;
-    for (const l of this.listeners.close ?? []) l({});
+    for (const l of this.listeners.close ?? []) l({ code });
   }
 }
 
@@ -153,6 +153,42 @@ describe("createChannel", () => {
     vi.advanceTimersByTime(500);
     expect(MockSocket.instances).toHaveLength(2); // reconnected
     expect(channel.current()).toBe("b1");
+  });
+
+  it("honours shouldReconnect: stops reconnecting when the guard returns false (e.g. a 1006 401)", () => {
+    vi.useFakeTimers();
+    const seenCodes: (number | undefined)[] = [];
+    const channel = createChannel<Patch>({
+      url: () => "wss://h",
+      reconnect: { baseMs: 500, maxMs: 8000 },
+      // eslint-disable-next-line jsdoc/require-jsdoc -- inline guard under test
+      shouldReconnect: event => {
+        seenCodes.push(event.code);
+        return event.code !== 1006;
+      }
+    });
+    channel.subscribe("b1", () => {});
+    expect(MockSocket.instances).toHaveLength(1);
+
+    MockSocket.instances[0]?.fireClose(1006); // failed HTTP upgrade (401 / channel-not-found)
+    vi.advanceTimersByTime(10_000);
+
+    expect(seenCodes).toEqual([1006]);
+    expect(MockSocket.instances).toHaveLength(1); // guard returned false → did NOT reconnect
+  });
+
+  it("honours shouldReconnect: still reconnects when the guard returns true", () => {
+    vi.useFakeTimers();
+    const channel = createChannel<Patch>({
+      url: () => "wss://h",
+      reconnect: { baseMs: 500, maxMs: 8000 },
+      shouldReconnect: () => true
+    });
+    channel.subscribe("b1", () => {});
+
+    MockSocket.instances[0]?.fireClose(1006);
+    vi.advanceTimersByTime(500);
+    expect(MockSocket.instances).toHaveLength(2); // guard returned true → reconnected
   });
 
   it("does NOT reconnect after an intentional disconnect", () => {
