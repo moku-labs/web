@@ -40,6 +40,8 @@ export type {
 } from "./plugins/content/types";
 
 // ─── Consumer helpers: route DSL, SPA islands, SEO <head> primitives ──────────
+export { collectionUrl } from "./plugins/collection/convention";
+export { loadCollectionShard } from "./plugins/collection/read";
 export { createUrls, defineRoutes, route } from "./plugins/router";
 export {
   type Channel,

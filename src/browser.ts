@@ -33,6 +33,10 @@ export { routerPlugin } from "./plugins/router";
 export { headPlugin } from "./plugins/head";
 export { spaPlugin } from "./plugins/spa";
 export { dataPlugin } from "./plugins/data";
+// collectionPlugin itself is NOT re-exported here (it's composed node-side via the root entry to keep the
+// browser closure lean); browser consumers read build-authored shards through these standalone helpers.
+export { collectionUrl } from "./plugins/collection/convention";
+export { loadCollectionShard } from "./plugins/collection/read";
 
 // contentPlugin is the browser-safe SHELL (the node markdown source lives in the
 // `fileSystemContent` provider, which is NOT exported here). Routes import contentPlugin
@@ -69,6 +73,7 @@ export {
 } from "./plugins/head";
 
 // ─── Plugin type namespaces (node-only Build/Deploy omitted) ──────────────────
+export * as Collection from "./plugins/collection/types";
 export * as Content from "./plugins/content/types";
 export * as Data from "./plugins/data/types";
 export type { Env } from "@moku-labs/common/browser";
