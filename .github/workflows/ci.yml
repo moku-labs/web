@@ -19,6 +19,6 @@ permissions:
 
 jobs:
   ci:
-    uses: moku-labs/ci/.github/workflows/package-ci.yml@feat/extra-scripts
+    uses: moku-labs/ci/.github/workflows/package-ci.yml@v1
     with:
       extra: '["check:bundle", "test:cli-e2e"]'
