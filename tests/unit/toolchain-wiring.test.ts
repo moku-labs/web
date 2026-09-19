@@ -42,7 +42,8 @@ describe("toolchain wiring", () => {
     it("CI runs the cli e2e suite (vitest never globs it, so CI must invoke it explicitly)", () => {
       const ci = readRepoFile(".github/workflows/ci.yml");
 
-      expect(ci).toContain("bun run test:cli-e2e");
+      // The thin caller hands it to moku-labs/ci as an `extra` script: one job, `bun run <script>`.
+      expect(ci).toMatch(/extra: '\[[^\]]*"test:cli-e2e"[^\]]*\]'/);
     });
   });
 

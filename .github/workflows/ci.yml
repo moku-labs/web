@@ -1,99 +1,24 @@
-# .github/workflows/ci.yml
-#
-# The single source of truth for the check suite: lint, types, tests, and
-# build+validate run as PARALLEL jobs. Triggered directly on push/PR, and reused
-# by publish.yml via `workflow_call` so release-time checks are byte-for-byte the
-# same as PR checks.
-#
-# Node 24 (the router uses the global URLPattern, only a global in Node 24+).
-# Every action is pinned to a commit SHA (not a tag) for supply-chain safety, and
-# none of the check jobs need write access or the git token, so credentials are
-# not persisted into the workspace.
-
 name: CI
 
+# Thin caller. All logic lives in moku-labs/ci, pinned to the moving @v1 major tag.
+# Required status checks land as "ci / lint", "ci / types", "ci / test", "ci / build"
+# (GitHub prefixes a reusable workflow's jobs with the CALLER's job id) — see rulesets/main.json.
 on:
   push:
     branches: [main]
   pull_request:
-  workflow_call:
+  # No `workflow_call:` needed — publish.yml reaches the same checks through
+  # package-release.yml, which calls package-ci.yml itself.
+
+# NO concurrency block here on purpose: package-ci.yml already scopes its group by
+# github.workflow (= this workflow's name), and a caller group with the same value would
+# deadlock against its own child.
 
 permissions:
   contents: read
 
-concurrency:
-  # Scoped by the top-level workflow name so a reused run from publish.yml never
-  # shares a group with a standalone CI run. Only redundant PR runs are cancelled;
-  # push-to-main and release-time runs always complete.
-  group: checks-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: 24
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-      - run: bun install --frozen-lockfile
-      - run: bun run lint
-
-  types:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: 24
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-      - run: bun install --frozen-lockfile
-      - run: bunx tsc --noEmit
-
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: 24
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-      - run: bun install --frozen-lockfile
-      - run: bun run test
-      # The cli e2e suite runs under `bun test` (NOT vitest) — it needs the real
-      # Bun.serve/Bun.file/Bun.build/Bun.spawn runtime, so vitest never globs it.
-      # It must be invoked explicitly or it runs nowhere.
-      - run: bun run test:cli-e2e
-
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-          fetch-depth: 0 # need all tags — the validate step seeds the version from the latest tag
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: 24
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-      - run: bun install --frozen-lockfile
-      - run: bun run build
-      # Guard the ./browser entry: zero static node/native imports + under size budget.
-      # Must run after build (needs dist/); the parallel `test` job has no dist.
-      - run: bun run check:bundle
-      # package.json carries NO version field (the version source of truth is the latest git tag;
-      # see publish.yml). publint packs the tarball via `bun pm pack`, which requires a version, so
-      # seed the LATEST TAG's version for the validate step only (0.0.0 only if there are no tags) —
-      # never committed, never published.
-      - name: Validate (seed version from latest tag for publint pack)
-        run: |
-          V="$(git tag --list 'v*' --sort=-v:refname | head -n1)"; V="${V#v}"
-          npm version "${V:-0.0.0}" --no-git-tag-version --allow-same-version >/dev/null
-          bun run validate
+  ci:
+    uses: moku-labs/ci/.github/workflows/package-ci.yml@feat/extra-scripts
+    with:
+      extra: '["check:bundle", "test:cli-e2e"]'
