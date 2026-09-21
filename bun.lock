@@ -5,8 +5,8 @@
     "": {
       "name": "@moku-labs/web",
       "dependencies": {
-        "@moku-labs/common": "0.2.1",
-        "@moku-labs/core": "1.5.0",
+        "@moku-labs/common": "0.3.2",
+        "@moku-labs/core": "1.6.0",
         "@resvg/resvg-js": "2.6.2",
         "@shikijs/rehype": "3.22.0",
         "feed": "5.2.0",
@@ -229,9 +229,9 @@
 
     "@moku-labs/ci": ["@moku-labs/ci@1.2.6", "", { "bin": { "moku-release": "dist/release.mjs" } }, "sha512-KIUvh3Sk+CvGM5v/r6pYNlJmbmpv5KxvNDzcMUjsfdUCcb8liSv+jAQ3JbZfBtQUKPMqXhAuOqf0BHe6aMHmGQ=="],
 
-    "@moku-labs/common": ["@moku-labs/common@0.2.1", "", { "dependencies": { "@moku-labs/core": "1.5.0" } }, "sha512-z7gbsQgutGdN0jaxXZpJjfMKVZuPvMM5NP9jfPcHK3chY/SwlxhoGExDb1xeYQfl4RgqiHI7xh2f+b8oF3dImw=="],
+    "@moku-labs/common": ["@moku-labs/common@0.3.2", "", { "dependencies": { "@moku-labs/core": "1.6.0" } }, "sha512-pAYvFDk+g4m4dkUNKyk94FrR1Qov7nMdIryE+FHc8L5JTCMXRofI7xRs5vaq9VsXFSp2MrjH/W2T73oD3K6xuw=="],
 
-    "@moku-labs/core": ["@moku-labs/core@1.5.0", "", {}, "sha512-CPQmvFvLTo/NpQBeoyLFXNcfuNIxtuSuFXkGwCpvuS0KmWwzkd8ObnN1s3xpzQ8J681t2NsrdDr+Fhc6DuFBvQ=="],
+    "@moku-labs/core": ["@moku-labs/core@1.6.0", "", {}, "sha512-Y6ws8WDa0lnxD810XSts1eoiZ5Hvc2ZjtthP5e1PcqhOxmomZlnk4JCcjcWYINaymZxpI42HZg05KW14rRdBWw=="],
 
     "@napi-rs/wasm-runtime": ["@napi-rs/wasm-runtime@1.1.4", "", { "dependencies": { "@tybys/wasm-util": "^0.10.1" }, "peerDependencies": { "@emnapi/core": "^1.7.1", "@emnapi/runtime": "^1.7.1" } }, "sha512-3NQNNgA1YSlJb/kMH1ildASP9HW7/7kYnRI2szWJaofaS1hWmbGI4H+d3+22aGzXXN9IJ+n+GiFVcGipJP18ow=="],
 
