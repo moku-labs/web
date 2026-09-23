@@ -113,12 +113,14 @@ beforeAll(async () => {
     { cssEntrypoints: [], jsEntrypoints: [path.join(clientDir, "main.ts")] }
   );
 
+  // Output names are content-hashed (`main-<hash>.js`): the manifest's one record is the entry.
   manifest = state.buildCache.get("js") as Record<string, string>;
+  const entryPath = Object.values(manifest)[0] ?? "";
   const assetsDir = path.join(outDir, "assets");
   const jsFiles = readdirSync(assetsDir).filter(file => file.endsWith(".js"));
-  entryCode = readFileSync(path.join(assetsDir, "main.js"), "utf8");
+  entryCode = readFileSync(path.join(outDir, entryPath), "utf8");
   chunkCodes = jsFiles
-    .filter(file => file !== "main.js")
+    .filter(file => file !== path.basename(entryPath))
     .map(file => readFileSync(path.join(assetsDir, file), "utf8"));
 });
 
@@ -151,6 +153,10 @@ describe("build/phases/bundle — e2e code splitting (real Bun.build)", () => {
   });
 
   test("only the entry is recorded for <script> injection — chunks stay lazy", () => {
-    expect(manifest).toEqual({ "main.js": "assets/main.js" });
+    const entries = Object.entries(manifest);
+    expect(entries).toHaveLength(1);
+    const [name, web] = entries[0] ?? ["", ""];
+    expect(name).toMatch(/^main-[\da-z]+\.js$/);
+    expect(web).toBe(`assets/${name}`);
   });
 });

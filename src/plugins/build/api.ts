@@ -107,6 +107,26 @@ function validateFonts(og: OgImageConfig): void {
   }
 }
 
+/** An environment variable name: letters, digits and `_`, not starting with a digit. */
+const ENV_NAME = /^[A-Z_a-z]\w*$/;
+
+/**
+ * Whether a `build.env` value lists environment variable names.
+ *
+ * @param value - The configured `build.env`.
+ * @returns True for an array of valid names.
+ * @example
+ * ```ts
+ * isEnvNameList(["IS_DEVELOPMENT"]); // true
+ * isEnvNameList(["process.env.X"]); // false
+ * ```
+ */
+function isEnvNameList(value: unknown): boolean {
+  return (
+    Array.isArray(value) && value.every(name => typeof name === "string" && ENV_NAME.test(name))
+  );
+}
+
 /**
  * Validates `build` config synchronously in `onInit` (return value discarded).
  * Throws an actionable `[web] build.<field>` error when `outDir` is empty, or
@@ -137,6 +157,13 @@ export function validateConfig(config: Config): void {
   // Optional client hydration entry, when set, must be a string path.
   if (config.clientEntry !== undefined && typeof config.clientEntry !== "string") {
     throw new Error(`${ERROR_PREFIX}.clientEntry: must be a string path when set.`);
+  }
+
+  // Optional bundle env, when set, must name environment variables.
+  if (config.env !== undefined && !isEnvNameList(config.env)) {
+    throw new Error(
+      `${ERROR_PREFIX}.env: must list environment variable names.\n  Use names like "IS_DEVELOPMENT".`
+    );
   }
 
   // When OG-image generation is enabled, its font directory must be usable.

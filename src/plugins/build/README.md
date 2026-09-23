@@ -56,10 +56,26 @@ The surface mounted on `app.build` (and reachable via `ctx.require(buildPlugin)`
 | `notFound` | `boolean \| { body?: string; path?: string }?` | `false` | Emit `outDir/404.html`. `true` = built-in default; `{ body }` = HTML body fragment wrapped in a minimal shell; `{ path }` = complete HTML page file (`path` wins over `body`). In every variant the `<!--moku:assets-->` family of placeholders is substituted with the fingerprinted bundle tags (a 404 page cannot hardcode a hashed bundle URL); a page without placeholders is written byte-for-byte. |
 | `localeRedirects` | `boolean?` | `false` | Emit per-path i18n bare-path redirect HTML pages. |
 | `clientEntry` | `string?` | — | Authoritative client bundle entry path (overrides the conventional scan). |
+| `env` | `readonly string[]?` | — | Environment variable names written into the client bundle as constants (see below). |
 | `template` | `string?` | — | HTML shell template with `<!--moku:head-->` / `<!--moku:body-->` / `<!--moku:assets-->` placeholders (plus split `<!--moku:assets:css-->` / `<!--moku:assets:js-->` for shells that place stylesheets and scripts at different sites). |
 | `cacheHeaders` | `boolean \| { assets?: string; pages?: string }?` | `true` | Emit `outDir/_headers` (Cloudflare Pages rules): a per-file `Cache-Control` rule per fingerprinted bundle (default `public, max-age=31536000, immutable` — safe because the URL embeds a content hash) plus a catch-all rule for every other URL (default `public, max-age=0, must-revalidate` — unchanged files still answer `304` from their ETag). The app's `<publicDir>/_headers` content is appended after the generated rules (the app can override; detach first with `! Cache-Control` — Cloudflare comma-joins duplicates). `false` disables. |
 
-`ogImage` is a nested object, so an override shallow-replaces it wholesale. When enabled, `onInit` validates that `fontDir` exists and contains at least one `.ttf`/`.otf`/`.woff` font, throwing an actionable `[web] build.<field>` error otherwise. `publicDir`, `template`, and `clientEntry` are also validated as strings-when-set in `onInit`.
+`ogImage` is a nested object, so an override shallow-replaces it wholesale. When enabled, `onInit` validates that `fontDir` exists and contains at least one `.ttf`/`.otf`/`.woff` font, throwing an actionable `[web] build.<field>` error otherwise. `publicDir`, `template`, and `clientEntry` are also validated as strings-when-set in `onInit`, and `env` as a list of variable names.
+
+**`env` names become bundle constants.** The browser has no `process.env`, so the build writes
+the named variables into the bundle. Each name is passed to `Bun.build` as `define` under
+`process.env.<NAME>` and `import.meta.env.<NAME>`, and the whole `import.meta.env` object is set,
+which `browserEnv()` reads. The value is the build process's own variable, or `""` when unset. With
+`minify`, a branch on an unset flag is removed together with the dynamic `import()` chunk it
+guards, so developer-only code is absent from a production build. Only the listed names are
+written: nothing else from the build machine's environment reaches the bundle.
+
+```ts
+// app: build: { env: ["IS_DEVELOPMENT", "IS_LOCAL"] }
+// IS_DEVELOPMENT=true bun run build   → the branch ships
+// bun run build                       → the branch and ./cheats are gone
+if (process.env.IS_DEVELOPMENT) void import("./cheats");
+```
 
 ### `OgImageConfig`
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { BundleRunner } from "../../phases/bundle";
-import { bundle } from "../../phases/bundle";
+import { bundle, envDefines } from "../../phases/bundle";
 import { makeCtx } from "../helpers";
 
 describe("build/phases/bundle", () => {
@@ -109,6 +109,34 @@ describe("build/phases/bundle", () => {
     }
   });
 
+  it("turns every build.env name into a bundle constant on both passes", async () => {
+    // A branch on an env constant is dead-code eliminated with its dynamic import chunk.
+    const runner = vi.fn(async (_opts: Parameters<BundleRunner>[0]) => ({
+      success: true,
+      outputs: []
+    }));
+    const ctx = makeCtx({
+      config: { outDir: "./dist", minify: true, env: ["MOKU_TEST_UNSET_FLAG"] }
+    });
+    await bundle(ctx, { runner, cssEntrypoints: ["styles.css"], jsEntrypoints: ["main.ts"] });
+    const define = {
+      "import.meta.env": '{"MOKU_TEST_UNSET_FLAG":""}',
+      "process.env.MOKU_TEST_UNSET_FLAG": '""',
+      "import.meta.env.MOKU_TEST_UNSET_FLAG": '""'
+    };
+    expect(runner.mock.calls.map(call => call[0].define)).toEqual([define, define]);
+  });
+
+  it("passes no constants without build.env", async () => {
+    const runner = vi.fn(async (_opts: Parameters<BundleRunner>[0]) => ({
+      success: true,
+      outputs: []
+    }));
+    const ctx = makeCtx({ config: { outDir: "./dist", minify: true } });
+    await bundle(ctx, { runner, cssEntrypoints: ["styles.css"], jsEntrypoints: ["main.ts"] });
+    expect(runner.mock.calls.map(call => call[0].define)).toEqual([{}, {}]);
+  });
+
   it("marks font url() globs external on the CSS pass only (JS pass bundles everything)", async () => {
     // Regression: Bun's CSS bundler cannot emit url() assets as files — every
     // resolvable font reference was inlined as a base64 data URI, shipping a
@@ -186,5 +214,27 @@ describe("build/phases/bundle", () => {
     await expect(
       bundle(ctx, { runner, cssEntrypoints: ["styles.css"], jsEntrypoints: [] })
     ).rejects.toThrow(/\[web\] build\.bundle/);
+  });
+});
+
+describe("build/phases/bundle envDefines", () => {
+  it("is empty without names", () => {
+    expect(envDefines([], { IS_DEVELOPMENT: "true" })).toEqual({});
+  });
+
+  it("maps each name under process.env and import.meta.env, and the whole import.meta.env", () => {
+    expect(envDefines(["IS_DEVELOPMENT", "IS_LOCAL"], { IS_DEVELOPMENT: "true" })).toEqual({
+      "import.meta.env": '{"IS_DEVELOPMENT":"true","IS_LOCAL":""}',
+      "process.env.IS_DEVELOPMENT": '"true"',
+      "import.meta.env.IS_DEVELOPMENT": '"true"',
+      "process.env.IS_LOCAL": '""',
+      "import.meta.env.IS_LOCAL": '""'
+    });
+  });
+
+  it("reads the build process's environment by default", () => {
+    vi.stubEnv("MOKU_TEST_SET_FLAG", "yes");
+    expect(envDefines(["MOKU_TEST_SET_FLAG"])["process.env.MOKU_TEST_SET_FLAG"]).toBe('"yes"');
+    vi.unstubAllEnvs();
   });
 });

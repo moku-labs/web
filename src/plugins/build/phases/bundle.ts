@@ -98,6 +98,8 @@ export type BundleRunner = (options: {
   naming: { entry: string; chunk: string; asset: string };
   /** Import/url() globs left unresolved (see {@link CSS_EXTERNAL_FONT_GLOBS}). */
   external: string[];
+  /** Global names replaced with constant expressions (see {@link envDefines}). */
+  define: Record<string, string>;
 }) => Promise<BuildRunnerResult>;
 
 /**
@@ -131,10 +133,11 @@ export type BundleOptions = {
  * @param options.naming.chunk - Naming template for lazy split chunks.
  * @param options.naming.asset - Naming template for additional emitted assets.
  * @param options.external - Import/url() globs left unresolved in the output.
+ * @param options.define - Global names replaced with constant expressions.
  * @returns The structural build result.
  * @example
  * ```ts
- * await defaultRunner({ entrypoints: ["a.css"], outdir: "dist", minify: true, splitting: true, target: "browser", naming: FINGERPRINT_NAMING, external: [] });
+ * await defaultRunner({ entrypoints: ["a.css"], outdir: "dist", minify: true, splitting: true, target: "browser", naming: FINGERPRINT_NAMING, external: [], define: {} });
  * ```
  */
 async function defaultRunner(options: {
@@ -145,12 +148,48 @@ async function defaultRunner(options: {
   target: "browser";
   naming: { entry: string; chunk: string; asset: string };
   external: string[];
+  define: Record<string, string>;
 }): Promise<BuildRunnerResult> {
   const bun = (globalThis as { Bun?: { build: BundleRunner } }).Bun;
   if (!bun) {
     return { success: false, outputs: [] };
   }
   return bun.build(options);
+}
+
+/**
+ * The bundle-time constants for the `build.env` names. Each name becomes `process.env.<NAME>` and
+ * `import.meta.env.<NAME>`, and the whole `import.meta.env` object is set too, because
+ * `browserEnv()` spreads it. The value is the build process's own variable, or `""` when unset.
+ * With `minify`, a branch on an unset flag is removed together with the dynamic `import()` chunk
+ * it guards, so developer-only code never ships in a build without the flag.
+ *
+ * @param names - The `build.env` names.
+ * @param source - Where the values come from; the build process's environment by default.
+ * @returns The `define` map for `Bun.build`; empty without names.
+ * @example
+ * ```ts
+ * envDefines(["IS_DEVELOPMENT"], { IS_DEVELOPMENT: "true" });
+ * // { "process.env.IS_DEVELOPMENT": "\"true\"", "import.meta.env.IS_DEVELOPMENT": "\"true\"",
+ * //   "import.meta.env": "{\"IS_DEVELOPMENT\":\"true\"}" }
+ * ```
+ */
+export function envDefines(
+  names: readonly string[],
+  source: Readonly<Record<string, string | undefined>> = process.env
+): Record<string, string> {
+  if (names.length === 0) return {};
+
+  // Each name's value in the build process; an unset one is "", so its branch is dead code.
+  const values = Object.fromEntries(names.map(name => [name, source[name] ?? ""]));
+
+  // The whole object for browserEnv(), then each name under both access forms.
+  const define: Record<string, string> = { "import.meta.env": JSON.stringify(values) };
+  for (const [name, value] of Object.entries(values)) {
+    define[`process.env.${name}`] = JSON.stringify(value);
+    define[`import.meta.env.${name}`] = JSON.stringify(value);
+  }
+  return define;
 }
 
 /**
@@ -227,9 +266,10 @@ function normalizeAssetPath(absolutePath: string, outDir: string): string {
  * @param outDir - The publish root; stored asset paths are made relative to it.
  * @param outdir - The bundler output directory (`<outDir>/assets`).
  * @param minify - Whether to minify.
+ * @param define - Global names replaced with constant expressions.
  * @example
  * ```ts
- * await runOne(ctx, runner, "css", ["a.css"], "dist", true);
+ * await runOne(ctx, runner, "css", ["a.css"], "dist", true, {});
  * ```
  */
 async function runOne(
@@ -239,7 +279,8 @@ async function runOne(
   entrypoints: string[],
   outDir: string,
   outdir: string,
-  minify: boolean
+  minify: boolean,
+  define: Record<string, string>
 ): Promise<void> {
   // Nothing to bundle for this kind — skip the pass entirely.
   if (entrypoints.length === 0) return;
@@ -254,6 +295,8 @@ async function runOne(
   // output filename so each bundle URL is unique per content (cache busting).
   // The CSS pass leaves font url()s external — Bun would otherwise inline every
   // font file as a base64 data URI in the stylesheet (CSS_EXTERNAL_FONT_GLOBS).
+  // `define` replaces the `build.env` variables with constants; with minify, a dead branch and
+  // the dynamic import it guards are dropped from the output.
   const result = await runner({
     entrypoints,
     outdir,
@@ -261,7 +304,8 @@ async function runOne(
     splitting: true,
     target: "browser",
     naming: FINGERPRINT_NAMING,
-    external: kind === "css" ? [...CSS_EXTERNAL_FONT_GLOBS] : []
+    external: kind === "css" ? [...CSS_EXTERNAL_FONT_GLOBS] : [],
+    define
   });
   if (!result.success) {
     throw new Error(`[web] build.bundle ${kind} build failed`);
@@ -311,13 +355,17 @@ export async function bundle(
   ctx: Pick<PhaseContext, "state" | "config" | "log">,
   options: BundleOptions = {}
 ): Promise<void> {
+  // The runner, the output settings and the bundle-time constants, shared by both passes.
   const runner = options.runner ?? defaultRunner;
   const { minify, outDir } = ctx.config;
+  const define = envDefines(ctx.config.env ?? []);
   const assetsDir = path.join(outDir, "assets");
+
+  // Resolve the entrypoints, then bundle CSS and JS concurrently.
   const cssEntrypoints = options.cssEntrypoints ?? resolveEntrypoints(CSS_ENTRY_CANDIDATES);
   const jsEntrypoints = options.jsEntrypoints ?? resolveJsEntrypoints(ctx);
   await Promise.all([
-    runOne(ctx, runner, "css", cssEntrypoints, outDir, assetsDir, minify),
-    runOne(ctx, runner, "js", jsEntrypoints, outDir, assetsDir, minify)
+    runOne(ctx, runner, "css", cssEntrypoints, outDir, assetsDir, minify, define),
+    runOne(ctx, runner, "js", jsEntrypoints, outDir, assetsDir, minify, define)
   ]);
 }

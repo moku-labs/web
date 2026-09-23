@@ -96,4 +96,24 @@ describe("build/api", () => {
       })
     ).toThrowError(/\[web\] build\.ogImage/);
   });
+
+  it("validateConfig accepts build.env names and rejects anything else", () => {
+    const base = {
+      outDir: "./dist",
+      minify: true,
+      feeds: false,
+      sitemap: false,
+      images: false,
+      ogImage: false
+    } as const;
+    expect(() => validateConfig({ ...base, env: ["IS_DEVELOPMENT", "IS_LOCAL"] })).not.toThrow();
+    expect(() => validateConfig({ ...base, env: ["process.env.X"] })).toThrowError(
+      /\[web\] build\.env: must list environment variable names/
+    );
+    expect(() => validateConfig({ ...base, env: ["1X"] })).toThrowError(/\[web\] build\.env/);
+    // A string instead of an array, as plain JS could pass it.
+    expect(() =>
+      validateConfig({ ...base, env: "IS_DEVELOPMENT" as unknown as string[] })
+    ).toThrowError(/\[web\] build\.env/);
+  });
 });
