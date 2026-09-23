@@ -238,6 +238,13 @@ export type Config = {
   /** Authoritative client bundle entry path (overrides the conventional scan). */
   clientEntry?: string;
   /**
+   * Environment variable names the client bundle reads, e.g. `["IS_DEVELOPMENT", "IS_LOCAL"]`.
+   * Each becomes a constant under `process.env.<NAME>` and `import.meta.env.<NAME>`: the value
+   * the build process has, or `""` when unset. With `minify`, a branch on an unset flag is dropped
+   * together with the dynamic `import()` chunk it guards. Default: none.
+   */
+  env?: readonly string[];
+  /**
    * Path to a custom HTML document shell, giving the app full control over the
    * scaffold (charset, viewport, `<html lang>`, body attributes, wrapper markup).
    * Placeholders, substituted per page at build time:
