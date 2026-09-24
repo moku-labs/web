@@ -567,7 +567,10 @@ describe("kernel.processNav — client DATA path (data plugin composed)", () => 
     vi.stubGlobal("fetch", fetchSpy);
 
     kernel.processNav("/en/hello/");
-    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledWith("/en/hello/"));
+    // A programmatic navigation carries its abort signal, like an intercepted one.
+    await vi.waitFor(() =>
+      expect(fetchSpy).toHaveBeenCalledWith("/en/hello/", { signal: expect.any(AbortSignal) })
+    );
     expect(dataAt).not.toHaveBeenCalled(); // ssg mode skips the data path entirely
   });
 
@@ -582,7 +585,10 @@ describe("kernel.processNav — client DATA path (data plugin composed)", () => 
     vi.stubGlobal("fetch", fetchSpy);
 
     kernel.processNav("/en/hello/");
-    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledWith("/en/hello/"));
+    // A programmatic navigation carries its abort signal, like an intercepted one.
+    await vi.waitFor(() =>
+      expect(fetchSpy).toHaveBeenCalledWith("/en/hello/", { signal: expect.any(AbortSignal) })
+    );
   });
 });
 
