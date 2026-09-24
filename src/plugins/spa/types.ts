@@ -14,6 +14,11 @@ export type { ScrollMode, TransitionMode } from "../router/types";
 export interface NavigateOptions {
   /** Override the scroll behaviour for this single navigation (else the route/app default). */
   scroll?: ScrollMode;
+  /**
+   * Replace the current history entry instead of adding one (`history.replaceState`), so Back
+   * skips the page navigated from; e.g. the same page in another language.
+   */
+  replace?: boolean;
 }
 
 /** Payload map for the events `spa` emits, used to type the kernel's `emit` closure. */
