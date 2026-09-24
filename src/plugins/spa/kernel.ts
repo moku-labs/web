@@ -133,6 +133,20 @@ export function createSpaKernel(
   // True only while `navigateProgrammatic` runs its own `history.pushState`: the `navigate` event
   // the Navigation API fires for it is that same navigation, so the router lets it pass.
   let pushingOwnUrl = false;
+  // The programmatic navigation still loading. The next navigation of any kind aborts it, so it can
+  // never swap in over the page the viewer went to (a tap, then back before the page loaded).
+  let programmatic: AbortController | undefined;
+
+  /**
+   * Aborts the programmatic navigation still loading, if any.
+   *
+   * @example
+   * supersedeProgrammatic(); // a link click or back/forward starts
+   */
+  const supersedeProgrammatic = (): void => {
+    programmatic?.abort();
+    programmatic = undefined;
+  };
 
   /**
    * Resolve a {@link TransitionMode} into the runtime {@link SwapTransition} the swap
@@ -532,7 +546,8 @@ export function createSpaKernel(
    * swaps but the address bar (and the back button / refresh / deep link) stays on the old URL.
    * Where the Navigation API exists, `history.pushState` fires a `navigate` event synchronously
    * (Chrome, Edge, Safari 26): `pushingOwnUrl` marks it, so the interceptor does not run this
-   * navigation a second time. The current scroll is saved first so a later back restores it.
+   * navigation a second time. The current scroll is saved first so a later back restores it. It
+   * carries its own abort signal: any later navigation aborts it before it can swap.
    *
    * @param path - The destination path (pathname + optional search).
    * @param scroll - The optional per-call scroll override.
@@ -550,7 +565,14 @@ export function createSpaKernel(
         pushingOwnUrl = false;
       }
     }
-    navigate(path, true, undefined, scroll).catch(() => {});
+    supersedeProgrammatic();
+    const controller = new AbortController();
+    programmatic = controller;
+    navigate(path, true, controller.signal, scroll)
+      .catch(() => {})
+      .finally(() => {
+        if (programmatic === controller) programmatic = undefined;
+      });
   };
 
   return {
@@ -589,7 +611,15 @@ export function createSpaKernel(
       // Stand up the progress bar and seed the current URL from the live document.
       progress = createProgressBar(resolved.progressBar);
       state.currentUrl = currentLocationUrl();
-      state.destroyRouter = attachRouter(handlers, navigate, () => pushingOwnUrl);
+      // A link click or back/forward first aborts a programmatic navigation still loading.
+      state.destroyRouter = attachRouter(
+        handlers,
+        (pathname, scrollToTop, signal, scrollOverride) => {
+          supersedeProgrammatic();
+          return navigate(pathname, scrollToTop, signal, scrollOverride);
+        },
+        () => pushingOwnUrl
+      );
 
       // Initial island mount. In spa mode a client-only route (dynamic, no `.generate()`) was NOT
       // pre-rendered — the host served a fallback shell — so client-render the matched route from the
