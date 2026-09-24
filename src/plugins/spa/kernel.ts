@@ -130,8 +130,9 @@ export function createSpaKernel(
   // View-Transition intent for the in-flight navigation's swap. Resolved per-nav from the
   // destination route's `.transition()` (falling back to the app default), set by `navigate`.
   let pendingTransition: SwapTransition = resolveTransition(resolved.defaultTransition);
-  // True only while `navigateProgrammatic` runs its own `history.pushState`: the `navigate` event
-  // the Navigation API fires for it is that same navigation, so the router lets it pass.
+  // True only while `navigateProgrammatic` runs its own `history.pushState` / `replaceState`: the
+  // `navigate` event the Navigation API fires for it is that same navigation, so the router lets it
+  // pass.
   let pushingOwnUrl = false;
   // The programmatic navigation still loading. The next navigation of any kind aborts it, so it can
   // never swap in over the page the viewer went to (a tap, then back before the page loaded).
@@ -549,18 +550,22 @@ export function createSpaKernel(
    * navigation a second time. The current scroll is saved first so a later back restores it. It
    * carries its own abort signal: any later navigation aborts it before it can swap.
    *
+   * `options.replace` swaps the current history entry (`replaceState`) instead of adding one.
+   *
    * @param path - The destination path (pathname + optional search).
-   * @param scroll - The optional per-call scroll override.
+   * @param options - Optional per-call overrides: `scroll`, `replace`.
    * @example
-   * navigateProgrammatic("/board/abc/issue/1", "preserve");
+   * navigateProgrammatic("/board/abc/issue/1", { scroll: "preserve" });
    */
-  const navigateProgrammatic = (path: string, scroll?: ScrollMode): void => {
+  const navigateProgrammatic = (path: string, options: NavigateOptions = {}): void => {
     if (typeof document === "undefined") return;
+    const { scroll, replace = false } = options;
     if (path !== currentLocationUrl()) {
       saveScrollPosition(currentLocationUrl());
       pushingOwnUrl = true;
       try {
-        history.pushState({}, "", path);
+        if (replace) history.replaceState({}, "", path);
+        else history.pushState({}, "", path);
       } finally {
         pushingOwnUrl = false;
       }
@@ -587,10 +592,10 @@ export function createSpaKernel(
       state.currentUrl = currentLocationUrl();
       // Bind the island-context navigator (read by `ctx.navigate` through state — the same
       // decoupled seam `islandApis` uses, so islands.ts never imports the kernel). A forward
-      // nav (scrollToTop=true); the per-call `options.scroll` flows through as the override.
+      // nav (scrollToTop=true); the per-call `options` (`scroll`, `replace`) flow through.
       // eslint-disable-next-line jsdoc/require-jsdoc -- inline navigator binding (delegates to navigateProgrammatic)
       state.navigate = (path: string, options?: NavigateOptions): void => {
-        navigateProgrammatic(path, options?.scroll);
+        navigateProgrammatic(path, options);
       };
     },
     /**
@@ -645,16 +650,16 @@ export function createSpaKernel(
       registerIsland(state, island);
     },
     /**
-     * Process a navigation to `path` (fetch then swap; full reload on error). An optional
-     * per-call `scroll` override flows through to the swap's scroll intent.
+     * Process a navigation to `path` (fetch then swap; full reload on error). Optional per-call
+     * overrides: `scroll` for the swap's scroll intent, `replace` to replace the history entry.
      *
      * @param path - The target path to navigate to.
-     * @param options - Optional per-navigation overrides (e.g. `{ scroll: "preserve" }`).
+     * @param options - Optional per-navigation overrides (e.g. `{ scroll: "preserve", replace: true }`).
      * @example
      * kernel.processNav("/about");
      */
     processNav(path, options?: NavigateOptions): void {
-      navigateProgrammatic(path, options?.scroll);
+      navigateProgrammatic(path, options);
     },
     /**
      * Cross a boundary the SPA cannot swap (a different layout, the auth split) with a REAL

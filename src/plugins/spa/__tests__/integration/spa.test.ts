@@ -110,6 +110,12 @@ function stubChromeNavigation(): { traverse: (url: string) => void } {
     for (const listener of listeners) listener(pushEvent(String(url)));
     push.call(this, data, unused, url);
   });
+  const replace = History.prototype.replaceState;
+  vi.spyOn(history, "replaceState").mockImplementation(function (this: History, data, unused, url) {
+    for (const listener of listeners)
+      listener({ ...pushEvent(String(url)), navigationType: "replace" });
+    replace.call(this, data, unused, url);
+  });
   return {
     traverse: url => {
       for (const listener of listeners) listener({ ...pushEvent(url), navigationType: "traverse" });
@@ -307,6 +313,31 @@ describe("spa integration", () => {
 
     expect(document.querySelector("#page")?.textContent).toBe("home again");
     expect(app.spa.current()).toBe("/");
+    vi.unstubAllGlobals();
+  });
+
+  it("navigate with replace swaps the page in place of the history entry, once", async () => {
+    stubChromeNavigation();
+    const { createApp } = makeCore();
+    app = makeApp(createApp);
+    await app.start();
+    const fetchSpy = vi.fn(() =>
+      Promise.resolve(new Response(pageHtml("About", "about content"), { status: 200 }))
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+    const entries = history.length;
+
+    app.spa.navigate("/replaced/", { replace: true });
+    await vi.waitFor(() =>
+      expect(document.querySelector("#page")?.textContent).toBe("about content")
+    );
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(history.replaceState).toHaveBeenCalledOnce();
+    expect(history.pushState).not.toHaveBeenCalled();
+    expect(history.length).toBe(entries);
+    expect(location.pathname).toBe("/replaced/");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
   });
 
