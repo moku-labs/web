@@ -98,7 +98,7 @@ function pushEvent(url: string) {
  * A Navigation API like Chrome's: `history.pushState` fires `navigate` for the new URL before the
  * URL changes.
  */
-function stubChromeNavigation(): void {
+function stubChromeNavigation(): { traverse: (url: string) => void } {
   const listeners: Array<(event: unknown) => void> = [];
   vi.stubGlobal("navigation", {
     addEventListener: (_type: string, listener: (event: unknown) => void) =>
@@ -110,6 +110,24 @@ function stubChromeNavigation(): void {
     for (const listener of listeners) listener(pushEvent(String(url)));
     push.call(this, data, unused, url);
   });
+  return {
+    traverse: url => {
+      for (const listener of listeners) listener({ ...pushEvent(url), navigationType: "traverse" });
+    }
+  };
+}
+
+/**
+ * A promise the test resolves later, for a page that is still loading.
+ *
+ * @returns The promise and its resolver.
+ */
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  const settlers: Array<(value: T) => void> = [];
+  const promise = new Promise<T>(settle => {
+    settlers.push(settle);
+  });
+  return { promise, resolve: value => settlers[0]?.(value) };
 }
 
 let app: ReturnType<typeof makeApp>;
@@ -263,6 +281,32 @@ describe("spa integration", () => {
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(location.pathname).toBe("/about/");
+    vi.unstubAllGlobals();
+  });
+
+  it("a back pressed while a programmatic navigation loads wins: the late page never swaps in", async () => {
+    const navigation = stubChromeNavigation();
+    const { createApp } = makeCore();
+    app = makeApp(createApp);
+    await app.start();
+    const about = deferred<Response>();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) =>
+        url.startsWith("/about")
+          ? about.promise
+          : Promise.resolve(new Response(pageHtml("Home", "home again"), { status: 200 }))
+      )
+    );
+
+    app.spa.navigate("/about/");
+    navigation.traverse("/");
+    await vi.waitFor(() => expect(document.querySelector("#page")?.textContent).toBe("home again"));
+    about.resolve(new Response(pageHtml("About", "about content"), { status: 200 }));
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(document.querySelector("#page")?.textContent).toBe("home again");
+    expect(app.spa.current()).toBe("/");
     vi.unstubAllGlobals();
   });
 
