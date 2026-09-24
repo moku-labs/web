@@ -489,6 +489,8 @@ export function attachHistoryFallback(
  * @param navigation - The Navigation API object to attach the listener to.
  * @param handlers - The navigation lifecycle callbacks.
  * @param navigate - The navigation strategy (defaults to HTML-over-fetch via `performNavigation`).
+ * @param isOwnPush - True while the kernel's programmatic navigation runs its own
+ *   `history.pushState`: the `navigate` event it fires is left alone, the kernel runs it once.
  * @returns A teardown that removes the `navigate` listener.
  * @example
  * const dispose = attachNavigationApi(navigation, handlers);
@@ -497,7 +499,8 @@ export function attachNavigationApi(
   navigation: NavigationApi,
   handlers: RouterHandlers,
   navigate: NavigateFunction = (pathname, _scrollToTop, signal) =>
-    performNavigation(pathname, handlers, signal)
+    performNavigation(pathname, handlers, signal),
+  isOwnPush: () => boolean = () => false
 ): RouterTeardown {
   /**
    * Handle a `navigate` event: classify, then intercept with fetch-and-swap.
@@ -507,6 +510,8 @@ export function attachNavigationApi(
    * navigation.addEventListener("navigate", onNavigate);
    */
   const onNavigate = (navEvent: NavigateEvent): void => {
+    // The kernel's own pushState (app.spa.navigate / ctx.navigate): it already runs the navigation.
+    if (isOwnPush()) return;
     const url = new URL(navEvent.destination.url);
     const shouldSkipIntercept =
       !navEvent.canIntercept || navEvent.hashChange || navEvent.downloadRequest;
@@ -553,16 +558,19 @@ export function attachNavigationApi(
  *
  * @param handlers - The navigation lifecycle callbacks the kernel supplies.
  * @param navigate - The navigation strategy (defaults to HTML-over-fetch via `performNavigation`).
+ * @param isOwnPush - True while the kernel runs its own `history.pushState` (Navigation API path
+ *   only; the History fallback never sees an event for it).
  * @returns A teardown removing all attached listeners.
  * @example
- * const dispose = attachRouter(handlers, navigate);
+ * const dispose = attachRouter(handlers, navigate, () => pushingOwnUrl);
  */
 export function attachRouter(
   handlers: RouterHandlers,
-  navigate?: NavigateFunction
+  navigate?: NavigateFunction,
+  isOwnPush?: () => boolean
 ): RouterTeardown {
   const navigation = getNavigation();
   return navigation
-    ? attachNavigationApi(navigation, handlers, navigate)
+    ? attachNavigationApi(navigation, handlers, navigate, isOwnPush)
     : attachHistoryFallback(handlers, navigate);
 }
