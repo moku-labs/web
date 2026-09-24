@@ -703,6 +703,32 @@ describe("Navigation API path", () => {
     listener?.(blocked);
     expect(blocked.intercept).not.toHaveBeenCalled();
   });
+
+  it("leaves the navigate event of the kernel's own pushState alone, and intercepts the rest", () => {
+    Object.defineProperty(globalThis, "location", {
+      value: { origin: "http://localhost:3000", pathname: "/", search: "" },
+      configurable: true
+    });
+    let listener: ((e: unknown) => void) | undefined;
+    const navMock = {
+      addEventListener: (_t: string, l: (e: unknown) => void) => {
+        listener = l;
+      },
+      removeEventListener: vi.fn()
+    };
+    let ownPush = true;
+    const handlers: RouterHandlers = { onStart: vi.fn(), onEnd: vi.fn(), onError: vi.fn() };
+    attachNavigationApi(navMock as never, handlers, undefined, () => ownPush);
+
+    const own = fakeNavEvent();
+    listener?.(own);
+    ownPush = false;
+    const click = fakeNavEvent();
+    listener?.(click);
+
+    expect(own.intercept).not.toHaveBeenCalled();
+    expect(click.intercept).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("Navigation API intercept handlers", () => {

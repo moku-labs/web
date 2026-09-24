@@ -146,7 +146,7 @@ Per spec/08 §4, `onStop` receives **`{ global }` only** — no `state`, `log`, 
 
 ### Navigation interception
 
-`attachRouter` prefers the **Navigation API** when supported, falling back to a **History API** click/popstate path otherwise. Internal-link classification skips modifier-key clicks, `target="_blank"`, cross-origin URLs, and static assets (`.xml`/`.json`/images/fonts/PDF). Scroll position is saved per path in `sessionStorage` (best-effort) and restored on back/forward.
+`attachRouter` prefers the **Navigation API** when supported, falling back to a **History API** click/popstate path otherwise. A programmatic navigation (`app.spa.navigate` / `ctx.navigate`) commits the URL with its own `history.pushState`; where the Navigation API exists that `pushState` fires a `navigate` event too, and the interceptor leaves exactly that one alone, so the navigation runs once, not twice. Internal-link classification skips modifier-key clicks, `target="_blank"`, cross-origin URLs, and static assets (`.xml`/`.json`/images/fonts/PDF). Scroll position is saved per path in `sessionStorage` (best-effort) and restored on back/forward.
 
 ### Head-sync and progress bar
 

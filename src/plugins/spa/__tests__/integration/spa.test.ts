@@ -67,6 +67,51 @@ function pageHtml(title: string, body: string): string {
   return `<html><head><title>${title}</title></head><body><main><section id="page">${body}</section></main></body></html>`;
 }
 
+/** Runs an intercepted navigation's handler once the `navigate` event is done, like Chrome. */
+function interceptLater(options: { handler: () => Promise<void> }): void {
+  queueMicrotask(() => {
+    options.handler().catch(() => {});
+  });
+}
+
+/**
+ * A `navigate` event for a push to `url`.
+ *
+ * @param url - The destination.
+ * @returns The fake event.
+ */
+function pushEvent(url: string) {
+  return {
+    destination: { url: new URL(url, location.href).href },
+    canIntercept: true,
+    hashChange: false,
+    // eslint-disable-next-line unicorn/no-null -- mirrors the native NavigateEvent.downloadRequest shape
+    downloadRequest: null,
+    navigationType: "push",
+    signal: new AbortController().signal,
+    intercept: interceptLater,
+    scroll: vi.fn()
+  };
+}
+
+/**
+ * A Navigation API like Chrome's: `history.pushState` fires `navigate` for the new URL before the
+ * URL changes.
+ */
+function stubChromeNavigation(): void {
+  const listeners: Array<(event: unknown) => void> = [];
+  vi.stubGlobal("navigation", {
+    addEventListener: (_type: string, listener: (event: unknown) => void) =>
+      listeners.push(listener),
+    removeEventListener: vi.fn()
+  });
+  const push = History.prototype.pushState;
+  vi.spyOn(history, "pushState").mockImplementation(function (this: History, data, unused, url) {
+    for (const listener of listeners) listener(pushEvent(String(url)));
+    push.call(this, data, unused, url);
+  });
+}
+
 let app: ReturnType<typeof makeApp>;
 
 beforeEach(() => {
@@ -198,6 +243,27 @@ describe("spa integration", () => {
     // a link click / the Navigation API does this for the interceptor, but app.spa.navigate /
     // ctx.navigate bypass it, so the kernel pushState's itself. Else back/refresh/deep-link break.
     expect(location.pathname).toBe("/doc/");
+  });
+
+  it("a programmatic navigation runs once where pushState fires the Navigation API's navigate", async () => {
+    stubChromeNavigation();
+    const { createApp } = makeCore();
+    app = makeApp(createApp);
+    await app.start();
+    const fetchSpy = vi.fn(() =>
+      Promise.resolve(new Response(pageHtml("About", "about content"), { status: 200 }))
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+
+    app.spa.navigate("/about/");
+    await vi.waitFor(() =>
+      expect(document.querySelector("#page")?.textContent).toBe("about content")
+    );
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(location.pathname).toBe("/about/");
+    vi.unstubAllGlobals();
   });
 
   it("type-level: app.spa is SpaApi with register/navigate/current", () => {

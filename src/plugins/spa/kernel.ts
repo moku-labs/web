@@ -130,6 +130,9 @@ export function createSpaKernel(
   // View-Transition intent for the in-flight navigation's swap. Resolved per-nav from the
   // destination route's `.transition()` (falling back to the app default), set by `navigate`.
   let pendingTransition: SwapTransition = resolveTransition(resolved.defaultTransition);
+  // True only while `navigateProgrammatic` runs its own `history.pushState`: the `navigate` event
+  // the Navigation API fires for it is that same navigation, so the router lets it pass.
+  let pushingOwnUrl = false;
 
   /**
    * Resolve a {@link TransitionMode} into the runtime {@link SwapTransition} the swap
@@ -527,8 +530,9 @@ export function createSpaKernel(
    * Navigation API commits the address bar before the interceptor calls {@link navigate}; a
    * programmatic call does NOT, so it must commit the URL itself first — otherwise the content
    * swaps but the address bar (and the back button / refresh / deep link) stays on the old URL.
-   * `history.pushState` updates the URL WITHOUT firing a `navigate` event, so it can't
-   * double-trigger the interceptor. The current scroll is saved first so a later back restores it.
+   * Where the Navigation API exists, `history.pushState` fires a `navigate` event synchronously
+   * (Chrome, Edge, Safari 26): `pushingOwnUrl` marks it, so the interceptor does not run this
+   * navigation a second time. The current scroll is saved first so a later back restores it.
    *
    * @param path - The destination path (pathname + optional search).
    * @param scroll - The optional per-call scroll override.
@@ -539,7 +543,12 @@ export function createSpaKernel(
     if (typeof document === "undefined") return;
     if (path !== currentLocationUrl()) {
       saveScrollPosition(currentLocationUrl());
-      history.pushState({}, "", path);
+      pushingOwnUrl = true;
+      try {
+        history.pushState({}, "", path);
+      } finally {
+        pushingOwnUrl = false;
+      }
     }
     navigate(path, true, undefined, scroll).catch(() => {});
   };
@@ -580,7 +589,7 @@ export function createSpaKernel(
       // Stand up the progress bar and seed the current URL from the live document.
       progress = createProgressBar(resolved.progressBar);
       state.currentUrl = currentLocationUrl();
-      state.destroyRouter = attachRouter(handlers, navigate);
+      state.destroyRouter = attachRouter(handlers, navigate, () => pushingOwnUrl);
 
       // Initial island mount. In spa mode a client-only route (dynamic, no `.generate()`) was NOT
       // pre-rendered — the host served a fallback shell — so client-render the matched route from the
