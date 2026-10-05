@@ -8,7 +8,7 @@ plugins are composed à la carte for the build.
 
 - Runtime: **Node 24+**, Bun, Cloudflare Workers, browsers. The route matcher is native `RegExp` (no `URLPattern` global), so matching works in every engine — including Safari/Firefox versions that ship no `URLPattern`.
 - Package manager: **bun**. Strict TS: `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`.
-- Dependencies: `preact` + `preact-render-to-string` are **peerDependencies** — install them alongside the package (`bun add @moku-labs/web preact preact-render-to-string`) so the app compiles its JSX against the SAME single preact instance the framework renders with; a second nested copy silently breaks hooks and island hydration.
+- Dependencies: `@moku-labs/core` (`^1.7.1`), `@moku-labs/common` (`^0.3.4`), `preact` + `preact-render-to-string` are **peerDependencies** — install them alongside the package (`bun add @moku-labs/web @moku-labs/core @moku-labs/common preact preact-render-to-string`) so the app compiles its JSX against the SAME single preact instance the framework renders with and shares one core/common instance; a second nested copy of preact silently breaks hooks and island hydration. `mermaid-isomorphic` is an **optional** peer, loaded lazily only when `content.mermaid` is on and a document has a mermaid fence.
 - Two entry points: `.` (Node SSG; dual ESM + CJS, full surface) and `./browser` (client bundle; ESM-only, guaranteed node-free). Prefer `./browser` for the client — do NOT rely on tree-shaking `.` for browser safety (see §0).
 
 ## 0. Entry points (`.` vs `./browser`)
@@ -207,4 +207,4 @@ Compose a provider per target via `env: { providers: [...] }`:
 - Single mode (`router.mode`); no parallel runtime / hand-rolled `boot()`; everything flows through the factory chain.
 
 ## Per-plugin READMEs
-site · i18n · router · head · spa · content · build · deploy · data · cli · log · env — see `src/plugins/<name>/README.md`.
+site · i18n · router · head · spa · content · build · deploy · data · collection · cli · log · env — see `src/plugins/<name>/README.md`.

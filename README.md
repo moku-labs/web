@@ -34,11 +34,11 @@ Built on the [@moku-labs/core](https://github.com/moku-labs/core) micro-kernel �
 ---
 
 ```sh
-bun add @moku-labs/web preact preact-render-to-string
+bun add @moku-labs/web @moku-labs/core @moku-labs/common preact preact-render-to-string
 ```
 
 > [!NOTE]
-> `preact` (and `preact-render-to-string`, used by the SSG build) are **peer dependencies** — your app compiles its JSX against the same single `preact` instance the framework renders with. Most package managers install peers automatically, but declare them explicitly so *you* own the version: a second nested copy of preact silently breaks hooks and island hydration.
+> `@moku-labs/core` (`^1.7.1`), `@moku-labs/common` (`^0.3.4`), `preact` and `preact-render-to-string` (used by the SSG build) are **peer dependencies** — your app compiles its JSX against the same single `preact` instance the framework renders with, and shares one `core`/`common` instance with the rest of the Moku family. Most package managers install peers automatically, but declare them explicitly so *you* own the version: a second nested copy of preact silently breaks hooks and island hydration. `mermaid-isomorphic` is an **optional** peer, needed only for build-time Mermaid diagrams in `content` (see its [README](src/plugins/content/README.md#mermaid-diagrams)).
 
 > [!NOTE]
 > **Status: `1.x` — stable.** The architecture and public API are stable and follow [semver](https://semver.org) — breaking changes land only in a new major. The npm badge above tracks the current release.
@@ -262,6 +262,7 @@ Each plugin is small, single-purpose, and documented on its own. **Click a name 
 | [`deploy`](src/plugins/deploy/README.md) | node-only | Cloudflare Pages: `wrangler.jsonc` scaffolding, secret scrubbing, deploy |
 | [`cli`](src/plugins/cli/README.md) | node-only | Developer CLI — `build` / `serve` / `preview` / `deploy` with the animated Velocity Panel UI (lockup + version banner, live phase tree, boxed panels, live pulse) |
 | [`data`](src/plugins/data/README.md) | optional provider | Agnostic `page path → JSON` contract: `write()` on Node, `at()` in the browser, for DATA nav |
+| [`collection`](src/plugins/collection/README.md) | optional provider | Agnostic `(collection, shard) → JSON` contract: `write()` on Node, `at()` in the browser, for on-demand collection reads |
 | [`env`](src/plugins/env/README.md) | core | Multi-provider environment / secret injection, validated and frozen at `onInit` |
 | [`log`](src/plugins/log/README.md) | core | Structured logging + an in-memory trace with an `expect()` DSL for testable workflows |
 
