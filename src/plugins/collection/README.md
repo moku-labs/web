@@ -7,13 +7,12 @@
 It is **not a framework default**: the consumer composes it where needed (the Node build, the browser app, or both). It declares **no hard `depends`** and is fully browser-composable — the only `node:fs` code lives in `writer.ts` behind a lazy `import()` inside `write()`, so a browser bundle that composes `collection` for the read side pulls **zero** `node:*`. Lifecycle is minimal: `onInit` validates `baseUrl`, and there is **no `onStart`/`onStop`** — the provider holds no long-lived resource.
 
 > [!NOTE]
-> Compose `collection` on **both** sides for client collection reads: a Node build so the build writes the shard files, and your browser entry (`createApp({ plugins: [collectionPlugin] })` from `@moku-labs/web/browser`) so the client reads them. The standalone reader `loadCollectionShard` is also exported from `@moku-labs/web/browser` for consumers that read shards without composing the plugin (e.g. a room-layer consumer). With `"sideEffects": false`, a browser app that never composes it tree-shakes it away.
+> Compose `collection` on **both** sides for client collection reads: a Node build so the build writes the shard files, and your browser entry (`createApp({ plugins: [collectionPlugin] })`, with `collectionPlugin` imported from the root `@moku-labs/web` entry) so the client reads them. The standalone reader `loadCollectionShard` is also exported from `@moku-labs/web/browser` for consumers that read shards without composing the plugin (e.g. a room-layer consumer). With `"sideEffects": false`, a browser app that never composes it tree-shakes it away.
 
 ## Example
 ```ts
 // Node build — write build-authored shards during/after the build's pages phase:
-import { createApp, buildPlugin } from "@moku-labs/web";
-import { collectionPlugin } from "@moku-labs/web/browser";
+import { createApp, buildPlugin, collectionPlugin } from "@moku-labs/web";
 
 const app = createApp({ plugins: [collectionPlugin, buildPlugin] });
 await app.build.run();
