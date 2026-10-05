@@ -7,7 +7,7 @@
  * merge. Consumers extend via additive extraRemarkPlugins / extraRehypePlugins.
  */
 import type { Element, Root as HastRoot } from "hast";
-import type { Root as MdastRoot } from "mdast";
+import type { Data as MdastData, Root as MdastRoot } from "mdast";
 import rehypeRaw from "rehype-raw";
 import remarkDirective from "remark-directive";
 import remarkFrontmatter from "remark-frontmatter";
@@ -26,7 +26,7 @@ import { normalizeMermaidOptions, remarkMermaidDiagrams } from "./mermaid";
 type DirectiveNode = Node & {
   type: "containerDirective" | "leafDirective" | "textDirective";
   name: string;
-  data?: Record<string, unknown>;
+  data?: MdastData;
 };
 
 /**
