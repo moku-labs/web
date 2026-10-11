@@ -27,9 +27,9 @@
       },
       "devDependencies": {
         "@biomejs/biome": "2.4.16",
-        "@moku-labs/ci": "1.5.5",
-        "@moku-labs/common": "0.3.7",
-        "@moku-labs/core": "1.7.5",
+        "@moku-labs/ci": "1.5.7",
+        "@moku-labs/common": "0.3.10",
+        "@moku-labs/core": "1.7.6",
         "@types/bun": "1.4.2",
         "@vitest/coverage-istanbul": "4.0.18",
         "eslint": "9.39.3",
@@ -229,11 +229,11 @@
 
     "@mermaid-js/parser": ["@mermaid-js/parser@1.1.1", "", { "dependencies": { "@chevrotain/types": "~11.1.1" } }, "sha512-VuHdsYMK1bT6X2JbcAaWAhugTRvRBRyuZgd+c22swUeI9g/ntaxF7CY7dYarhZovofCbUNO0G7JesfmNtjYOCw=="],
 
-    "@moku-labs/ci": ["@moku-labs/ci@1.5.5", "", { "bin": { "moku-release": "dist/release.mjs" } }, "sha512-1hIR3h8v2FisW94SQe/pbz0taVx634su5Y178cUR9uCtqbTGKUYcjjAwz9zTA9wb3T520UhPEreudGuaAOZVYQ=="],
+    "@moku-labs/ci": ["@moku-labs/ci@1.5.7", "", { "bin": { "moku-release": "dist/release.mjs" } }, "sha512-YiloZ86RVPjpFFqk7yTzlHvNArZkGv7NzURKJsc1eILrL2HSrYIZM8L/3KucuQmaiX+E+Drwyn6bIAI9OadxQQ=="],
 
-    "@moku-labs/common": ["@moku-labs/common@0.3.7", "", { "peerDependencies": { "@moku-labs/core": "^1.7.1" } }, "sha512-cbrZ8XEVC78xVzQo4Yuulmct/rEa3ov/tARtkbHQInvgN79xhxJApSQZaONmG6w2fLqK4xq5L86l6IIyTDRLTA=="],
+    "@moku-labs/common": ["@moku-labs/common@0.3.10", "", { "peerDependencies": { "@moku-labs/core": "^1.7.1" } }, "sha512-KMDbT6dAomEMM0YPQibVlY+ndDWL2JlGmaBjN3JH5Rxy5e4ZprwTqXUciEYoyPnKRciLe4Liu3/CGfV4K3z6hA=="],
 
-    "@moku-labs/core": ["@moku-labs/core@1.7.5", "", {}, "sha512-mLuHHqvEssCwO/ZkvoiPLO/SHc/xVHQ52XxQzq8IuLcMIbRZe6HfCEgB6QGdcR6PnJ8NTcDaYNRejumC03ocWw=="],
+    "@moku-labs/core": ["@moku-labs/core@1.7.6", "", {}, "sha512-CdCxX/9zwJ9Czv45I/CmDuV8sV1r9uiOSfUzckD3MZC8eumO1QcT4PY4yiSXd0zspsTgdsntFxfDHkUUYVp5Iw=="],
 
     "@napi-rs/wasm-runtime": ["@napi-rs/wasm-runtime@1.1.4", "", { "dependencies": { "@tybys/wasm-util": "^0.10.1" }, "peerDependencies": { "@emnapi/core": "^1.7.1", "@emnapi/runtime": "^1.7.1" } }, "sha512-3NQNNgA1YSlJb/kMH1ildASP9HW7/7kYnRI2szWJaofaS1hWmbGI4H+d3+22aGzXXN9IJ+n+GiFVcGipJP18ow=="],
 
