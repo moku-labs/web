@@ -53,14 +53,19 @@ export type NavigateFunction = (
 interface NavigateEvent extends Event {
   /** Whether the navigation can be intercepted. */
   readonly canIntercept: boolean;
-  /** The navigation destination (absolute URL). */
-  readonly destination: { readonly url: string };
+  /**
+   * The navigation destination: its absolute URL, and whether it stays in this document
+   * (`history.pushState` / `replaceState`, a hash change).
+   */
+  readonly destination: { readonly url: string; readonly sameDocument: boolean };
   /** A download filename when this is a download request, else `null` (DOM API shape). */
   readonly downloadRequest: string | null;
   /** Whether this navigation is only a hash change. */
   readonly hashChange: boolean;
   /** The navigation type. */
   readonly navigationType: "push" | "replace" | "reload" | "traverse";
+  /** Whether a person started it (a real link tap, the back button); `false` for a script. */
+  readonly userInitiated: boolean;
   /** Aborts when this navigation is superseded by a newer one (or canceled). */
   readonly signal: AbortSignal;
   /**
@@ -513,8 +518,14 @@ export function attachNavigationApi(
     // The kernel's own pushState (app.spa.navigate / ctx.navigate): it already runs the navigation.
     if (isOwnPush()) return;
     const url = new URL(navEvent.destination.url);
+    // A script's location.replace() asks for a new document: LIFF's liff.state redirect waits
+    // for it. The kernel's own replace is a same-document history.replaceState.
+    const isScriptReplace =
+      navEvent.navigationType === "replace" &&
+      !navEvent.userInitiated &&
+      !navEvent.destination.sameDocument;
     const shouldSkipIntercept =
-      !navEvent.canIntercept || navEvent.hashChange || navEvent.downloadRequest;
+      !navEvent.canIntercept || navEvent.hashChange || navEvent.downloadRequest || isScriptReplace;
     if (shouldSkipIntercept) return;
     if (!isInternalLink(url)) return;
     if (pathWithSearch(url) === pathWithSearch(location)) {

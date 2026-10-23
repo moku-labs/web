@@ -845,6 +845,60 @@ describe("Navigation API intercept handlers", () => {
     expect(scrollTo).not.toHaveBeenCalled();
   });
 
+  // Bug: LIFF's liff.state redirect calls location.replace() and waits for a new document; a swap
+  // in place leaves liff.init() pending forever and the app never boots.
+  it("leaves a script location.replace to another page to the browser", () => {
+    Object.defineProperty(globalThis, "location", {
+      value: { origin: "http://localhost:3000", pathname: "/", search: "" },
+      configurable: true
+    });
+    const listener = attachAndCapture({ onStart: vi.fn(), onEnd: vi.fn(), onError: vi.fn() });
+    const event = fakeNavEvent({
+      navigationType: "replace",
+      userInitiated: false,
+      destination: { url: "http://localhost:3000/about", sameDocument: false }
+    });
+
+    listener(event);
+    expect(event.intercept).not.toHaveBeenCalled();
+  });
+
+  // Each row breaks one condition of the script-replace guard; each must still be swapped.
+  it.each([
+    {
+      name: "a link a script clicks (a push)",
+      navigationType: "push",
+      userInitiated: false,
+      sameDocument: false
+    },
+    {
+      name: "a replace the person started",
+      navigationType: "replace",
+      userInitiated: true,
+      sameDocument: false
+    },
+    {
+      name: "a script replace inside the document",
+      navigationType: "replace",
+      userInitiated: false,
+      sameDocument: true
+    }
+  ])("still swaps $name", ({ navigationType, userInitiated, sameDocument }) => {
+    Object.defineProperty(globalThis, "location", {
+      value: { origin: "http://localhost:3000", pathname: "/", search: "" },
+      configurable: true
+    });
+    const listener = attachAndCapture({ onStart: vi.fn(), onEnd: vi.fn(), onError: vi.fn() });
+    const event = fakeNavEvent({
+      navigationType,
+      userInitiated,
+      destination: { url: "http://localhost:3000/about", sameDocument }
+    });
+
+    listener(event);
+    expect(event.intercept).toHaveBeenCalledOnce();
+  });
+
   it("threads navEvent.signal into the default navigate's fetch", async () => {
     Object.defineProperty(globalThis, "location", {
       value: { origin: "http://localhost:3000", pathname: "/" },
