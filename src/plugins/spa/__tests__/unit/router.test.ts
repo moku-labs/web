@@ -845,6 +845,40 @@ describe("Navigation API intercept handlers", () => {
     expect(scrollTo).not.toHaveBeenCalled();
   });
 
+  // Bug: LIFF's liff.state redirect calls location.replace() and waits for a new document; a swap
+  // in place leaves liff.init() pending forever and the app never boots.
+  it("leaves a script location.replace to another page to the browser", () => {
+    Object.defineProperty(globalThis, "location", {
+      value: { origin: "http://localhost:3000", pathname: "/", search: "" },
+      configurable: true
+    });
+    const listener = attachAndCapture({ onStart: vi.fn(), onEnd: vi.fn(), onError: vi.fn() });
+    const event = fakeNavEvent({
+      navigationType: "replace",
+      userInitiated: false,
+      destination: { url: "http://localhost:3000/about", sameDocument: false }
+    });
+
+    listener(event);
+    expect(event.intercept).not.toHaveBeenCalled();
+  });
+
+  it("still swaps a link a script clicks: a push, not a replace", () => {
+    Object.defineProperty(globalThis, "location", {
+      value: { origin: "http://localhost:3000", pathname: "/", search: "" },
+      configurable: true
+    });
+    const listener = attachAndCapture({ onStart: vi.fn(), onEnd: vi.fn(), onError: vi.fn() });
+    const event = fakeNavEvent({
+      navigationType: "push",
+      userInitiated: false,
+      destination: { url: "http://localhost:3000/about", sameDocument: false }
+    });
+
+    listener(event);
+    expect(event.intercept).toHaveBeenCalledOnce();
+  });
+
   it("threads navEvent.signal into the default navigate's fetch", async () => {
     Object.defineProperty(globalThis, "location", {
       value: { origin: "http://localhost:3000", pathname: "/" },
