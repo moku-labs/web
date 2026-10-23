@@ -863,16 +863,36 @@ describe("Navigation API intercept handlers", () => {
     expect(event.intercept).not.toHaveBeenCalled();
   });
 
-  it("still swaps a link a script clicks: a push, not a replace", () => {
+  // Each row breaks one condition of the script-replace guard; each must still be swapped.
+  it.each([
+    {
+      name: "a link a script clicks (a push)",
+      navigationType: "push",
+      userInitiated: false,
+      sameDocument: false
+    },
+    {
+      name: "a replace the person started",
+      navigationType: "replace",
+      userInitiated: true,
+      sameDocument: false
+    },
+    {
+      name: "a script replace inside the document",
+      navigationType: "replace",
+      userInitiated: false,
+      sameDocument: true
+    }
+  ])("still swaps $name", ({ navigationType, userInitiated, sameDocument }) => {
     Object.defineProperty(globalThis, "location", {
       value: { origin: "http://localhost:3000", pathname: "/", search: "" },
       configurable: true
     });
     const listener = attachAndCapture({ onStart: vi.fn(), onEnd: vi.fn(), onError: vi.fn() });
     const event = fakeNavEvent({
-      navigationType: "push",
-      userInitiated: false,
-      destination: { url: "http://localhost:3000/about", sameDocument: false }
+      navigationType,
+      userInitiated,
+      destination: { url: "http://localhost:3000/about", sameDocument }
     });
 
     listener(event);
