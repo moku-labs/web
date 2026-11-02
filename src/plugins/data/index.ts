@@ -11,12 +11,14 @@
  * **No hard `depends`** — fully browser-composable; the `node:fs` writer is behind
  * a lazy `import()` inside `write()`. Build ordering is a call-site contract: build
  * writes data during its pages phase (after its Phase-0 clean), via `app.data.write`.
- * No `onStart`/`onStop`.
+ * `onStart` schedules the optional `preload: "all"` bundle fetch (browser, idle);
+ * `onStop` cancels it.
  * @see README.md
  */
 import { createPlugin } from "../../config";
 import { dataApi } from "./api";
 import { defaultDataConfig } from "./config";
+import { startPreload, stopPreload } from "./preload";
 import { createDataState } from "./state";
 import { validateDataConfig } from "./validate";
 
@@ -44,5 +46,9 @@ export const dataPlugin = createPlugin("data", {
   createState: createDataState,
   // eslint-disable-next-line jsdoc/require-jsdoc -- thin wiring
   onInit: ctx => validateDataConfig(ctx.config),
-  api: dataApi
+  api: dataApi,
+  // eslint-disable-next-line jsdoc/require-jsdoc -- thin wiring; logic lives in ./preload
+  onStart: ctx => startPreload(ctx),
+  // eslint-disable-next-line jsdoc/require-jsdoc -- thin wiring; logic lives in ./preload
+  onStop: ctx => stopPreload(ctx)
 });

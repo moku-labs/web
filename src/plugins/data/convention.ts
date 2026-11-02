@@ -78,3 +78,6 @@ export function relativeDataFile(outputDir: string, path: string): string {
   const dir = outputDir.endsWith("/") ? outputDir.slice(0, -1) : outputDir;
   return `${dir}/${decodeSuffix(dataSuffix(path))}`;
 }
+
+/** Preload bundle file name. Page files end in `/index.json`, so it never collides. */
+export const BUNDLE_FILE = "_all.json";
