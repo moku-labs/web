@@ -124,7 +124,7 @@ BUILD (router.mode !== "ssg")              ON DISK                      CLIENT N
 - `at(path) => Promise<unknown | null>` — browser; fetch+cache the page's JSON (`null` on miss/parse-fail).
 - `urlFor(path) => string` — `/en/p/` → `/_data/en/p/index.json` (fetch URL).
 - `fileFor(path) => string` — `/en/p/` → `_data/en/p/index.json` (outDir-relative file).
-- Config: `data: { outputDir?: "_data", baseUrl?: "/_data/" }`. Knows NO domain types — any Layer-3 shape integrates via its route's `load`/`render`.
+- Config: `data: { outputDir?: "_data", baseUrl?: "/_data/", preload?: "none" | "all" }`. `preload: "all"` (set it in the Node app AND the browser app): `write()` also writes `_data/_all.json` = `{ "<page path>": data }`, and the browser fetches it once when idle (skipped on save-data, silent on failure) and fills the `at()` cache. For small static sites. Knows NO domain types — any Layer-3 shape integrates via its route's `load`/`render`.
 
 ## 4. spa — client runtime (island hydration + navigation)
 

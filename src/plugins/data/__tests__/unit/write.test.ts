@@ -88,3 +88,26 @@ describe("data.urlFor() / fileFor() — the shared convention", () => {
     expect(api.urlFor("/en/hello/?x=1")).toBe("/_data/en/hello/index.json");
   });
 });
+
+describe("data.write() — preload bundle", () => {
+  // Bug: preload "all" in the browser fetches _all.json but the build never wrote it.
+  it("with preload 'all' writes _all.json keyed by page path", async () => {
+    const config: DataConfig = { ...CFG, preload: "all" };
+    const state = createDataState({ global: {}, config });
+    const summary = await dataApi({ state, config }).write(ENTRIES, { outDir });
+
+    const bundle = JSON.parse(readFileSync(path.join(outDir, "_data", "_all.json"), "utf8"));
+    expect(bundle).toEqual({ "/": ENTRIES[0]?.data, "/en/hello/": ENTRIES[1]?.data });
+    expect(summary.fileCount).toBe(2);
+    expect(summary.bundle?.file).toBe("_data/_all.json");
+  });
+
+  // Bug: the default build output changes for sites that never asked for a bundle.
+  it("with preload unset writes no bundle and no bundle summary", async () => {
+    const { ctx } = makeCtx();
+    const summary = await dataApi(ctx).write(ENTRIES, { outDir });
+
+    expect(() => readFileSync(path.join(outDir, "_data", "_all.json"))).toThrow();
+    expect("bundle" in summary).toBe(false);
+  });
+});

@@ -10,7 +10,15 @@ describe("createDataState()", () => {
     expect(state.cache.size).toBe(0);
     expect(state.pending).toBeInstanceOf(Map);
     expect(state.pending.size).toBe(0);
-    expect(Object.keys(state).toSorted()).toEqual(["cache", "lastWrite", "pending"]);
+    expect(state.bundle).toBeNull();
+    expect(state.cancelPreload).toBeNull();
+    expect(Object.keys(state).toSorted()).toEqual([
+      "bundle",
+      "cache",
+      "cancelPreload",
+      "lastWrite",
+      "pending"
+    ]);
   });
 
   it("returns a fresh object (and a fresh Map) on each call", () => {

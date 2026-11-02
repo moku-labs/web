@@ -57,7 +57,7 @@ async function fetchAndCache(ctx: DataPluginContext, path: string): Promise<unkn
 /**
  * Builds the data provider — the agnostic bridge. `write()` is the Node persist
  * side; `at()` is the browser read side; `urlFor`/`fileFor` are the pure
- * convention. No `onStart`/`onStop` (holds no long-lived resource).
+ * convention. The optional preload lives in `./preload` (started by `onStart`).
  *
  * @param ctx - The data plugin context.
  * @returns The {@link DataProvider} mounted at `app.data`.
@@ -72,7 +72,9 @@ export function dataApi(ctx: DataPluginContext): DataProvider {
   return {
     /**
      * READ (browser) — fetch (and cache) the persisted data for a page path.
-     * Concurrent calls for one path share one in-flight request.
+     * Concurrent calls for one path share one in-flight request. While a preload
+     * bundle is in flight, it waits for the bundle and fetches the single file
+     * only if the bundle did not bring the path.
      * Returns the raw JSON as `unknown`, which the route uses directly as `ctx.data`
      * (no route `.parse()`); returns `null` if the fetch or JSON parse fails (so
      * `spa` can fall back to HTML).
@@ -86,6 +88,11 @@ export function dataApi(ctx: DataPluginContext): DataProvider {
      */
     async at(path: string): Promise<unknown | null> {
       if (ctx.state.cache.has(path)) return ctx.state.cache.get(path);
+      // A preload bundle in flight will likely bring this path: wait for it first.
+      if (ctx.state.bundle) {
+        await ctx.state.bundle;
+        if (ctx.state.cache.has(path)) return ctx.state.cache.get(path);
+      }
       const inFlight = ctx.state.pending.get(path);
       if (inFlight) return inFlight;
 

@@ -15,7 +15,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import pLimit from "p-limit";
 import type { DataPluginContext } from "./api";
-import { relativeDataFile } from "./convention";
+import { relativeBundleFile, relativeDataFile } from "./convention";
 import type { DataEntry, DataWriteSummary } from "./types";
 
 /** Default build output root, matching build's default `outDir` ("./dist", build/api.ts). */
@@ -76,8 +76,39 @@ function compileSummary(written: readonly { relative: string; bytes: number }[])
 }
 
 /**
+ * Persist the preload bundle: one JSON object `{ "<page path>": data }` keyed by
+ * each entry's `path`, exactly the key `at(path)` caches under. A later entry for
+ * the same path wins, like the per-page file it overwrites.
+ *
+ * @param entries - The per-page data to bundle.
+ * @param outDir - The build output root.
+ * @param outputDir - The configured data output subdir.
+ * @returns The written bundle's `outDir`-relative path and byte length.
+ * @example
+ * ```ts
+ * await writeBundle([{ path: "/en/hello/", data }], "./dist", "_data");
+ * ```
+ */
+async function writeBundle(
+  entries: readonly DataEntry[],
+  outDir: string,
+  outputDir: string
+): Promise<{ file: string; bytes: number }> {
+  const bundle: Record<string, unknown> = {};
+  for (const entry of entries) bundle[entry.path] = entry.data;
+
+  const file = relativeBundleFile(outputDir);
+  const filePath = path.join(outDir, file);
+  await mkdir(path.dirname(filePath), { recursive: true });
+  const body = JSON.stringify(bundle);
+  await writeFile(filePath, body, "utf8");
+  return { file, bytes: Buffer.byteLength(body, "utf8") };
+}
+
+/**
  * The Node write side of the provider. Persists one JSON file per entry (bounded
  * by `p-limit`) — domain-agnostic, no route expansion (`build` already did that).
+ * With `preload: "all"` it also writes the bundle file (see {@link writeBundle}).
  * Records the summary in `ctx.state.lastWrite`.
  *
  * @param ctx - The data plugin context (state, config).
@@ -106,6 +137,9 @@ export async function writeData(
 
   // Roll up the per-file records and record the summary on state.
   const summary = compileSummary(written);
+  if (ctx.config.preload === "all") {
+    summary.bundle = await writeBundle(entries, outDir, ctx.config.outputDir);
+  }
   ctx.state.lastWrite = summary;
   return summary;
 }

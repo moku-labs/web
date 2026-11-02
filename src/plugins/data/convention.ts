@@ -78,3 +78,24 @@ export function relativeDataFile(outputDir: string, path: string): string {
   const dir = outputDir.endsWith("/") ? outputDir.slice(0, -1) : outputDir;
   return `${dir}/${decodeSuffix(dataSuffix(path))}`;
 }
+
+/**
+ * File name of the preload bundle, written next to the per-page files. Page files
+ * always end in `/index.json`, so this name can never collide with one.
+ */
+export const BUNDLE_FILE = "_all.json";
+
+/**
+ * Compute the `outDir`-relative path of the preload bundle file.
+ *
+ * @param outputDir - The configured data output subdir (e.g. `"_data"` or `"_data/"`).
+ * @returns The `outDir`-relative bundle path (e.g. `_data/_all.json`).
+ * @example
+ * ```ts
+ * relativeBundleFile("_data"); // "_data/_all.json"
+ * ```
+ */
+export function relativeBundleFile(outputDir: string): string {
+  const dir = outputDir.endsWith("/") ? outputDir.slice(0, -1) : outputDir;
+  return `${dir}/${BUNDLE_FILE}`;
+}

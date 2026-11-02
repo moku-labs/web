@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,7 +56,12 @@ async function loadArticles(): Promise<{ bySlug: Map<string, Article>; cards: Ar
 }
 
 /** Compose the full SSG app with the data provider over a tmp outDir (hybrid mode). */
-function makeApp(outDir: string, bySlug: Map<string, Article>, cards: ArticleCard[]) {
+function makeApp(
+  outDir: string,
+  bySlug: Map<string, Article>,
+  cards: ArticleCard[],
+  data: { preload?: "none" | "all" } = {}
+) {
   const home = route("/")
     .load(() => cards) // list view → slim CARDS
     .render(() => h("h1", {}, `Home (${String(cards.length)})`))
@@ -104,7 +109,8 @@ function makeApp(outDir: string, bySlug: Map<string, Article>, cards: ArticleCar
       i18n: { locales: ["en"], defaultLocale: "en" },
       content: { providers: [fileSystemContent({ contentDir: FIXTURE_DIR })] },
       build: { outDir, feeds: false, sitemap: false, images: false, ogImage: false, minify: false },
-      router: { routes }
+      router: { routes },
+      data
     }
   });
   return app;
@@ -197,5 +203,42 @@ describe("data provider — build writes per-page data → at() reads it", () =>
       readFileSync(path.join(outDir, "_data", "hello-world", "via", "index.json"), "utf8")
     ) as { html: string };
     expect(via.html).toContain("Hello World");
+  });
+});
+
+describe("data provider — preload bundle from a real build", () => {
+  // Bug: the bundle keys differ from the keys at(path) caches by (for example
+  // file paths or missing trailing slashes), so the preload fills the cache
+  // with keys no navigation ever asks for.
+  it("preload 'all' writes _all.json with one key per per-page file", async () => {
+    const { bySlug, cards } = await loadArticles();
+    const app = makeApp(outDir, bySlug, cards, { preload: "all" });
+    await app.start();
+    await app.build.run();
+
+    const bundle = JSON.parse(
+      readFileSync(path.join(outDir, "_data", "_all.json"), "utf8")
+    ) as Record<string, unknown>;
+    const keys = Object.keys(bundle);
+    const written = readdirSync(path.join(outDir, "_data"), { recursive: true })
+      .map(String)
+      .filter(file => file.endsWith("index.json"))
+      .map(file => path.join("_data", file).split(path.sep).join("/"));
+    expect(keys.map(key => app.data.fileFor(key)).toSorted()).toEqual([...written].toSorted());
+    expect(keys).toContain("/hello-world/");
+    for (const key of keys) {
+      const onDisk = readFileSync(path.join(outDir, app.data.fileFor(key)), "utf8");
+      expect(bundle[key]).toEqual(JSON.parse(onDisk));
+    }
+  });
+
+  // Bug: a default build starts writing the bundle, growing every deploy.
+  it("a default build writes no _all.json", async () => {
+    const { bySlug, cards } = await loadArticles();
+    const app = makeApp(outDir, bySlug, cards);
+    await app.start();
+    await app.build.run();
+
+    expect(() => readFileSync(path.join(outDir, "_data", "_all.json"))).toThrow();
   });
 });

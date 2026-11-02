@@ -4,7 +4,7 @@
 
 `data` is the transport seam of the SSG→DATA→SPA pattern. It knows **nothing** about what the data *is* — no domain types appear in its surface. On Node, `build` calls `app.data.write(entries)` to persist one JSON file per page (build supplies the entries it already expanded — no duplicate route expansion here). In the browser, `spa` calls `app.data.at(path)` on navigation; the fetched JSON is used directly as the route's `ctx.data` for `render`, with no validation step. One module owns write **and** read **and** the pure URL convention (`urlFor`/`fileFor`, both derived from a single `dataSuffix(path)`), so the file the build writes is exactly the URL the client fetches — format drift is impossible.
 
-It is **not a framework default**: the consumer composes it where needed (the Node build, the browser app, or both). It declares **no hard `depends`** and is fully browser-composable — the only `node:fs` code lives in `writer.ts` behind a lazy `import()` inside `write()`, so a browser bundle that composes `data` for the read side pulls **zero** `node:*`. Lifecycle is minimal: `onInit` validates `baseUrl`, and there is **no `onStart`/`onStop`** — the provider holds no long-lived resource.
+It is **not a framework default**: the consumer composes it where needed (the Node build, the browser app, or both). It declares **no hard `depends`** and is fully browser-composable — the only `node:fs` code lives in `writer.ts` behind a lazy `import()` inside `write()`, so a browser bundle that composes `data` for the read side pulls **zero** `node:*`. Lifecycle is minimal: `onInit` validates `baseUrl` and `preload`. `onStart` schedules the optional `preload: "all"` bundle fetch in a browser, and `onStop` cancels it. With the default `preload: "none"` both are no-ops.
 
 > [!NOTE]
 > Compose `data` on **both** sides for client DATA navigation: a Node build (`createApp({ plugins: [dataPlugin, contentPlugin, buildPlugin] })`) so `build` writes the data sidecars, and your browser entry (`createApp({ plugins: [dataPlugin] })` from `@moku-labs/web/browser`) so `spa` reads them. Omit it for a plain static site (HTML-over-fetch). With `"sideEffects": false`, a browser app that never composes it tree-shakes it away.
@@ -37,7 +37,7 @@ Mounted at `app.data` (type {@link DataProvider}).
 
 | Method | Side | Signature | Notes |
 |--------|------|-----------|-------|
-| `at` | browser | `(path: string) => Promise<unknown \| null>` | Fetch (and cache) the persisted data for a page path from `config.baseUrl`. Concurrent calls for one path share one in-flight request; a failure is not cached, so a later call retries. Returns the raw parsed JSON as `unknown`, used directly as the route's `ctx.data`. Returns `null` if the fetch or JSON parse fails, so `spa` can fall back to HTML. |
+| `at` | browser | `(path: string) => Promise<unknown \| null>` | Fetch (and cache) the persisted data for a page path from `config.baseUrl`. Concurrent calls for one path share one in-flight request. While a preload bundle is in flight, it waits for the bundle first and fetches the single file only if the bundle lacks the path; a failure is not cached, so a later call retries. Returns the raw parsed JSON as `unknown`, used directly as the route's `ctx.data`. Returns `null` if the fetch or JSON parse fails, so `spa` can fall back to HTML. |
 | `write` | Node | `(entries: readonly DataEntry[], options?: { outDir?: string }) => Promise<DataWriteSummary>` | Persist one JSON file per entry, keyed by page path via `fileFor`. Called by `build` after it expands routes. Lazily loads its `node:fs` writer. `options.outDir` defaults to `./dist`. Records the summary in state. |
 | `urlFor` | pure | `(path: string) => string` | The browser fetch URL for a page path, e.g. `/en/hello/` → `/_data/en/hello/index.json`. |
 | `fileFor` | pure | `(path: string) => string` | The `outDir`-relative file path for a page path, e.g. `/en/hello/` → `_data/en/hello/index.json`. |
@@ -46,12 +46,13 @@ Mounted at `app.data` (type {@link DataProvider}).
 
 ## Configuration
 
-`pluginConfigs.data` — all fields optional (both have defaults). `onInit` validates that `baseUrl` is a non-empty, site-root-relative URL path (must start with `/`).
+`pluginConfigs.data` — all fields optional (all have defaults). `onInit` validates that `baseUrl` is a non-empty, site-root-relative URL path (must start with `/`) and that `preload` is `"none"` or `"all"`.
 
 | Field | Type | Default | Notes |
 |-------|------|---------|-------|
 | `outputDir` | `string` | `"_data"` | WRITE side (Node): output subdir **relative to the build `outDir`** — a filesystem path where `write()` persists the per-page JSON. |
 | `baseUrl` | `string` | `"/_data/"` | READ side (browser): site-root-relative URL the client fetches the per-page JSON from. The URL-space mirror of `outputDir`; keep them consistent (`"/" + trim(outputDir) + "/"`). |
+| `preload` | `"none" \| "all"` | `"none"` | BOTH sides. `"all"`: `write()` also writes `<outputDir>/_all.json`, and the browser fetches it once when idle and fills the `at()` cache. Set the same value in the Node app and the browser app. |
 
 ## Dependencies
 
@@ -71,6 +72,22 @@ The path convention (`convention.ts`):
 | `/en/hello/` | `_data/en/hello/index.json` | `/_data/en/hello/index.json` |
 | `/en/hello` | `_data/en/hello/index.json` | `/_data/en/hello/index.json` (trailing slash normalized) |
 
+### Preload bundle (`preload: "all"`)
+
+Use it for small static sites, where all page data together is small. One file compresses much better than many: on moku-labs.com, 43 pages are 194 KB gzip as 43 files and 122 KB gzip as one file. After that, every SPA navigation reads data from memory.
+
+- **Build.** `write()` also writes **`<outDir>/<outputDir>/_all.json`** = `{ "<page path>": data, ... }`. Keys are the entry paths, the same keys `at(path)` caches under. Page files always end in `/index.json`, so the name never collides. It is written only with `preload: "all"`, so a default build is unchanged. `DataWriteSummary.bundle` reports it; `fileCount`/`bytes` still count page files only.
+- **Browser.** `onStart` waits for an idle main thread (`requestIdleCallback`, `setTimeout` fallback), then fetches `<baseUrl>_all.json` once. It fills the cache for every path not already cached. It skips the fetch when `navigator.connection.saveData` is on. A failed fetch is silent; `at()` keeps fetching single files. `onStop` cancels the idle callback or aborts the fetch.
+- **Both apps.** The Node app and the browser app are configured separately. Set `data: { preload: "all" }` in both. If only the browser sets it, the bundle fetch 404s silently and navigation stays lazy.
+
+```ts
+// src/app.ts (Node build)
+pluginConfigs: { data: { preload: "all" } }
+
+// src/spa.tsx (browser)
+pluginConfigs: { data: { baseUrl: "/_data/", preload: "all" } }
+```
+
 `write()` returns a `DataWriteSummary` — `{ fileCount, bytes, files }` (the `files` paths are `outDir`-relative) — and writes are bounded at concurrency 8 via `p-limit`.
 
 ## Design notes
@@ -81,7 +98,7 @@ The path convention (`convention.ts`):
 - **No format drift.** `urlFor`/`fileFor` derive from one `dataSuffix(path)`, so the written file is exactly the fetched URL.
 - **Node-free read side.** The `node:fs` writer (`writer.ts`) and the `loadJson` Node branch are both behind lazy `import()`; a browser bundle composing `data` pulls zero `node:*` (the writer becomes its own split chunk). The read primitive `loadJson` is the single isomorphic seam — `fetch` in the browser, lazy `node:fs/promises` on Node.
 - **Single switch.** The global `config.mode` (read via `router.mode()`) decides everything: `build` writes when `!== "ssg"`, `spa` data-renders when `!== "ssg"`.
-- **Minimal lifecycle.** `onInit` only (validates `baseUrl`); no `onStart`/`onStop` — the provider holds no long-lived resource. State is a `null` `lastWrite` slot (Node) plus an empty per-path `cache` Map and an empty `pending` Map of in-flight fetches (browser), each populated lazily on first use.
+- **Minimal lifecycle.** `onInit` validates `baseUrl` and `preload`. `onStart`/`onStop` only schedule and cancel the optional preload. State is a `null` `lastWrite` slot (Node) plus an empty per-path `cache` Map and an empty `pending` Map of in-flight fetches (browser), each populated lazily on first use.
 
 ## Files
 
@@ -89,13 +106,14 @@ The path convention (`convention.ts`):
 |------|------|
 | `index.ts` | Wiring — `createPlugin("data", …)` with `config`/`createState`/`onInit`/`api`; no hard `depends`. |
 | `types.ts` | `DataConfig`, `DataProvider`, `DataEntry`, `DataWriteSummary`, `DataState`. |
-| `config.ts` | `defaultDataConfig` (`outputDir` ↔ `baseUrl` defaults agree). |
-| `state.ts` | `createDataState` — `null` `lastWrite` + empty per-path `cache` + empty `pending`. |
-| `convention.ts` | `dataSuffix(path)` + `relativeDataFile(outputDir, path)` — the one pure URL↔file mapping. |
-| `validate.ts` | `validateDataConfig` — `baseUrl` check at `onInit`. |
+| `config.ts` | `defaultDataConfig` (`outputDir` ↔ `baseUrl` defaults agree; `preload: "none"`). |
+| `state.ts` | `createDataState` — `null` `lastWrite` + empty per-path `cache` + empty `pending` + `null` `bundle`/`cancelPreload`. |
+| `convention.ts` | `dataSuffix(path)` + `relativeDataFile(outputDir, path)` — the one pure URL↔file mapping; `BUNDLE_FILE` + `relativeBundleFile(outputDir)` for the preload bundle. |
+| `preload.ts` | `startPreload`/`stopPreload` — browser idle fetch of `_all.json` into the `at()` cache (`preload: "all"`). |
+| `validate.ts` | `validateDataConfig` — `baseUrl` and `preload` checks at `onInit`. |
 | `api.ts` | `dataApi` (+ `DataPluginContext`) — node-free; `write()` (lazy writer) + `at()` (fetch+cache, one request per path in flight) + `urlFor`/`fileFor`. |
 | `load-json.ts` | `loadJson` — internal isomorphic JSON reader (browser `fetch` / lazy `node:fs`); used by `at()`. |
-| `writer.ts` | `writeData` — Node-only per-page writer (`node:fs`, bounded by `p-limit`); imported lazily by `write()`. |
+| `writer.ts` | `writeData` — Node-only per-page writer (`node:fs`, bounded by `p-limit`), plus the `_all.json` bundle with `preload: "all"`; imported lazily by `write()`. |
 
 ---
 

@@ -18,6 +18,13 @@
  */
 
 /**
+ * How the browser loads page data. `"none"` fetches one page file per navigation
+ * (lazy). `"all"` also loads every page's data once, from one bundle file, after
+ * the app starts and the main thread is idle.
+ */
+export type DataPreload = "none" | "all";
+
+/**
  * Configuration for {@link dataPlugin}. All fields have defaults (see `./config`).
  *
  * @example
@@ -37,6 +44,13 @@ export type DataConfig = {
    * path); keep them consistent (`"/" + trim(outputDir) + "/"`). Default `"/_data/"`.
    */
   baseUrl: string;
+  /**
+   * BOTH sides. `"all"`: the Node `write()` also writes one bundle file
+   * `<outputDir>/_all.json` (`{ "<page path>": data }`), and the browser fetches
+   * it once when idle and fills the `at()` cache. Set the same value in the Node
+   * app and the browser app. Default `"none"`: no bundle, lazy per-page fetches.
+   */
+  preload?: DataPreload;
 };
 
 /** One page's data to persist — `build` produces these from its route expansion. */
@@ -55,6 +69,8 @@ export interface DataWriteSummary {
   bytes: number;
   /** The written file paths, relative to the build `outDir`. */
   files: string[];
+  /** The preload bundle, present only when `preload` is `"all"`. Not counted in `fileCount`/`bytes`. */
+  bundle?: { file: string; bytes: number };
 }
 
 /**
@@ -73,6 +89,14 @@ export interface DataState {
    * the fetch settles, on success and on failure, so a failure is never cached.
    */
   pending: Map<string, Promise<unknown | null>>;
+  /**
+   * The preload bundle fetch while it is in flight (browser, `preload: "all"`).
+   * `at()` awaits it before fetching a single file. Never rejects. `null` when no
+   * bundle fetch is running.
+   */
+  bundle: Promise<void> | null;
+  /** Cancels the scheduled idle callback or aborts the bundle fetch. `null` when nothing is scheduled. */
+  cancelPreload: (() => void) | null;
 }
 
 /**
