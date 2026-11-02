@@ -37,7 +37,7 @@ Mounted at `app.data` (type {@link DataProvider}).
 
 | Method | Side | Signature | Notes |
 |--------|------|-----------|-------|
-| `at` | browser | `(path: string) => Promise<unknown \| null>` | Fetch (and cache) the persisted data for a page path from `config.baseUrl`. Returns the raw parsed JSON as `unknown`, used directly as the route's `ctx.data`. Returns `null` if the fetch or JSON parse fails, so `spa` can fall back to HTML. |
+| `at` | browser | `(path: string) => Promise<unknown \| null>` | Fetch (and cache) the persisted data for a page path from `config.baseUrl`. Concurrent calls for one path share one in-flight request; a failure is not cached, so a later call retries. Returns the raw parsed JSON as `unknown`, used directly as the route's `ctx.data`. Returns `null` if the fetch or JSON parse fails, so `spa` can fall back to HTML. |
 | `write` | Node | `(entries: readonly DataEntry[], options?: { outDir?: string }) => Promise<DataWriteSummary>` | Persist one JSON file per entry, keyed by page path via `fileFor`. Called by `build` after it expands routes. Lazily loads its `node:fs` writer. `options.outDir` defaults to `./dist`. Records the summary in state. |
 | `urlFor` | pure | `(path: string) => string` | The browser fetch URL for a page path, e.g. `/en/hello/` → `/_data/en/hello/index.json`. |
 | `fileFor` | pure | `(path: string) => string` | The `outDir`-relative file path for a page path, e.g. `/en/hello/` → `_data/en/hello/index.json`. |
@@ -81,7 +81,7 @@ The path convention (`convention.ts`):
 - **No format drift.** `urlFor`/`fileFor` derive from one `dataSuffix(path)`, so the written file is exactly the fetched URL.
 - **Node-free read side.** The `node:fs` writer (`writer.ts`) and the `loadJson` Node branch are both behind lazy `import()`; a browser bundle composing `data` pulls zero `node:*` (the writer becomes its own split chunk). The read primitive `loadJson` is the single isomorphic seam — `fetch` in the browser, lazy `node:fs/promises` on Node.
 - **Single switch.** The global `config.mode` (read via `router.mode()`) decides everything: `build` writes when `!== "ssg"`, `spa` data-renders when `!== "ssg"`.
-- **Minimal lifecycle.** `onInit` only (validates `baseUrl`); no `onStart`/`onStop` — the provider holds no long-lived resource. State is a `null` `lastWrite` slot (Node) plus an empty per-path `cache` Map (browser), each populated lazily on first use.
+- **Minimal lifecycle.** `onInit` only (validates `baseUrl`); no `onStart`/`onStop` — the provider holds no long-lived resource. State is a `null` `lastWrite` slot (Node) plus an empty per-path `cache` Map and an empty `pending` Map of in-flight fetches (browser), each populated lazily on first use.
 
 ## Files
 
@@ -90,10 +90,10 @@ The path convention (`convention.ts`):
 | `index.ts` | Wiring — `createPlugin("data", …)` with `config`/`createState`/`onInit`/`api`; no hard `depends`. |
 | `types.ts` | `DataConfig`, `DataProvider`, `DataEntry`, `DataWriteSummary`, `DataState`. |
 | `config.ts` | `defaultDataConfig` (`outputDir` ↔ `baseUrl` defaults agree). |
-| `state.ts` | `createDataState` — `null` `lastWrite` + empty per-path `cache`. |
+| `state.ts` | `createDataState` — `null` `lastWrite` + empty per-path `cache` + empty `pending`. |
 | `convention.ts` | `dataSuffix(path)` + `relativeDataFile(outputDir, path)` — the one pure URL↔file mapping. |
 | `validate.ts` | `validateDataConfig` — `baseUrl` check at `onInit`. |
-| `api.ts` | `dataApi` (+ `DataPluginContext`) — node-free; `write()` (lazy writer) + `at()` (fetch+cache) + `urlFor`/`fileFor`. |
+| `api.ts` | `dataApi` (+ `DataPluginContext`) — node-free; `write()` (lazy writer) + `at()` (fetch+cache, one request per path in flight) + `urlFor`/`fileFor`. |
 | `load-json.ts` | `loadJson` — internal isomorphic JSON reader (browser `fetch` / lazy `node:fs`); used by `at()`. |
 | `writer.ts` | `writeData` — Node-only per-page writer (`node:fs`, bounded by `p-limit`); imported lazily by `write()`. |
 
