@@ -89,12 +89,6 @@ export interface DataState {
    * the fetch settles, on success and on failure, so a failure is never cached.
    */
   pending: Map<string, Promise<unknown | null>>;
-  /**
-   * The preload bundle fetch while it is in flight (browser, `preload: "all"`).
-   * `at()` awaits it before fetching a single file. Never rejects. `null` when no
-   * bundle fetch is running.
-   */
-  bundle: Promise<void> | null;
   /** Cancels the scheduled idle callback or aborts the bundle fetch. `null` when nothing is scheduled. */
   cancelPreload: (() => void) | null;
 }

@@ -6,7 +6,7 @@ import { BUNDLE_FILE } from "./convention";
 
 /**
  * Fetches the bundle and caches every path not already cached. Never rejects:
- * a failed fetch leaves lazy `at()` working. Clears the preload slots when done.
+ * a failed fetch leaves lazy `at()` working. Clears `cancelPreload` when done.
  *
  * @param ctx - The data plugin context.
  * @param signal - Aborts the fetch on stop.
@@ -27,7 +27,7 @@ async function fill(ctx: DataPluginContext, signal: AbortSignal): Promise<void> 
     // Silent on purpose.
   } finally {
     // eslint-disable-next-line unicorn/no-null -- nothing in flight
-    ctx.state.bundle = ctx.state.cancelPreload = null;
+    ctx.state.cancelPreload = null;
   }
 }
 
@@ -53,7 +53,7 @@ export function startPreload(ctx: DataPluginContext): void {
   const controller = new AbortController();
   // eslint-disable-next-line jsdoc/require-jsdoc -- inline
   const run = (): void => {
-    ctx.state.bundle = fill(ctx, controller.signal);
+    void fill(ctx, controller.signal);
   };
   const idle = typeof requestIdleCallback === "function";
   const handle = idle ? requestIdleCallback(run, { timeout: 2000 }) : setTimeout(run, 0);
