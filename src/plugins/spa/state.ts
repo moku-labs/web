@@ -8,6 +8,7 @@ import type {
   // eslint-disable-next-line unicorn/prevent-abbreviations -- canonical public type name per spec
   IslandDef,
   IslandInstance,
+  PrefetchMode,
   ResolvedSpaConfig,
   SpaConfig,
   SpaState
@@ -18,6 +19,9 @@ const ERROR_PREFIX = "[web]";
 
 /** Last-resort `swapSelector` when neither config nor defaults supply one. */
 const FALLBACK_SWAP_SELECTOR = "main > section";
+
+/** Every value `spa.prefetch` accepts. */
+const PREFETCH_MODES = new Set<PrefetchMode>([false, "intent", "visible"]);
 
 /**
  * Resolve the `viewTransitions` config value into the default {@link TransitionMode}:
@@ -34,13 +38,33 @@ function resolveDefaultTransition(raw: boolean | TransitionMode): TransitionMode
   return raw;
 }
 
+/**
+ * Validate `spa.prefetch` (spec/11 Part-3 error). An untyped config can carry any value,
+ * so a typo like `"hover"` fails at init instead of silently disabling the preload.
+ *
+ * @param mode - The raw `prefetch` config value (absent ⇒ `false`).
+ * @returns The validated mode.
+ * @throws {Error} When the value is not `false`, `"intent"` or `"visible"`.
+ * @example
+ * resolvePrefetchMode(undefined); // false
+ */
+function resolvePrefetchMode(mode: PrefetchMode = false): PrefetchMode {
+  if (!PREFETCH_MODES.has(mode)) {
+    throw new Error(
+      `${ERROR_PREFIX} spa.prefetch must be false, "intent" or "visible". Got ${JSON.stringify(mode)}.\n  Set spa.prefetch to one of the allowed values, or leave it out.`
+    );
+  }
+  return mode;
+}
+
 /** Default SPA config (declared as a value — no inline assertion). */
 export const defaultSpaConfig: SpaConfig = {
   swapSelector: "main > section",
   viewTransitions: false,
   scrollRestoration: "top",
   progressBar: true,
-  islands: []
+  islands: [],
+  prefetch: false
 };
 
 /**
@@ -69,7 +93,8 @@ function isValidSelector(selector: string): boolean {
  *
  * @param config - The raw spa config to validate.
  * @returns The fully-resolved config with defaults applied.
- * @throws {Error} When `swapSelector` is empty or not a valid CSS selector.
+ * @throws {Error} When `swapSelector` is empty or not a valid CSS selector, or `prefetch`
+ *   is not one of its three values.
  * @example
  * const resolved = resolveSpaConfig({ swapSelector: "main > section" });
  */
@@ -107,7 +132,8 @@ export function resolveSpaConfig(config: SpaConfig): ResolvedSpaConfig {
     defaultTransition,
     scrollRestoration: config.scrollRestoration ?? "top",
     progressBar: config.progressBar ?? true,
-    islands: config.islands ?? []
+    islands: config.islands ?? [],
+    prefetch: resolvePrefetchMode(config.prefetch)
   };
 }
 
@@ -138,6 +164,8 @@ export function createState(_ctx: {
     // eslint-disable-next-line unicorn/no-null -- `navigate` is bound by the kernel at init
     navigate: null,
     // eslint-disable-next-line unicorn/no-null -- `kernel` is `SpaKernel | null` until onInit builds it
-    kernel: null
+    kernel: null,
+    // eslint-disable-next-line unicorn/no-null -- `prefetch` is `Prefetcher | null` until kernel.boot() builds it
+    prefetch: null
   };
 }

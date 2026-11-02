@@ -11,6 +11,7 @@ describe("createState (headless / node)", () => {
     expect(state.destroyRouter).toBeNull();
     expect(state.started).toBe(false);
     expect(state.kernel).toBeNull();
+    expect(state.prefetch).toBeNull();
   });
 });
 
@@ -33,7 +34,8 @@ describe("resolveSpaConfig (headless / node — selector check is permissive)", 
       defaultTransition: "none",
       scrollRestoration: "top",
       progressBar: true,
-      islands: []
+      islands: [],
+      prefetch: false
     });
   });
 
@@ -58,5 +60,21 @@ describe("resolveSpaConfig (headless / node — selector check is permissive)", 
   it("carries the scrollRestoration default through (top), overridable to preserve", () => {
     expect(resolveSpaConfig({}).scrollRestoration).toBe("top");
     expect(resolveSpaConfig({ scrollRestoration: "preserve" }).scrollRestoration).toBe("preserve");
+  });
+});
+
+describe("resolveSpaConfig — prefetch", () => {
+  // Bug: opting in does nothing, because the resolver drops a valid mode.
+  it("keeps the intent and visible modes", () => {
+    expect(resolveSpaConfig({ prefetch: "intent" }).prefetch).toBe("intent");
+    expect(resolveSpaConfig({ prefetch: "visible" }).prefetch).toBe("visible");
+  });
+
+  // Bug: a typo silently disables the feature.
+  it('throws the Part-3 error on prefetch: "hover"', () => {
+    const config = { prefetch: "hover" } as unknown as Parameters<typeof resolveSpaConfig>[0];
+    expect(() => resolveSpaConfig(config)).toThrow(
+      '[web] spa.prefetch must be false, "intent" or "visible". Got "hover".\n  Set spa.prefetch to one of the allowed values, or leave it out.'
+    );
   });
 });

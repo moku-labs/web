@@ -7,8 +7,21 @@ import type { Log } from "@moku-labs/common";
 import type { EmitFn as EmitFunction } from "@moku-labs/core";
 import type { Api as HeadApi } from "../head/types";
 import type { RouterApi, ScrollMode, TransitionMode } from "../router/types";
+import type { Prefetcher } from "./prefetch";
 
 export type { ScrollMode, TransitionMode } from "../router/types";
+
+/**
+ * When the spa preloads a linked page's HTML before the tap (`spa.prefetch`):
+ * - `false` — never; the page is fetched on click, as without the option;
+ * - `"intent"` — on `pointerdown` / `touchstart` at once, or after 65 ms of mouse hover;
+ * - `"visible"` — as `"intent"`, plus every link that enters the viewport, drained in idle
+ *   time with at most 2 preloads in flight.
+ *
+ * @example
+ * createApp({ pluginConfigs: { spa: { prefetch: "visible" } } });
+ */
+export type PrefetchMode = false | "intent" | "visible";
 
 /** Per-navigation options for the programmatic navigators (`ctx.navigate` / `app.spa.navigate`). */
 export interface NavigateOptions {
@@ -120,6 +133,12 @@ export type SpaConfig = {
    * Defaults to an empty array.
    */
   islands?: IslandDef[];
+  /**
+   * Preload a linked page's HTML before the tap, so the swap does not wait for the network.
+   * A preload is used once, lives 30 s, and is skipped with save-data on, on a 2G connection,
+   * and for a route the client DATA path renders. Defaults to `false` (fetch on click only).
+   */
+  prefetch?: PrefetchMode;
 };
 
 /** Resolved SPA config after defaults are applied. */
@@ -136,6 +155,8 @@ export interface ResolvedSpaConfig {
   progressBar: boolean;
   /** Pre-registered islands. */
   islands: IslandDef[];
+  /** The validated preload mode (`false` ⇒ no preload listeners at all). */
+  prefetch: PrefetchMode;
 }
 
 /**
@@ -583,6 +604,11 @@ export interface SpaState {
   navigate: ((path: string, options?: NavigateOptions) => void) | null;
   /** The single shared SPA kernel instance (null until onInit builds it). */
   kernel: SpaKernel | null;
+  /**
+   * The live HTML preloader, built by `kernel.boot()` when `spa.prefetch` is not `false`.
+   * Null before boot, after stop or `hardNavigate`, and when the mode is `false`.
+   */
+  prefetch: Prefetcher | null;
 }
 
 /** Public API of the spa plugin (registration / control surface). */

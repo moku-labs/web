@@ -24,6 +24,8 @@ export default defineConfig([
     // entry exists to avoid. The `.` entry stays dual (esm+cjs) for Node consumers.
     entry: { browser: "src/browser.ts" },
     format: ["esm"],
+    // JSDoc stays in browser.d.mts for editors; the shipped bundle drops it (check:bundle budget).
+    outputOptions: { comments: { legal: true, annotation: true, jsdoc: false } },
     dts: true,
     clean: false,
     sourcemap: false,

@@ -158,9 +158,10 @@ export function isInternalLink(url: URL): boolean {
 /**
  * The navigable path of a URL or Location: pathname plus query string. The query
  * is part of page identity (the kernel's `currentUrl` is pathname + search), so
- * same-page checks, history entries, fetches, and scroll keys must all carry it —
- * comparing pathnames alone would treat `/search?q=a` → `/search?q=b` as same-page
- * and the History fallback would drop the query from the address bar.
+ * same-page checks, history entries, fetches, scroll keys and the preload cache key
+ * must all carry it — comparing pathnames alone would treat `/search?q=a` →
+ * `/search?q=b` as same-page and the History fallback would drop the query from the
+ * address bar. The hash is not part of it.
  *
  * @param target - The URL or Location to read.
  * @param target.pathname - The path component.
@@ -169,7 +170,7 @@ export function isInternalLink(url: URL): boolean {
  * @example
  * pathWithSearch(new URL("https://x.dev/search?q=a")); // "/search?q=a"
  */
-function pathWithSearch(target: { pathname: string; search: string }): string {
+export function pathWithSearch(target: { pathname: string; search: string }): string {
   return target.pathname + target.search;
 }
 
@@ -205,16 +206,35 @@ export function restoreScrollPosition(path: string): void {
 }
 
 /**
- * Fetch a page and hand its HTML to the handlers; on any error fall back to a
+ * Fetch a page's HTML. The one fetch-and-check shared by navigation and preload
+ * (`prefetch.ts`): a response that is not ok is an error, never HTML to swap in.
+ *
+ * @param pathname - The page path (pathname + search).
+ * @param signal - Aborts the request.
+ * @returns The page HTML.
+ * @throws {Error} When the response is not ok (`HTTP <status>`), or the fetch fails or aborts.
+ * @example
+ * await fetchPage("/about"); // "<!doctype html>…" — rejects with "HTTP 404" on a missing page
+ */
+export async function fetchPage(pathname: string, signal?: AbortSignal): Promise<string> {
+  const response = await (signal ? fetch(pathname, { signal }) : fetch(pathname));
+  if (!response.ok) throw new Error(`HTTP ${String(response.status)}`);
+  return response.text();
+}
+
+/**
+ * Load a page and hand its HTML to the handlers; on any error fall back to a
  * full browser navigation (`location.href = pathname`).
  *
- * When `signal` aborts (this navigation was superseded by a newer one) the
- * fetch is cancelled and NOTHING is applied: no swap (onEnd) and no fallback
- * reload — the live navigation owns the document from that point on.
+ * When `signal` aborts (this navigation was superseded by a newer one) NOTHING is
+ * applied: no swap (onEnd) and no fallback reload — the live navigation owns the
+ * document from that point on.
  *
  * @param pathname - The destination pathname.
  * @param handlers - The navigation lifecycle callbacks.
  * @param signal - Aborts when this navigation is superseded (`navEvent.signal`).
+ * @param load - Where the HTML comes from: {@link fetchPage} by default; the kernel
+ *   passes a loader that serves a preloaded page first (`loadWithPrefetch`).
  * @returns A promise that resolves once the swap (or fallback) is dispatched.
  * @example
  * await performNavigation("/about", handlers, navEvent.signal);
@@ -222,13 +242,12 @@ export function restoreScrollPosition(path: string): void {
 export async function performNavigation(
   pathname: string,
   handlers: RouterHandlers,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  load: (pathname: string, signal?: AbortSignal) => Promise<string> = fetchPage
 ): Promise<void> {
   handlers.onStart(pathname);
   try {
-    const response = await (signal ? fetch(pathname, { signal }) : fetch(pathname));
-    if (!response.ok) throw new Error(`HTTP ${String(response.status)}`);
-    const html = await response.text();
+    const html = await load(pathname, signal);
     // A superseded navigation must never apply its swap: bail before onEnd
     // (swap + head-sync + island teardown) once the browser aborted this nav.
     if (signal?.aborted) return;
@@ -380,6 +399,27 @@ export function swapRegion(
 }
 
 /**
+ * Resolve the internal URL a link leads to, or `undefined` when the SPA leaves it
+ * to the browser (no anchor, `target="_blank"`, another origin, a static asset). The
+ * one link rule shared by the click interceptor and the preloader (`prefetch.ts`).
+ *
+ * @param anchor - The link element, or nothing.
+ * @returns The internal URL, or `undefined`.
+ * @example
+ * resolveLinkTarget(document.querySelector("a[href='/about']"))?.pathname; // "/about"
+ */
+export function resolveLinkTarget(anchor: HTMLAnchorElement | null | undefined): URL | undefined {
+  if (!anchor || anchor.target === "_blank") return undefined;
+  let url: URL;
+  try {
+    url = new URL(anchor.href, location.origin);
+  } catch {
+    return undefined;
+  }
+  return isInternalLink(url) ? url : undefined;
+}
+
+/**
  * Resolve a navigable internal URL from a click event, or `undefined` when the
  * click should not be intercepted (modifier keys, non-anchor, external, new-tab).
  *
@@ -392,15 +432,7 @@ export function resolveClickTarget(event: MouseEvent): URL | undefined {
   const hasModifierKey = event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
   if (hasModifierKey) return undefined;
   if (event.defaultPrevented) return undefined;
-  const anchor = (event.target as Element | null)?.closest("a");
-  if (!anchor || anchor.target === "_blank") return undefined;
-  let url: URL;
-  try {
-    url = new URL(anchor.href, location.origin);
-  } catch {
-    return undefined;
-  }
-  return isInternalLink(url) ? url : undefined;
+  return resolveLinkTarget((event.target as Element | null)?.closest("a"));
 }
 
 /**
