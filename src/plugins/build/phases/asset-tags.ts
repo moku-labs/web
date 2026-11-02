@@ -58,6 +58,23 @@ export function readBundleOutputs(
 }
 
 /**
+ * Read the chunks the JS entry imports statically (publish-root-relative web paths),
+ * recorded by the bundle phase under `js:preload`. Dynamic-import-only chunks are
+ * never in this list.
+ *
+ * @param ctx - Plugin context (provides `state`).
+ * @returns The static chunk paths, or an empty array when absent.
+ * @example
+ * ```ts
+ * readPreloads(ctx); // ["assets/chunk-9f8e.js"]
+ * ```
+ */
+export function readPreloads(ctx: Pick<PhaseContext, "state">): readonly string[] {
+  const entry = ctx.state.buildCache.get("js:preload");
+  return Array.isArray(entry) ? (entry as string[]) : [];
+}
+
+/**
  * Render the stylesheet `<link>` tags for the fingerprinted CSS manifest.
  *
  * @param ctx - Plugin context (provides `state`).
@@ -74,19 +91,28 @@ function buildCssTags(ctx: Pick<PhaseContext, "state">): string {
 }
 
 /**
- * Render the module `<script>` tags for the fingerprinted JS manifest.
+ * Render the module `<script>` tags for the fingerprinted JS manifest, followed by
+ * one `<link rel="modulepreload">` per chunk the entry imports statically. Without
+ * the preloads the browser finds those chunks only after the entry has downloaded
+ * and parsed, a request waterfall that delays hydration.
  *
  * @param ctx - Plugin context (provides `state`).
- * @returns The concatenated `<script type="module">` tags (possibly `""`).
+ * @returns The concatenated `<script type="module">` and modulepreload tags (possibly `""`).
  * @example
  * ```ts
- * buildJsTags(ctx); // '<script type="module" src="/assets/spa-abc123.js"></script>'
+ * buildJsTags(ctx);
+ * // '<script type="module" src="/assets/spa-abc123.js"></script><link rel="modulepreload" href="/assets/chunk-9f8e.js">'
  * ```
  */
 function buildJsTags(ctx: Pick<PhaseContext, "state">): string {
-  return Object.values(readManifest(ctx, "js"))
+  const scripts = Object.values(readManifest(ctx, "js"))
     .map(src => `<script type="module" src="/${src}"></script>`)
     .join("");
+  if (scripts === "") return "";
+  const preloads = readPreloads(ctx)
+    .map(href => `<link rel="modulepreload" href="/${href}">`)
+    .join("");
+  return scripts + preloads;
 }
 
 /**

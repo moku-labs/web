@@ -31,6 +31,8 @@ import type { Config, State } from "../../types";
 const RENDER_SENTINEL = "E2E_RENDER_SENTINEL_1b7c";
 /** Marker that exists ONLY in the lazily imported node-writer fixture module. */
 const WRITER_SENTINEL = "E2E_WRITER_SENTINEL_1b7c";
+/** Marker that exists ONLY in the module shared by the entry and the render chunk. */
+const SHARED_SENTINEL = "E2E_SHARED_SENTINEL_1b7c";
 
 /** The temp fixture project root (removed in afterAll). */
 let projectDir: string;
@@ -40,6 +42,10 @@ let entryCode: string;
 let chunkCodes: string[];
 /** The js asset manifest the bundle phase recorded for the pages phase. */
 let manifest: Record<string, string>;
+/** The static entry chunks the bundle phase recorded for modulepreload. */
+let preloads: string[];
+/** The publish root of the fixture build. */
+let outDirPath: string;
 
 /**
  * Write the fixture client source tree: an entry that lazily imports a render
@@ -49,9 +55,10 @@ let manifest: Record<string, string>;
  * @param clientDir - The fixture's client source directory.
  */
 function writeFixtureSources(clientDir: string): void {
+  writeFileSync(path.join(clientDir, "shared.ts"), `export const shared = "${SHARED_SENTINEL}";\n`);
   writeFileSync(
     path.join(clientDir, "render.ts"),
-    `export function lazyRender(): string {\n  return "${RENDER_SENTINEL}";\n}\n`
+    `import { shared } from "./shared";\nexport function lazyRender(): string {\n  return "${RENDER_SENTINEL}" + shared;\n}\n`
   );
   writeFileSync(
     path.join(clientDir, "writer.ts"),
@@ -67,6 +74,9 @@ function writeFixtureSources(clientDir: string): void {
   writeFileSync(
     path.join(clientDir, "main.ts"),
     [
+      'import { shared } from "./shared";',
+      "export const label = shared;",
+      "",
       "export async function boot(): Promise<string> {",
       '  const { lazyRender } = await import("./render");',
       "  return lazyRender();",
@@ -115,6 +125,8 @@ beforeAll(async () => {
 
   // Output names are content-hashed (`main-<hash>.js`): the manifest's one record is the entry.
   manifest = state.buildCache.get("js") as Record<string, string>;
+  preloads = state.buildCache.get("js:preload") as string[];
+  outDirPath = outDir;
   const entryPath = Object.values(manifest)[0] ?? "";
   const assetsDir = path.join(outDir, "assets");
   const jsFiles = readdirSync(assetsDir).filter(file => file.endsWith(".js"));
@@ -158,5 +170,24 @@ describe("build/phases/bundle — e2e code splitting (real Bun.build)", () => {
     const [name, web] = entries[0] ?? ["", ""];
     expect(name).toMatch(/^main-[\da-z]+\.js$/);
     expect(web).toBe(`assets/${name}`);
+  });
+
+  test("the chunk the entry imports statically is recorded for modulepreload", () => {
+    // Bug caught: the real Bun.build metafile shape is what the preload graph reads.
+    // If Bun stops returning it, or changes its paths, this list goes empty and the
+    // entry -> chunk request waterfall comes back.
+    expect(preloads).toHaveLength(1);
+    const [chunk] = preloads;
+    expect(chunk).toMatch(/^assets\/chunk-[\da-z]+\.js$/);
+    expect(readFileSync(path.join(outDirPath, chunk ?? ""), "utf8")).toContain(SHARED_SENTINEL);
+  });
+
+  test("no dynamic-import-only chunk is recorded for modulepreload", () => {
+    // Bug caught: preloading the lazy render or node-writer chunk on every page.
+    for (const chunk of preloads) {
+      const code = readFileSync(path.join(outDirPath, chunk), "utf8");
+      expect(code).not.toContain(RENDER_SENTINEL);
+      expect(code).not.toContain(WRITER_SENTINEL);
+    }
   });
 });

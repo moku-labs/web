@@ -51,7 +51,7 @@ The surface mounted on `app.build` (and reachable via `ctx.require(buildPlugin)`
 | `sitemap` | `boolean` | `true` | Generate `sitemap.xml` + `robots.txt`. |
 | `images` | `boolean` | `true` | Copy static images + per-article co-located images into the output. |
 | `ogImage` | `OgImageConfig \| false` | `false` | OG-image generation. An object enables + configures it (and requires a `fontDir`); `false` disables it. |
-| `injectAssets` | `boolean?` | `true` | Auto-inject bundled `main.{css,js}` into rendered pages. |
+| `injectAssets` | `boolean?` | `true` | Auto-inject bundled `main.{css,js}` into rendered pages, plus a `<link rel="modulepreload">` for each chunk the client entry imports statically (see below). |
 | `publicDir` | `string?` | `"public"` | Directory copied verbatim into `outDir` (skipped silently if absent). |
 | `notFound` | `boolean \| { body?: string; path?: string }?` | `false` | Emit `outDir/404.html`. `true` = built-in default; `{ body }` = HTML body fragment wrapped in a minimal shell; `{ path }` = complete HTML page file (`path` wins over `body`). In every variant the `<!--moku:assets-->` family of placeholders is substituted with the fingerprinted bundle tags (a 404 page cannot hardcode a hashed bundle URL); a page without placeholders is written byte-for-byte. |
 | `localeRedirects` | `boolean?` | `false` | Emit per-path i18n bare-path redirect HTML pages. |
@@ -75,6 +75,18 @@ written: nothing else from the build machine's environment reaches the bundle.
 // IS_DEVELOPMENT=true bun run build   → the branch ships
 // bun run build                       → the branch and ./cheats are gone
 if (process.env.IS_DEVELOPMENT) void import("./cheats");
+```
+
+**Static entry chunks are preloaded.** With code splitting, the client entry can import shared
+chunks statically. The browser finds those only after the entry has downloaded, so they load
+one round trip late. The bundle phase reads the `Bun.build` metafile, follows the entry's static
+`import` edges (transitively), and the injected JS tags list one `<link rel="modulepreload">` per
+chunk right after the entry `<script>`. Chunks reached only through `import()` stay lazy and get
+no preload. The same tags fill `<!--moku:assets-->` and `<!--moku:assets:js-->`.
+
+```html
+<script type="module" src="/assets/spa-ab12.js"></script>
+<link rel="modulepreload" href="/assets/chunk-cd34.js">
 ```
 
 ### `OgImageConfig`

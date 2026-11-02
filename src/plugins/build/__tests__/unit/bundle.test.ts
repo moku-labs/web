@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { BundleRunner } from "../../phases/bundle";
-import { bundle, envDefines } from "../../phases/bundle";
+import { bundle, envDefines, staticEntryChunks } from "../../phases/bundle";
 import { makeCtx } from "../helpers";
 
 describe("build/phases/bundle", () => {
@@ -236,5 +236,60 @@ describe("build/phases/bundle envDefines", () => {
     vi.stubEnv("MOKU_TEST_SET_FLAG", "yes");
     expect(envDefines(["MOKU_TEST_SET_FLAG"])["process.env.MOKU_TEST_SET_FLAG"]).toBe('"yes"');
     vi.unstubAllEnvs();
+  });
+
+  it("records js:preload from a JSON-string metafile and asks only the JS pass for one", async () => {
+    // Bug caught: some Bun versions return the metafile as a JSON string; reading it as an
+    // object silently dropped every modulepreload.
+    const runner = vi.fn(async (opts: Parameters<BundleRunner>[0]) => ({
+      success: true,
+      outputs: [{ path: `${opts.outdir}/spa-1.js`, kind: "entry-point" }],
+      metafile: JSON.stringify({
+        outputs: {
+          "spa-1.js": {
+            entryPoint: "spa.ts",
+            imports: [{ path: "chunk-a.js", kind: "import-statement" }]
+          },
+          "chunk-a.js": { imports: [] }
+        }
+      })
+    }));
+    const ctx = makeCtx({ config: { outDir: "./dist", minify: true } });
+    await bundle(ctx, { runner, cssEntrypoints: ["styles.css"], jsEntrypoints: ["spa.ts"] });
+    expect(runner.mock.calls.map(call => call[0].metafile)).toEqual([false, true]);
+    expect(ctx.state.buildCache.get("js:preload")).toEqual(["assets/chunk-a.js"]);
+  });
+
+  it("records no preloads when the metafile is absent or unreadable", () => {
+    // Bug caught: a runner without metafile support must degrade to "no preloads", not throw.
+    const outputs = [{ path: "dist/assets/spa-1.js", kind: "entry-point" }];
+    expect(staticEntryChunks({ success: true, outputs }, "dist/assets", "dist")).toEqual([]);
+    expect(
+      staticEntryChunks({ success: true, outputs, metafile: "{not json" }, "dist/assets", "dist")
+    ).toEqual([]);
+  });
+
+  it("follows static imports transitively from the entry", () => {
+    // Bug caught: a static chunk that itself imports another chunk statically left the
+    // second one undiscovered until the first had loaded (a two-step waterfall).
+    const chunks = staticEntryChunks(
+      {
+        success: true,
+        outputs: [{ path: "/abs/dist/assets/spa-1.js", kind: "entry-point" }],
+        metafile: {
+          outputs: {
+            "./spa-1.js": {
+              entryPoint: "spa.ts",
+              imports: [{ path: "./chunk-a.js", kind: "import-statement" }]
+            },
+            "./chunk-a.js": { imports: [{ path: "./chunk-b.js", kind: "import-statement" }] },
+            "./chunk-b.js": { imports: [{ path: "./chunk-a.js", kind: "import-statement" }] }
+          }
+        }
+      },
+      "/abs/dist/assets",
+      "/abs/dist"
+    );
+    expect(chunks).toEqual(["assets/chunk-a.js", "assets/chunk-b.js"]);
   });
 });
