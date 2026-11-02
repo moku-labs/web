@@ -225,6 +225,8 @@ Importing `@moku-labs/web/browser` can **never** drag node/native code into a cl
 bun run check:bundle   # asserts: zero static node/native imports + under the gzip budget
 ```
 
+The shipped `browser.mjs` has no JSDoc comments. This keeps it under the budget. `browser.d.mts` keeps them, so your editor still shows the docs.
+
 ## The route is the contract
 
 A route is a fluent builder. Each step is optional except `render`, and every type flows from it:

@@ -10,7 +10,7 @@ import { i18nPlugin } from "../../../i18n";
 import { defineRoutes, route, routerPlugin } from "../../../router";
 import { sitePlugin } from "../../../site";
 import { spaPlugin } from "../../index";
-import type { SpaApi } from "../../types";
+import type { SpaApi, SpaConfig } from "../../types";
 
 const SITE = {
   name: "SPA Test",
@@ -32,7 +32,8 @@ function makeCore() {
 /** Build a router+head+spa app over happy-dom (site+i18n satisfy head's deps). */
 function makeApp(
   createApp: ReturnType<typeof makeCore>["createApp"],
-  extraPlugins: unknown[] = []
+  extraPlugins: unknown[] = [],
+  spa: SpaConfig = {}
 ) {
   const routes = defineRoutes({
     home: route("/")
@@ -55,7 +56,7 @@ function makeApp(
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
       head: {},
-      spa: { progressBar: false },
+      spa: { progressBar: false, ...spa },
       router: { routes }
     }
   });
@@ -98,7 +99,10 @@ function pushEvent(url: string) {
  * A Navigation API like Chrome's: `history.pushState` fires `navigate` for the new URL before the
  * URL changes.
  */
-function stubChromeNavigation(): { traverse: (url: string) => void } {
+function stubChromeNavigation(): {
+  traverse: (url: string) => void;
+  push: (url: string) => void;
+} {
   const listeners: Array<(event: unknown) => void> = [];
   vi.stubGlobal("navigation", {
     addEventListener: (_type: string, listener: (event: unknown) => void) =>
@@ -119,6 +123,9 @@ function stubChromeNavigation(): { traverse: (url: string) => void } {
   return {
     traverse: url => {
       for (const listener of listeners) listener({ ...pushEvent(url), navigationType: "traverse" });
+    },
+    push: url => {
+      for (const listener of listeners) listener(pushEvent(url));
     }
   };
 }
@@ -348,5 +355,227 @@ describe("spa integration", () => {
     expectTypeOf(app.spa.navigate).parameter(0).toEqualTypeOf<string>();
     expectTypeOf(app.spa.current).returns.toEqualTypeOf<string>();
     expectTypeOf(app.spa.register).parameter(0).toMatchTypeOf<{ name: string }>();
+  });
+});
+
+/** A page with one internal link outside the swap region. */
+const LINKED_PAGE = `<nav><a id="about" href="/about/">About</a></nav><main><section id="page">home</section></main>`;
+
+/**
+ * Stub `fetch` to serve the About page, a fresh response per call.
+ *
+ * @returns The spy that counts the page requests.
+ */
+function serveAbout() {
+  const fetchSpy = vi.fn((_path: string, _init?: RequestInit) =>
+    Promise.resolve(new Response(pageHtml("About", "about content"), { status: 200 }))
+  );
+  vi.stubGlobal("fetch", fetchSpy);
+  return fetchSpy;
+}
+
+/**
+ * Dispatch an event on the About link, the way the browser does under a tap or the mouse.
+ *
+ * @param type - The event type: `pointerdown`, `touchstart` or `mouseover`.
+ */
+function onLink(type: string): void {
+  const link = document.querySelector("#about");
+  if (!link) throw new Error("no #about link");
+  const event =
+    type === "mouseover"
+      ? new MouseEvent(type, { bubbles: true })
+      : new Event(type, { bubbles: true });
+  link.dispatchEvent(event);
+}
+
+/** Click the About link (the History fallback intercepts it). */
+function clickLink(): void {
+  document
+    .querySelector("#about")
+    ?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+}
+
+/**
+ * Wait longer than the 65 ms hover delay, so a hover preload would have started.
+ *
+ * @returns A promise that resolves after the wait.
+ */
+function pastHoverDelay(): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, 100));
+}
+
+/** Every IntersectionObserver built while the stub is on (emptied before each test). */
+const observers: FakeObserver[] = [];
+
+/** A stand-in IntersectionObserver that keeps the elements it watches. */
+class FakeObserver {
+  readonly observed = new Set<Element>();
+
+  constructor() {
+    observers.push(this);
+  }
+
+  /**
+   * Watch an element.
+   *
+   * @param target - The element.
+   */
+  observe(target: Element): void {
+    this.observed.add(target);
+  }
+
+  /**
+   * Stop watching an element.
+   *
+   * @param target - The element.
+   */
+  unobserve(target: Element): void {
+    this.observed.delete(target);
+  }
+
+  /** Stop watching every element. */
+  disconnect(): void {
+    this.observed.clear();
+  }
+}
+
+/**
+ * Build a router+head+spa app with a probe that counts `spa:navigated`.
+ *
+ * @param spa - The spa config under test.
+ * @returns The app and the list of navigated URLs.
+ */
+function makeProbedApp(spa: SpaConfig): { app: ReturnType<typeof makeApp>; navigated: string[] } {
+  const { createApp, createPlugin } = makeCore();
+  const navigated: string[] = [];
+  const probe = createPlugin("spa-probe", {
+    depends: [spaPlugin],
+    hooks: () => ({
+      "spa:navigated": (payload: { url: string }) => {
+        navigated.push(payload.url);
+      }
+    })
+  });
+  return { app: makeApp(createApp, [probe], spa), navigated };
+}
+
+describe("spa prefetch integration", () => {
+  beforeEach(() => {
+    history.replaceState(undefined, "", "/");
+    document.body.innerHTML = LINKED_PAGE;
+    observers.length = 0;
+  });
+
+  afterEach(async () => {
+    await app?.stop().catch(() => {});
+    vi.unstubAllGlobals();
+  });
+
+  // Bug: the Navigation API path ignores the cache and fetches the page a second time on the tap.
+  it('prefetch "intent", Navigation API: a pointerdown then the tap make one request', async () => {
+    const navigation = stubChromeNavigation();
+    const probed = makeProbedApp({ prefetch: "intent" });
+    app = probed.app;
+    await app.start();
+    const fetchSpy = serveAbout();
+
+    onLink("pointerdown");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    navigation.push("/about/"); // the browser's navigate event for the tap
+    await vi.waitFor(() =>
+      expect(document.querySelector("#page")?.textContent).toBe("about content")
+    );
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("/about/");
+    expect(document.title).toBe("About");
+    expect(probed.navigated).toEqual(["/about/"]);
+  });
+
+  // Bug: the History fallback (no Navigation API) skips the cache and fetches the page again.
+  it('prefetch "intent", History fallback: a pointerdown then the click make one request', async () => {
+    vi.stubGlobal("navigation", undefined);
+    const probed = makeProbedApp({ prefetch: "intent" });
+    app = probed.app;
+    await app.start();
+    const fetchSpy = serveAbout();
+
+    onLink("pointerdown");
+    clickLink();
+    await vi.waitFor(() =>
+      expect(document.querySelector("#page")?.textContent).toBe("about content")
+    );
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("/about/");
+    expect(location.pathname).toBe("/about/");
+    expect(probed.navigated).toEqual(["/about/"]);
+  });
+
+  // Bug: preload listeners or the viewport observer survive onStop and keep fetching pages.
+  it('prefetch "visible": after app.stop() no preload listener or observer is left', async () => {
+    vi.stubGlobal("navigation", undefined);
+    vi.stubGlobal("IntersectionObserver", FakeObserver);
+    const { createApp } = makeCore();
+    app = makeApp(createApp, [], { prefetch: "visible" });
+    await app.start();
+    const fetchSpy = serveAbout();
+    expect(observers[0]?.observed.size).toBe(1);
+
+    await app.stop();
+    onLink("pointerdown");
+    onLink("touchstart");
+    onLink("mouseover");
+    await pastHoverDelay();
+
+    expect(observers[0]?.observed.size).toBe(0);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  // Bug: the default turns preloading on, so a site that never opted in sends extra requests.
+  it("prefetch left out: hover and press fetch nothing, the click fetches once as before", async () => {
+    vi.stubGlobal("navigation", undefined);
+    vi.stubGlobal("IntersectionObserver", FakeObserver);
+    const { createApp } = makeCore();
+    app = makeApp(createApp);
+    await app.start();
+    const fetchSpy = serveAbout();
+
+    onLink("pointerdown");
+    onLink("touchstart");
+    onLink("mouseover");
+    await pastHoverDelay();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    clickLink();
+    await vi.waitFor(() =>
+      expect(document.querySelector("#page")?.textContent).toBe("about content")
+    );
+
+    expect(observers).toHaveLength(0);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledWith("/about/", { signal: expect.any(AbortSignal) });
+  });
+
+  // Bug: SpaConfig.prefetch widened to `string`, so a typo like "hover" compiles.
+  it("type-level: spa.prefetch rejects a value that is not a PrefetchMode", () => {
+    const { createApp } = makeCore();
+    // Never called: the typo would throw the [web] spa.prefetch error at init.
+    const withTypo = () =>
+      createApp({
+        plugins: [sitePlugin, i18nPlugin, routerPlugin, headPlugin, spaPlugin],
+        pluginConfigs: {
+          site: SITE,
+          i18n: { locales: ["en"], defaultLocale: "en" },
+          router: { routes: defineRoutes({ home: route("/").render(() => undefined as never) }) },
+          spa: {
+            // @ts-expect-error not a PrefetchMode
+            prefetch: "hover"
+          }
+        }
+      });
+    expectTypeOf(withTypo).toBeFunction();
   });
 });

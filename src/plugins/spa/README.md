@@ -67,6 +67,35 @@ Every navigation entry point (Navigation API, History fallback, `navigate()`) fu
 
 `spa` stays `depends: [router, head]` and imports neither `data` nor its types — it captures the `data` reader at init via a structural by-name `ctx.require` (only when `ctx.has("data")`) and drives the matched route's handlers structurally.
 
+### Preloading
+
+`spa.prefetch` loads a linked page's HTML before the tap. The swap then does not wait for the network.
+
+```ts
+createApp({ pluginConfigs: { spa: { prefetch: "visible" } } });
+```
+
+| Mode | A preload starts |
+|---|---|
+| `false` (default) | Never. No listeners, no observer. The page is fetched on click. |
+| `"intent"` | On `pointerdown` or `touchstart` on a link: at once. On mouse hover: after 65 ms. Leaving the link earlier cancels it. |
+| `"visible"` | As `"intent"`, plus when a link enters the viewport. These wait for idle time. At most 2 run at once. |
+
+The rules. The numbers are fixed, not config:
+
+- A preload is used once. The navigation takes it out of the cache.
+- A preload lives 30 s. An older one is dropped and the page is fetched again.
+- The cache holds 20 pages. A new preload drops the oldest one.
+- No preload with Save-Data on, or on a `2g` or `slow-2g` connection. This is checked at every preload.
+- Only pages the HTML path renders. A route the client DATA path renders is never preloaded.
+- Only links the click interceptor takes: same origin, not `target="_blank"`, not a static asset. Also not a `download` link and not the current page.
+- A failed preload is dropped. The navigation then fetches the page once, as without preloading.
+- A preload is not a navigation. It emits no event.
+
+Why not `<link rel="prefetch">`: sites serve HTML with `Cache-Control: max-age=0, must-revalidate`. The browser revalidates a prefetched page on the tap, so it saves nothing. `spa` keeps the HTML in memory instead.
+
+`app.stop()` removes the listeners, disconnects the observer and aborts the preloads in flight.
+
 ## Configuration
 
 `pluginConfigs.spa` — all fields optional; defaults are applied and validated in `onInit`.
@@ -74,14 +103,16 @@ Every navigation entry point (Navigation API, History fallback, `navigate()`) fu
 | Field | Type | Default | Notes |
 |---|---|---|---|
 | `swapSelector` | `string` | `"main > section"` | CSS selector for the DOM region replaced on each navigation. |
-| `viewTransitions` | `boolean` | `false` | Opt-in `document.startViewTransition` wrapping; instant swap when unsupported or under `prefers-reduced-motion`. |
+| `viewTransitions` | `boolean \| TransitionMode` | `false` | Opt-in `document.startViewTransition` wrapping. `true` is `"crossfade"`, `false` is `"none"`. Instant swap when unsupported or under `prefers-reduced-motion`. |
 | `progressBar` | `boolean` | `true` | Toggle the in-house top progress bar shown during navigation. |
 | `islands` | `IslandDef[]` | `[]` | Islands to auto-register at init (in addition to runtime `register`). |
+| `prefetch` | `false \| "intent" \| "visible"` | `false` | Preload a linked page's HTML before the tap. See [Preloading](#preloading). |
 
 **Validation (`onInit`, Part-3 errors):**
 
 - `swapSelector` must be a non-empty string and a syntactically valid CSS selector — otherwise an actionable `[web] spa.swapSelector …` error is thrown.
 - `islands` entries must each pass `createIsland` validation (every hook key in `ISLAND_HOOK_NAMES`; every hook value a function).
+- `prefetch` must be `false`, `"intent"` or `"visible"`. Otherwise `[web] spa.prefetch must be false, "intent" or "visible". Got "hover".` is thrown.
 
 ## Dependencies
 
@@ -162,6 +193,7 @@ Head-sync re-applies the composed `<head>` from the fetched document — title, 
 | `islands.ts` | `createIsland`, instance mount/unmount, hook dispatch, `script#__DATA__` extraction. |
 | `head.ts` | Client head-sync over `head`'s composition (`syncHead`). |
 | `progress.ts` | In-house top progress bar (`createProgressBar`). |
+| `prefetch.ts` | The HTML preload cache (`createPrefetcher`, `loadWithPrefetch`): press, hover and viewport triggers, the 30 s / 20-entry cache. |
 | `render.ts` | Lazy-loaded Preact render layer (`renderVNode`) — its own chunk, reached only on the DATA path. |
 | `lifecycle.ts` | `onStop` closure capture/dispose (`captureTeardown`/`disposeSpa`). |
 | `state.ts` | `createState`, `defaultSpaConfig`, `resolveSpaConfig` (validation). |
