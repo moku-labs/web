@@ -22,11 +22,37 @@ import type { DataConfig, DataEntry, DataProvider, DataState, DataWriteSummary }
  * ```
  */
 export type DataPluginContext = {
-  /** Mutable plugin state (last write summary + per-path fetch cache). */
+  /** Mutable plugin state (last write summary, per-path fetch cache, in-flight fetches). */
   state: DataState;
   /** Resolved plugin configuration. */
   config: DataConfig;
 };
+
+/**
+ * Fetches one path's data, caches it on success, and always clears the path's
+ * in-flight entry. Never rejects: a failed fetch or JSON parse resolves `null`
+ * and caches nothing, so a later `at(path)` retries.
+ *
+ * @param ctx - The data plugin context.
+ * @param path - The page URL path (e.g. `/en/hello/`).
+ * @returns The page's raw data, or `null` on failure.
+ * @example
+ * ```ts
+ * const raw = await fetchAndCache(ctx, "/en/hello/");
+ * ```
+ */
+async function fetchAndCache(ctx: DataPluginContext, path: string): Promise<unknown | null> {
+  try {
+    const data = await loadJson<unknown>(`${ctx.config.baseUrl}${dataSuffix(path)}`);
+    ctx.state.cache.set(path, data);
+    return data;
+  } catch {
+    // eslint-disable-next-line unicorn/no-null -- "fetch or JSON parse failed → fall back" signal
+    return null;
+  } finally {
+    ctx.state.pending.delete(path);
+  }
+}
 
 /**
  * Builds the data provider — the agnostic bridge. `write()` is the Node persist
@@ -46,6 +72,7 @@ export function dataApi(ctx: DataPluginContext): DataProvider {
   return {
     /**
      * READ (browser) — fetch (and cache) the persisted data for a page path.
+     * Concurrent calls for one path share one in-flight request.
      * Returns the raw JSON as `unknown`, which the route uses directly as `ctx.data`
      * (no route `.parse()`); returns `null` if the fetch or JSON parse fails (so
      * `spa` can fall back to HTML).
@@ -59,14 +86,12 @@ export function dataApi(ctx: DataPluginContext): DataProvider {
      */
     async at(path: string): Promise<unknown | null> {
       if (ctx.state.cache.has(path)) return ctx.state.cache.get(path);
-      try {
-        const data = await loadJson<unknown>(`${ctx.config.baseUrl}${dataSuffix(path)}`);
-        ctx.state.cache.set(path, data);
-        return data;
-      } catch {
-        // eslint-disable-next-line unicorn/no-null -- "fetch or JSON parse failed → fall back" signal
-        return null;
-      }
+      const inFlight = ctx.state.pending.get(path);
+      if (inFlight) return inFlight;
+
+      const request = fetchAndCache(ctx, path);
+      ctx.state.pending.set(path, request);
+      return request;
     },
     /**
      * WRITE (Node) — persist one JSON file per entry, keyed by page path. Called by

@@ -67,6 +67,12 @@ export interface DataState {
   lastWrite: DataWriteSummary | null;
   /** Per-path fetched data, cached after the first `at(path)` (browser). */
   cache: Map<string, unknown>;
+  /**
+   * Per-path fetches still in flight (browser). A second `at(path)` awaits the
+   * same promise instead of starting another request. The entry is removed when
+   * the fetch settles, on success and on failure, so a failure is never cached.
+   */
+  pending: Map<string, Promise<unknown | null>>;
 }
 
 /**
