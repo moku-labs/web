@@ -37,7 +37,7 @@ Mounted at `app.data` (type {@link DataProvider}).
 
 | Method | Side | Signature | Notes |
 |--------|------|-----------|-------|
-| `at` | browser | `(path: string) => Promise<unknown \| null>` | Fetch (and cache) the persisted data for a page path from `config.baseUrl`. Concurrent calls for one path share one in-flight request. While a preload bundle is in flight, it waits for the bundle first and fetches the single file only if the bundle lacks the path; a failure is not cached, so a later call retries. Returns the raw parsed JSON as `unknown`, used directly as the route's `ctx.data`. Returns `null` if the fetch or JSON parse fails, so `spa` can fall back to HTML. |
+| `at` | browser | `(path: string) => Promise<unknown \| null>` | Fetch (and cache) the persisted data for a page path from `config.baseUrl`. Concurrent calls for one path share one in-flight request. It never waits for an in-flight preload bundle: an uncached path is fetched at once. A failure is not cached, so a later call retries. Returns the raw parsed JSON as `unknown`, used directly as the route's `ctx.data`. Returns `null` if the fetch or JSON parse fails, so `spa` can fall back to HTML. |
 | `write` | Node | `(entries: readonly DataEntry[], options?: { outDir?: string }) => Promise<DataWriteSummary>` | Persist one JSON file per entry, keyed by page path via `fileFor`. Called by `build` after it expands routes. Lazily loads its `node:fs` writer. `options.outDir` defaults to `./dist`. Records the summary in state. |
 | `urlFor` | pure | `(path: string) => string` | The browser fetch URL for a page path, e.g. `/en/hello/` → `/_data/en/hello/index.json`. |
 | `fileFor` | pure | `(path: string) => string` | The `outDir`-relative file path for a page path, e.g. `/en/hello/` → `_data/en/hello/index.json`. |
@@ -78,6 +78,7 @@ Use it for small static sites, where all page data together is small. One file c
 
 - **Build.** `write()` also writes **`<outDir>/<outputDir>/_all.json`** = `{ "<page path>": data, ... }`. Keys are the entry paths, the same keys `at(path)` caches under. Page files always end in `/index.json`, so the name never collides. It is written only with `preload: "all"`, so a default build is unchanged. `DataWriteSummary.bundle` reports it; `fileCount`/`bytes` still count page files only.
 - **Browser.** `onStart` waits for an idle main thread (`requestIdleCallback`, `setTimeout` fallback), then fetches `<baseUrl>_all.json` once. It fills the cache for every path not already cached. It skips the fetch when `navigator.connection.saveData` is on. A failed fetch is silent; `at()` keeps fetching single files. `onStop` cancels the idle callback or aborts the fetch.
+- **`at()` never waits for the bundle.** While the bundle is in flight, `at(path)` for an uncached path fetches the single file at once. Waiting would make a click right after load slower than no preload: on moku-labs.com (slow 4G, CPU x6, 103 KB bundle) 855 ms vs 653 ms. The fill never overwrites a path that is already cached.
 - **Both apps.** The Node app and the browser app are configured separately. Set `data: { preload: "all" }` in both. If only the browser sets it, the bundle fetch 404s silently and navigation stays lazy.
 
 ```ts
@@ -107,7 +108,7 @@ pluginConfigs: { data: { baseUrl: "/_data/", preload: "all" } }
 | `index.ts` | Wiring — `createPlugin("data", …)` with `config`/`createState`/`onInit`/`api`; no hard `depends`. |
 | `types.ts` | `DataConfig`, `DataProvider`, `DataEntry`, `DataWriteSummary`, `DataState`. |
 | `config.ts` | `defaultDataConfig` (`outputDir` ↔ `baseUrl` defaults agree; `preload: "none"`). |
-| `state.ts` | `createDataState` — `null` `lastWrite` + empty per-path `cache` + empty `pending` + `null` `bundle`/`cancelPreload`. |
+| `state.ts` | `createDataState` — `null` `lastWrite` + empty per-path `cache` + empty `pending` + `null` `cancelPreload`. |
 | `convention.ts` | `dataSuffix(path)` + `relativeDataFile(outputDir, path)` — the one pure URL↔file mapping; `BUNDLE_FILE`, the preload bundle name. |
 | `preload.ts` | `startPreload`/`stopPreload` — browser idle fetch of `_all.json` into the `at()` cache (`preload: "all"`). |
 | `validate.ts` | `validateDataConfig` — `baseUrl` and `preload` checks at `onInit`. |

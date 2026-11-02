@@ -46,10 +46,9 @@ function stubIdle(): void {
   vi.stubGlobal("cancelIdleCallback", (handle: number) => clearTimeout(handle));
 }
 
-/** Wait until the scheduled idle callback has run and the bundle has settled. */
-async function settle(state: DataState): Promise<void> {
+/** Wait a few macrotasks: the idle callback runs and stubbed fetches settle. */
+async function tick(): Promise<void> {
   await new Promise(resolve => setTimeout(resolve, 5));
-  await state.bundle;
 }
 
 afterEach(() => {
@@ -67,7 +66,7 @@ describe("data preload: 'all' fills the cache from one bundle", () => {
     const { ctx, state } = makeCtx(ALL);
 
     startPreload(ctx);
-    await settle(state);
+    await tick();
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(fetchSpy.mock.calls[0]?.[0]).toBe("/_data/_all.json");
@@ -88,7 +87,7 @@ describe("data preload: 'all' fills the cache from one bundle", () => {
     state.cache.set("/en/a/", fresh);
 
     startPreload(ctx);
-    await settle(state);
+    await tick();
 
     expect(state.cache.get("/en/a/")).toBe(fresh);
   });
@@ -102,10 +101,10 @@ describe("data preload: 'all' fills the cache from one bundle", () => {
     const { ctx, state } = makeCtx(NONE);
 
     startPreload(ctx);
-    await settle(state);
+    await tick();
 
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(state.bundle).toBeNull();
+    expect(state.cancelPreload).toBeNull();
   });
 
   // Bug: a user who asked the browser to save data still downloads every page.
@@ -114,10 +113,10 @@ describe("data preload: 'all' fills the cache from one bundle", () => {
     const fetchSpy = serveBundle();
     vi.stubGlobal("fetch", fetchSpy);
     vi.stubGlobal("navigator", { connection: { saveData: true } });
-    const { ctx, state } = makeCtx(ALL);
+    const { ctx } = makeCtx(ALL);
 
     startPreload(ctx);
-    await settle(state);
+    await tick();
 
     expect(fetchSpy).not.toHaveBeenCalled();
   });
@@ -137,10 +136,10 @@ describe("data preload: 'all' fills the cache from one bundle", () => {
     const { ctx, state } = makeCtx(ALL);
 
     startPreload(ctx);
-    await settle(state);
+    await tick();
 
     expect(state.cache.size).toBe(0);
-    expect(state.bundle).toBeNull();
+    expect(state.cancelPreload).toBeNull();
     expect(await dataApi(ctx).at("/en/a/")).toEqual({ single: "/_data/en/a/index.json" });
   });
 
@@ -151,46 +150,61 @@ describe("data preload: 'all' fills the cache from one bundle", () => {
     const { ctx, state } = makeCtx(ALL);
 
     startPreload(ctx);
-    await settle(state);
+    await tick();
 
     expect(state.cache.get("/en/a/")).toEqual({ a: 1 });
   });
 });
 
 describe("data preload: at() while the bundle is in flight", () => {
-  // Bug: a navigation during the bundle download starts its own request for a
-  // page the bundle is about to bring, so the page is downloaded twice.
-  it("awaits the bundle instead of fetching the single file", async () => {
+  // Bug: a click right after load waits for the whole bundle download
+  // (855 ms vs 653 ms with no preload on slow 4G). at() must fetch the
+  // single file at once and resolve before the bundle does.
+  it("starts the single-file fetch at once and resolves before the bundle", async () => {
     stubIdle();
     const { fetchSpy, release } = gatedBundle();
     vi.stubGlobal("fetch", fetchSpy);
     const { ctx, state } = makeCtx(ALL);
 
     startPreload(ctx);
-    await new Promise(resolve => setTimeout(resolve, 5));
-    expect(state.bundle).not.toBeNull();
+    await tick();
+    expect(fetchSpy).toHaveBeenCalledWith("/_data/_all.json", expect.anything());
 
     const read = dataApi(ctx).at("/en/a/");
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy.mock.calls[1]?.[0]).toBe("/_data/en/a/index.json");
+    expect(await read).toEqual({ single: "/_data/en/a/index.json" });
+    expect(state.cancelPreload).not.toBeNull();
+
     release();
-    expect(await read).toEqual({ a: 1 });
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    await tick();
+    expect(state.cache.get("/en/a/")).toEqual({ single: "/_data/en/a/index.json" });
+    expect(state.cache.get("/en/b/")).toEqual({ b: 2 });
+    expect(state.pending.size).toBe(0);
   });
 
-  // Bug: a path missing from the bundle returns null and the page falls back
-  // to a full HTML load.
-  it("falls back to the single file for a path the bundle lacks", async () => {
+  // Bug: a single file that lands after the bundle fill throws, or leaves a
+  // stale pending entry, so the next at() for that path hangs or refetches.
+  it("a single file that finishes after the fill still resolves and clears pending", async () => {
     stubIdle();
-    const { fetchSpy, release } = gatedBundle();
+    const { promise: slow, resolve: releaseSingle } = Promise.withResolvers<void>();
+    const fetchSpy = vi.fn(async (url: string) => {
+      if (url === "/_data/_all.json") return Response.json(BUNDLE, { status: 200 });
+      await slow;
+      return Response.json({ single: url }, { status: 200 });
+    });
     vi.stubGlobal("fetch", fetchSpy);
     const { ctx, state } = makeCtx(ALL);
 
     startPreload(ctx);
-    await new Promise(resolve => setTimeout(resolve, 5));
-    expect(state.bundle).not.toBeNull();
+    const read = dataApi(ctx).at("/en/a/");
+    await tick();
+    expect(state.cache.get("/en/a/")).toEqual({ a: 1 });
 
-    const read = dataApi(ctx).at("/en/new/");
-    release();
-    expect(await read).toEqual({ single: "/_data/en/new/index.json" });
+    releaseSingle();
+    expect(await read).toEqual({ single: "/_data/en/a/index.json" });
+    expect(state.pending.size).toBe(0);
+    expect(await dataApi(ctx).at("/en/a/")).toEqual(state.cache.get("/en/a/"));
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 });
@@ -202,11 +216,11 @@ describe("data preload: stop", () => {
     stubIdle();
     const fetchSpy = serveBundle();
     vi.stubGlobal("fetch", fetchSpy);
-    const { ctx, state } = makeCtx(ALL);
+    const { ctx } = makeCtx(ALL);
 
     startPreload(ctx);
     stopPreload(ctx);
-    await settle(state);
+    await tick();
 
     expect(fetchSpy).not.toHaveBeenCalled();
   });
@@ -228,13 +242,13 @@ describe("data preload: stop", () => {
     const { ctx, state } = makeCtx(ALL);
 
     startPreload(ctx);
-    await new Promise(resolve => setTimeout(resolve, 5));
-    const inFlight = state.bundle;
+    await tick();
+    expect(seenSignal).toBeDefined();
     stopPreload(ctx);
-    await inFlight;
+    await tick();
 
     expect(seenSignal?.aborted).toBe(true);
     expect(state.cache.size).toBe(0);
-    expect(state.bundle).toBeNull();
+    expect(state.cancelPreload).toBeNull();
   });
 });
