@@ -27,6 +27,7 @@ import {
   unmountAll,
   unmountPageSpecific
 } from "./islands";
+import { createPrefetcher, loadWithPrefetch } from "./prefetch";
 import { createProgressBar, type ProgressBar } from "./progress";
 import {
   attachRouter,
@@ -79,6 +80,24 @@ export function registerIsland(state: SpaState, island: IslandDef): void {
 function currentLocationUrl(): string {
   if (typeof document === "undefined") return "";
   return location.pathname + location.search;
+}
+
+/**
+ * Whether a navigation to `path` renders from fetched HTML, so a preload of it is used.
+ *
+ * @param deps - The router and the optional data reader.
+ * @param path - The page path (pathname + search).
+ * @returns False when the client DATA path renders the page.
+ * @example
+ * usesHtml({ router, head }, "/en/about/"); // true: no data reader, every page is HTML
+ */
+function usesHtml(deps: SpaKernelDeps, path: string): boolean {
+  // Mirrors `resolveDataRender` without its fetch: ssg mode, no route with a `render`, or a
+  // route that is not client-only while no `data` reader is composed.
+  if (deps.router.mode() === "ssg") return true;
+  const route = deps.router.match(path.split("?")[0] ?? path)?.route;
+  if (!route?._handlers.render) return true;
+  return !isClientOnlyRoute(deps.router.mode(), route) && !deps.dataAt;
 }
 
 /**
@@ -269,6 +288,9 @@ export function createSpaKernel(
         const routeSlice = islandRouteContext(pathname);
         scanAndMount(state, emit, resolved.swapSelector, routeSlice);
         notifyNavEnd(state, routeSlice);
+        // Here, not after swapRegion: with view transitions the swap runs later, inside
+        // startViewTransition, and the new links exist only from this point.
+        state.prefetch?.observe();
       },
       applyPendingScroll
     );
@@ -440,6 +462,7 @@ export function createSpaKernel(
       renderVNode(vnode, region);
       scanAndMount(state, emit, resolved.swapSelector, routeSlice);
       notifyNavEnd(state, routeSlice);
+      state.prefetch?.observe();
     };
     runSwap(renderAndMount, pendingTransition, applyPendingScroll);
 
@@ -494,12 +517,14 @@ export function createSpaKernel(
     const resolvedRender = await resolveDataRender(pathname);
     if (resolvedRender === false) {
       scanAndMount(state, emit, resolved.swapSelector, routeSlice);
+      state.prefetch?.observe();
       return;
     }
     const { vnode, region } = resolvedRender;
     const { renderVNode } = await import("./render");
     renderVNode(vnode, region);
     scanAndMount(state, emit, resolved.swapSelector, routeSlice);
+    state.prefetch?.observe();
   };
 
   /**
@@ -537,7 +562,11 @@ export function createSpaKernel(
     if (deps.router.mode() !== "ssg" && (await tryDataRender(pathname, signal))) return;
     // Superseded while the DATA path resolved — never start the HTML fallback.
     if (signal?.aborted) return;
-    await performNavigation(pathname, handlers, signal);
+    // Serve a preloaded page first (`spa.prefetch`). The one funnel of the Navigation API path,
+    // the History fallback and programmatic navigation, so all three use the cache.
+    await performNavigation(pathname, handlers, signal, (path, loadSignal) =>
+      loadWithPrefetch(state.prefetch, path, loadSignal)
+    );
   };
 
   /**
@@ -625,6 +654,13 @@ export function createSpaKernel(
         },
         () => pushingOwnUrl
       );
+      if (resolved.prefetch !== false) {
+        state.prefetch = createPrefetcher({
+          mode: resolved.prefetch,
+          // eslint-disable-next-line jsdoc/require-jsdoc -- binds the HTML-path check to these deps
+          usesHtml: path => usesHtml(deps, path)
+        });
+      }
 
       // Initial island mount. In spa mode a client-only route (dynamic, no `.generate()`) was NOT
       // pre-rendered — the host served a fallback shell — so client-render the matched route from the
@@ -636,6 +672,7 @@ export function createSpaKernel(
         void bootRender(state.currentUrl);
       } else {
         scanAndMount(state, emit, resolved.swapSelector, islandRouteContext(state.currentUrl));
+        state.prefetch?.observe();
       }
       state.started = true;
     },
@@ -677,6 +714,9 @@ export function createSpaKernel(
       state.destroyRouter?.();
       // eslint-disable-next-line unicorn/no-null -- `destroyRouter` is `(() => void) | null`
       state.destroyRouter = null;
+      state.prefetch?.dispose();
+      // eslint-disable-next-line unicorn/no-null -- `prefetch` is `Prefetcher | null`
+      state.prefetch = null;
       location.assign(url);
     },
     /**
@@ -698,6 +738,9 @@ export function createSpaKernel(
       state.destroyRouter?.();
       // eslint-disable-next-line unicorn/no-null -- `destroyRouter` is `(() => void) | null`; nulled to mirror onStart
       state.destroyRouter = null;
+      state.prefetch?.dispose();
+      // eslint-disable-next-line unicorn/no-null -- `prefetch` is `Prefetcher | null`
+      state.prefetch = null;
       unmountAll(state, emit);
       progress = undefined;
       state.started = false;

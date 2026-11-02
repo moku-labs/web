@@ -5,7 +5,10 @@ import type { Api as HeadApi } from "../../../head/types";
 import type { RouteDefinition, RouterApi } from "../../../router/types";
 import { createSpaKernel, resolveSpaConfig } from "../../kernel";
 import { createState } from "../../state";
-import type { SpaKernelDeps, SpaState } from "../../types";
+import type { SpaKernel, SpaKernelDeps, SpaState } from "../../types";
+
+/** happy-dom's own Location: several tests below swap `globalThis.location` for a stub. */
+const happyLocation = globalThis.location;
 
 /** A router stub with the given mode + match result. */
 function makeRouter(
@@ -117,7 +120,8 @@ describe("resolveSpaConfig", () => {
       defaultTransition: "none",
       scrollRestoration: "top",
       progressBar: true,
-      islands: []
+      islands: [],
+      prefetch: false
     });
   });
 
@@ -752,5 +756,252 @@ describe("kernel navigation — superseded navigation (navEvent.signal)", () => 
 
     kernel.dispose();
     vi.unstubAllGlobals();
+  });
+});
+
+/** A stand-in IntersectionObserver; the returned `observe` spy is what the tests read. */
+function stubObserver(): ReturnType<typeof vi.fn> {
+  const observe = vi.fn();
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      observe = observe;
+      unobserve = vi.fn();
+      disconnect = vi.fn();
+    }
+  );
+  return observe;
+}
+
+/** The `href` of every anchor handed to the observer, in order. */
+function observedHrefs(observe: ReturnType<typeof vi.fn>): (string | null)[] {
+  return observe.mock.calls.map(call => (call[0] as Element).getAttribute("href"));
+}
+
+/** Press the element the way a finger or a mouse button does. */
+function pointerdown(selector: string): void {
+  document.querySelector(selector)?.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+}
+
+/** A route that matches but has no `render`: navigation to it always fetches HTML. */
+const routeWithoutRender = { pattern: "/x/", _meta: {}, _handlers: {} } as RouteDefinition;
+
+/** One row of the HTML-path table: the deps a navigation sees, and the preloads one press makes. */
+interface HtmlPathCase {
+  name: string;
+  router: RouterApi;
+  dataAt: boolean;
+  fetches: number;
+}
+
+const htmlPathCases: HtmlPathCase[] = [
+  { name: "ssg mode", router: makeRouter("ssg", makeDataRoute()), dataAt: true, fetches: 1 },
+  {
+    name: "a route with no render",
+    router: makeRouter("hybrid", routeWithoutRender),
+    dataAt: true,
+    fetches: 1
+  },
+  {
+    name: "a client-only route",
+    router: makeSpaRouter(makeClientOnlyRoute(), "abc"),
+    dataAt: false,
+    fetches: 0
+  },
+  {
+    name: "no data reader",
+    router: makeRouter("hybrid", makeDataRoute()),
+    dataAt: false,
+    fetches: 1
+  },
+  { name: "a data reader", router: makeRouter("hybrid", makeDataRoute()), dataAt: true, fetches: 0 }
+];
+
+describe("kernel — prefetch", () => {
+  const kernels: SpaKernel[] = [];
+
+  /** Init and boot a kernel that `afterEach` disposes. */
+  function boot(kernel: SpaKernel): SpaKernel {
+    kernels.push(kernel);
+    kernel.init();
+    kernel.boot();
+    return kernel;
+  }
+
+  beforeEach(() => {
+    Object.defineProperty(globalThis, "location", { value: happyLocation, configurable: true });
+    history.replaceState({}, "", "/");
+    document.body.innerHTML = `<main><section id="page"><a id="link" href="/next/">next</a></section></main>`;
+  });
+
+  afterEach(() => {
+    for (const kernel of kernels.splice(0)) kernel.dispose();
+    Reflect.deleteProperty(document, "startViewTransition");
+    vi.unstubAllGlobals();
+  });
+
+  // Bug: consumers who did not opt in get preload requests.
+  it("the default boots no preloader; hover and pointerdown fetch nothing", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const { state, kernel } = setup();
+    boot(kernel);
+
+    expect(state.prefetch).toBeNull();
+    document.querySelector("#link")?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    pointerdown("#link");
+    await new Promise(resolve => setTimeout(resolve, 80));
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  // Bug: preload listeners stay on document after app.stop().
+  it("dispose() drops the preloader and its listeners", () => {
+    const fetchSpy = vi.fn(() => new Promise<Response>(() => {}));
+    vi.stubGlobal("fetch", fetchSpy);
+    const { state, kernel } = setup({ prefetch: "intent" });
+    boot(kernel);
+    expect(state.prefetch).not.toBeNull();
+
+    kernel.dispose();
+    expect(state.prefetch).toBeNull();
+    pointerdown("#link");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  // Bug: preload listeners keep fetching while the page unloads for a hard navigation.
+  it("hardNavigate() drops the preloader and its listeners", () => {
+    const fetchSpy = vi.fn(() => new Promise<Response>(() => {}));
+    vi.stubGlobal("fetch", fetchSpy);
+    const { state, kernel } = setup({ prefetch: "intent" });
+    boot(kernel);
+
+    const assign = vi.fn();
+    Object.defineProperty(globalThis, "location", {
+      value: { assign, origin: happyLocation.origin, pathname: "/", search: "" },
+      configurable: true
+    });
+    kernel.hardNavigate("/signin/");
+    Object.defineProperty(globalThis, "location", { value: happyLocation, configurable: true });
+
+    expect(assign).toHaveBeenCalledWith("/signin/");
+    expect(state.prefetch).toBeNull();
+    pointerdown("#link");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  // Bug: the navigation ignores the preload and fetches the page a second time.
+  it("a navigation after pointerdown swaps the preloaded page with one fetch", async () => {
+    const html = `<main><section id="page">next page</section></main>`;
+    const fetchSpy = vi.fn(() => Promise.resolve(new Response(html, { status: 200 })));
+    vi.stubGlobal("fetch", fetchSpy);
+    const { emit, kernel } = setup({ prefetch: "intent" });
+    boot(kernel);
+
+    pointerdown("#link");
+    kernel.processNav("/next/");
+    await vi.waitFor(() => expect(emit).toHaveBeenCalledWith("spa:navigated", { url: "/next/" }));
+    expect(document.querySelector("#page")?.textContent).toBe("next page");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  // Bug: HTML is preloaded for a route the DATA path renders, or not for one it cannot.
+  it.each(htmlPathCases)("$name: one pointerdown makes $fetches preload(s)", ({
+    router,
+    dataAt,
+    fetches
+  }) => {
+    document.body.innerHTML = `<header><a id="link" href="/b/xyz/">x</a></header><main><section id="page">old</section></main>`;
+    const fetchSpy = vi.fn(() => new Promise<Response>(() => {}));
+    vi.stubGlobal("fetch", fetchSpy);
+    const head = makeHead();
+    const kernelDeps: SpaKernelDeps = dataAt
+      ? { router, head, dataAt: vi.fn(() => Promise.resolve({})) }
+      : { router, head };
+    const state = createState({ global: {}, config: {} });
+    boot(createSpaKernel(state, { prefetch: "intent" }, vi.fn(), kernelDeps));
+
+    pointerdown("#link");
+    expect(fetchSpy).toHaveBeenCalledTimes(fetches);
+  });
+
+  // Bug: with view transitions on, visible mode watches the old page's links instead of the new ones.
+  it("visible + crossfade: boot watches the served links, a navigation the new page's links", async () => {
+    const observe = stubObserver();
+    const html = `<main><section id="page"><a id="after" href="/after/">after</a></section></main>`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(new Response(html, { status: 200 })))
+    );
+    const startViewTransition = vi.fn((update: () => void) => {
+      queueMicrotask(update);
+      return { finished: Promise.resolve(), ready: Promise.resolve() };
+    });
+    Object.defineProperty(document, "startViewTransition", {
+      value: startViewTransition,
+      configurable: true
+    });
+    const { kernel } = setup({ prefetch: "visible", viewTransitions: "crossfade" });
+    boot(kernel);
+    expect(observedHrefs(observe)).toEqual(["/next/"]);
+
+    kernel.processNav("/next/");
+    await vi.waitFor(() => expect(observedHrefs(observe)).toContain("/after/"));
+    expect(startViewTransition).toHaveBeenCalled();
+  });
+
+  // Bug: visible mode is dead after a navigation the DATA path rendered.
+  it("visible: links on a DATA-rendered page reach the observer", async () => {
+    const observe = stubObserver();
+    const route = {
+      pattern: "/{lang:?}/{slug}/",
+      _meta: {},
+      _handlers: { render: () => h("a", { href: "/rendered/" }, "rendered") }
+    } as RouteDefinition;
+    const router = {
+      mode: () => "hybrid",
+      match: (path: string) =>
+        path === "/en/hello/" ? { params: { lang: "en" }, route } : undefined
+    } as unknown as RouterApi;
+    const emit = vi.fn();
+    const dataAt = vi.fn(() => Promise.resolve({ title: "T" }));
+    const state = createState({ global: {}, config: {} });
+    const kernel = boot(
+      createSpaKernel(state, { prefetch: "visible" }, emit, { router, head: makeHead(), dataAt })
+    );
+
+    kernel.processNav("/en/hello/");
+    await vi.waitFor(() =>
+      expect(emit).toHaveBeenCalledWith("spa:navigated", { url: "/en/hello/" })
+    );
+    expect(document.querySelector("#page")?.textContent).toBe("rendered");
+    expect(observedHrefs(observe)).toContain("/rendered/");
+  });
+
+  // Bug: visible mode is dead on a deep-linked client-only page (rendered at boot, or, without a
+  // swap region in the served shell, mounted as served).
+  it.each([
+    {
+      name: "rendered into the swap region",
+      body: `<main><section id="page">shell</section></main>`
+    },
+    { name: "served without a swap region", body: `<header><a href="/elsewhere/">x</a></header>` }
+  ])("visible: links on a client-only page $name at boot reach the observer", async ({ body }) => {
+    document.body.innerHTML = body;
+    const observe = stubObserver();
+    const route = {
+      pattern: "/b/{id}/",
+      _meta: {},
+      _handlers: { render: () => h("a", { href: "/elsewhere/" }, "elsewhere") }
+    } as RouteDefinition;
+    const router = {
+      mode: () => "spa",
+      match: (path: string) =>
+        path.startsWith("/b/") ? { params: { id: "abc" }, route } : undefined
+    } as unknown as RouterApi;
+    history.replaceState({}, "", "/b/abc/");
+    const state = createState({ global: {}, config: {} });
+    boot(createSpaKernel(state, { prefetch: "visible" }, vi.fn(), { router, head: makeHead() }));
+
+    await vi.waitFor(() => expect(observedHrefs(observe)).toContain("/elsewhere/"));
   });
 });

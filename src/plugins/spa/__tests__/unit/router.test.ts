@@ -635,6 +635,24 @@ describe("performNavigation", () => {
     expect(hrefSetter).not.toHaveBeenCalled();
   });
 
+  // Bug: the navigation ignores a preloaded page and fetches it again.
+  it("swaps the HTML of an injected load and never calls fetch", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const onEnd = vi.fn();
+    const controller = new AbortController();
+    const load = vi.fn(() => Promise.resolve("<p>preloaded</p>"));
+    await performNavigation(
+      "/page",
+      { onStart() {}, onEnd, onError() {} },
+      controller.signal,
+      load
+    );
+    expect(load).toHaveBeenCalledWith("/page", controller.signal);
+    expect(onEnd).toHaveBeenCalledWith("<p>preloaded</p>", "/page");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("calls onError when the response is not ok", async () => {
     const onError = vi.fn();
     const hrefSetter = vi.fn();
