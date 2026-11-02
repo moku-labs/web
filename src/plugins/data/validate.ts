@@ -20,21 +20,6 @@ function isInvalidBaseUrl(baseUrl: unknown): boolean {
 }
 
 /**
- * Reports whether a `preload` value is invalid: unset, `"none"` and `"all"` are valid.
- *
- * @param preload - The candidate `preload` value to check.
- * @returns `true` when `preload` is set to anything other than `"none"` or `"all"`.
- * @example
- * ```ts
- * isInvalidPreload("all"); // false
- * isInvalidPreload("al"); // true
- * ```
- */
-function isInvalidPreload(preload: unknown): boolean {
-  return preload !== undefined && preload !== "none" && preload !== "all";
-}
-
-/**
  * Validates the resolved data config: the browser `baseUrl` must be a non-empty,
  * site-root-relative URL path, and `preload` must be `"none"` or `"all"`.
  *
@@ -51,10 +36,10 @@ export function validateDataConfig(config: DataConfig): void {
       `[web] data.baseUrl: must be a site-root-relative URL path starting with "/" (e.g. "/_data/").`
     );
   }
-  if (isInvalidPreload(config.preload)) {
+  const { preload } = config;
+  if (preload !== undefined && preload !== "none" && preload !== "all") {
     throw new Error(
-      `[web] data.preload: must be "none" or "all" (got ${JSON.stringify(config.preload)}).\n` +
-        `  Set pluginConfigs.data.preload to "all" in the Node app and the browser app, or remove it.`
+      `[web] data.preload: must be "none" or "all".\n  Set it to "all" in both apps, or remove it.`
     );
   }
 }

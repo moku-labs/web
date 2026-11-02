@@ -108,7 +108,7 @@ pluginConfigs: { data: { baseUrl: "/_data/", preload: "all" } }
 | `types.ts` | `DataConfig`, `DataProvider`, `DataEntry`, `DataWriteSummary`, `DataState`. |
 | `config.ts` | `defaultDataConfig` (`outputDir` ↔ `baseUrl` defaults agree; `preload: "none"`). |
 | `state.ts` | `createDataState` — `null` `lastWrite` + empty per-path `cache` + empty `pending` + `null` `bundle`/`cancelPreload`. |
-| `convention.ts` | `dataSuffix(path)` + `relativeDataFile(outputDir, path)` — the one pure URL↔file mapping; `BUNDLE_FILE` + `relativeBundleFile(outputDir)` for the preload bundle. |
+| `convention.ts` | `dataSuffix(path)` + `relativeDataFile(outputDir, path)` — the one pure URL↔file mapping; `BUNDLE_FILE`, the preload bundle name. |
 | `preload.ts` | `startPreload`/`stopPreload` — browser idle fetch of `_all.json` into the `at()` cache (`preload: "all"`). |
 | `validate.ts` | `validateDataConfig` — `baseUrl` and `preload` checks at `onInit`. |
 | `api.ts` | `dataApi` (+ `DataPluginContext`) — node-free; `write()` (lazy writer) + `at()` (fetch+cache, one request per path in flight) + `urlFor`/`fileFor`. |

@@ -1,137 +1,81 @@
 /**
- * @file data plugin — browser preload of every page's data (`preload: "all"`).
- *
- * After the app starts and the main thread is idle, fetch the one bundle file
- * the build wrote (`<baseUrl>_all.json`) and fill the `at()` cache with every
- * path not already cached. Node-free. Does nothing on Node, with `preload:
- * "none"`, or when the user asked the browser to save data. A failed fetch is
- * silent: `at()` keeps fetching single files lazily.
+ * @file data plugin — browser preload of all page data (`preload: "all"`). See README.
  */
 import type { DataPluginContext } from "./api";
 import { BUNDLE_FILE } from "./convention";
 
-/** Upper bound for the idle wait, so a busy page still preloads. */
-const IDLE_TIMEOUT_MS = 2000;
-
 /**
- * Reports whether the user asked the browser to reduce data use.
- *
- * @returns `true` when `navigator.connection.saveData` is on.
- * @example
- * ```ts
- * if (saveDataOn()) return;
- * ```
- */
-function saveDataOn(): boolean {
-  const nav = globalThis.navigator as { connection?: { saveData?: boolean } } | undefined;
-  return nav?.connection?.saveData === true;
-}
-
-/**
- * Runs `task` when the main thread is idle, with a `setTimeout` fallback where
- * `requestIdleCallback` is missing.
- *
- * @param task - The work to run.
- * @returns A function that cancels the scheduled run.
- * @example
- * ```ts
- * const cancel = whenIdle(() => console.log("idle"));
- * ```
- */
-function whenIdle(task: () => void): () => void {
-  if (typeof globalThis.requestIdleCallback === "function") {
-    const handle = globalThis.requestIdleCallback(task, { timeout: IDLE_TIMEOUT_MS });
-    return () => globalThis.cancelIdleCallback(handle);
-  }
-  const timer = setTimeout(task, 0);
-  return () => clearTimeout(timer);
-}
-
-/**
- * Fetches the bundle and caches every path not already cached. Never rejects.
- * Clears the in-flight slot and the cancel hook when it settles.
+ * Fetches the bundle and caches every path not already cached. Never rejects:
+ * a failed fetch leaves lazy `at()` working. Clears the preload slots when done.
  *
  * @param ctx - The data plugin context.
  * @param signal - Aborts the fetch on stop.
- * @returns Resolves once the cache is filled or the fetch failed.
+ * @returns Resolves when the fill is done or failed.
  * @example
  * ```ts
- * await fillFromBundle(ctx, new AbortController().signal);
+ * await fill(ctx, signal);
  * ```
  */
-async function fillFromBundle(ctx: DataPluginContext, signal: AbortSignal): Promise<void> {
+async function fill(ctx: DataPluginContext, signal: AbortSignal): Promise<void> {
   try {
     const response = await fetch(`${ctx.config.baseUrl}${BUNDLE_FILE}`, { signal });
-    if (!response.ok) return;
-    const bundle = (await response.json()) as Record<string, unknown>;
-    if (signal.aborted) return;
+    const bundle = response.ok ? ((await response.json()) as Record<string, unknown>) : {};
     for (const [path, data] of Object.entries(bundle)) {
-      if (!ctx.state.cache.has(path)) ctx.state.cache.set(path, data);
+      if (!signal.aborted && !ctx.state.cache.has(path)) ctx.state.cache.set(path, data);
     }
   } catch {
-    // Silent: a missing or broken bundle leaves lazy at() working.
+    // Silent on purpose.
   } finally {
-    // eslint-disable-next-line unicorn/no-null -- no bundle in flight any more
-    ctx.state.bundle = null;
-    // eslint-disable-next-line unicorn/no-null -- nothing left to cancel
-    ctx.state.cancelPreload = null;
+    // eslint-disable-next-line unicorn/no-null -- nothing in flight
+    ctx.state.bundle = ctx.state.cancelPreload = null;
   }
 }
 
 /**
- * Schedules the bundle preload for `preload: "all"` in a browser. A no-op on
- * Node, with `preload: "none"`, with save-data on, or when already scheduled.
+ * From `onStart`: when idle, fetch `<baseUrl>_all.json` once and fill the cache.
+ * No-op on Node, with `preload: "none"`, with save-data on, or if already scheduled.
  *
  * @param ctx - The data plugin context.
  * @example
  * ```ts
- * startPreload(ctx); // from onStart
+ * startPreload(ctx);
  * ```
  */
 export function startPreload(ctx: DataPluginContext): void {
-  if (ctx.config.preload !== "all") return;
-  if (typeof document === "undefined") return;
-  if (ctx.state.cancelPreload || ctx.state.bundle) return;
-  if (saveDataOn()) return;
+  const nav = globalThis.navigator as { connection?: { saveData?: boolean } } | undefined;
+  const skip =
+    ctx.config.preload !== "all" ||
+    typeof document === "undefined" ||
+    ctx.state.cancelPreload !== null ||
+    nav?.connection?.saveData === true;
+  if (skip) return;
 
   const controller = new AbortController();
-  const abort = controller.abort.bind(controller);
-  const cancelIdle = whenIdle(() => {
-    ctx.state.cancelPreload = abort;
-    ctx.state.bundle = fillFromBundle(ctx, controller.signal);
-  });
-  ctx.state.cancelPreload = cancelAll(cancelIdle, abort);
-}
-
-/**
- * Combines the two cancel steps of a scheduled preload into one hook.
- *
- * @param cancelIdle - Cancels the idle callback.
- * @param abort - Aborts the bundle fetch.
- * @returns One function that runs both.
- * @example
- * ```ts
- * ctx.state.cancelPreload = cancelAll(cancelIdle, abort);
- * ```
- */
-function cancelAll(cancelIdle: () => void, abort: () => void): () => void {
-  return function cancel(): void {
-    cancelIdle();
-    abort();
+  // eslint-disable-next-line jsdoc/require-jsdoc -- inline
+  const run = (): void => {
+    ctx.state.bundle = fill(ctx, controller.signal);
+  };
+  const idle = typeof requestIdleCallback === "function";
+  const handle = idle ? requestIdleCallback(run, { timeout: 2000 }) : setTimeout(run, 0);
+  // eslint-disable-next-line jsdoc/require-jsdoc -- inline
+  ctx.state.cancelPreload = () => {
+    if (idle) cancelIdleCallback(handle as number);
+    else clearTimeout(handle);
+    controller.abort();
   };
 }
 
 /**
- * Cancels a scheduled preload or aborts the bundle fetch in flight.
+ * From `onStop`: cancel the idle callback or abort the bundle fetch.
  *
  * @param ctx - The data plugin context.
  * @example
  * ```ts
- * stopPreload(ctx); // from onStop
+ * stopPreload(ctx);
  * ```
  */
 export function stopPreload(ctx: DataPluginContext): void {
   ctx.state.cancelPreload?.();
-  // eslint-disable-next-line unicorn/no-null -- nothing scheduled any more
+  // eslint-disable-next-line unicorn/no-null -- nothing scheduled
   ctx.state.cancelPreload = null;
 }

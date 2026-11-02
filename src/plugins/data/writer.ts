@@ -15,7 +15,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import pLimit from "p-limit";
 import type { DataPluginContext } from "./api";
-import { relativeBundleFile, relativeDataFile } from "./convention";
+import { BUNDLE_FILE, relativeDataFile } from "./convention";
 import type { DataEntry, DataWriteSummary } from "./types";
 
 /** Default build output root, matching build's default `outDir` ("./dist", build/api.ts). */
@@ -97,7 +97,7 @@ async function writeBundle(
   const bundle: Record<string, unknown> = {};
   for (const entry of entries) bundle[entry.path] = entry.data;
 
-  const file = relativeBundleFile(outputDir);
+  const file = `${outputDir.endsWith("/") ? outputDir.slice(0, -1) : outputDir}/${BUNDLE_FILE}`;
   const filePath = path.join(outDir, file);
   await mkdir(path.dirname(filePath), { recursive: true });
   const body = JSON.stringify(bundle);
