@@ -1,7 +1,8 @@
 /**
  * @file build phase 1 — bundle. Runs `Bun.build` for CSS and JS separately into
  * outDir (honoring `config.minify`) with content-hashed output naming; caches the
- * fingerprinted asset paths for the pages phase and the complete output list for
+ * fingerprinted asset paths for the pages phase, the chunks the JS entry imports
+ * statically (for `<link rel="modulepreload">`), and the complete output list for
  * the cache-headers phase.
  */
 import { existsSync } from "node:fs";
@@ -59,6 +60,35 @@ export type BuildArtifact = {
 };
 
 /**
+ * Structural view of the `Bun.build` metafile (only the output import graph the
+ * bundle phase reads). Output keys and import paths are relative to the bundler
+ * `outdir` (e.g. `"./spa-abc123.js"`, `"./chunk-9f8e.js"`).
+ *
+ * @example
+ * ```ts
+ * const meta: BundleMetafile = {
+ *   outputs: {
+ *     "./spa-abc.js": { entryPoint: "src/spa.ts", imports: [{ path: "./chunk-1.js", kind: "import-statement" }] }
+ *   }
+ * };
+ * ```
+ */
+export type BundleMetafile = {
+  /** Every emitted file, keyed by its outdir-relative path. */
+  readonly outputs: Readonly<
+    Record<
+      string,
+      {
+        /** The source entry this output was built from (entry points and lazy chunks). */
+        readonly entryPoint?: string;
+        /** The other outputs this file imports, with the import kind. */
+        readonly imports?: readonly { readonly path: string; readonly kind: string }[];
+      }
+    >
+  >;
+};
+
+/**
  * Structural view of a `Bun.build` result (the subset the bundle phase reads).
  *
  * @example
@@ -71,6 +101,8 @@ export type BuildRunnerResult = {
   readonly success: boolean;
   /** The produced artifacts (entry points first). */
   readonly outputs: readonly BuildArtifact[];
+  /** The build metafile when requested (an object, or its JSON string in some Bun versions). */
+  readonly metafile?: BundleMetafile | string;
 };
 
 /**
@@ -100,6 +132,8 @@ export type BundleRunner = (options: {
   external: string[];
   /** Global names replaced with constant expressions (see {@link envDefines}). */
   define: Record<string, string>;
+  /** Whether to return the metafile (the JS pass reads its import graph for preloads). */
+  metafile: boolean;
 }) => Promise<BuildRunnerResult>;
 
 /**
@@ -134,10 +168,11 @@ export type BundleOptions = {
  * @param options.naming.asset - Naming template for additional emitted assets.
  * @param options.external - Import/url() globs left unresolved in the output.
  * @param options.define - Global names replaced with constant expressions.
+ * @param options.metafile - Whether to return the build metafile.
  * @returns The structural build result.
  * @example
  * ```ts
- * await defaultRunner({ entrypoints: ["a.css"], outdir: "dist", minify: true, splitting: true, target: "browser", naming: FINGERPRINT_NAMING, external: [], define: {} });
+ * await defaultRunner({ entrypoints: ["a.css"], outdir: "dist", minify: true, splitting: true, target: "browser", naming: FINGERPRINT_NAMING, external: [], define: {}, metafile: false });
  * ```
  */
 async function defaultRunner(options: {
@@ -149,6 +184,7 @@ async function defaultRunner(options: {
   naming: { entry: string; chunk: string; asset: string };
   external: string[];
   define: Record<string, string>;
+  metafile: boolean;
 }): Promise<BuildRunnerResult> {
   const bun = (globalThis as { Bun?: { build: BundleRunner } }).Bun;
   if (!bun) {
@@ -254,6 +290,97 @@ function normalizeAssetPath(absolutePath: string, outDir: string): string {
 }
 
 /**
+ * Parse the runner's metafile into the structural view (object or JSON string).
+ *
+ * @param metafile - The metafile as the runner returned it (possibly absent).
+ * @returns The parsed metafile, or `undefined` when absent or unreadable.
+ * @example
+ * ```ts
+ * parseMetafile('{"outputs":{}}'); // { outputs: {} }
+ * ```
+ */
+function parseMetafile(metafile: BuildRunnerResult["metafile"]): BundleMetafile | undefined {
+  if (typeof metafile !== "string") return metafile;
+  try {
+    return JSON.parse(metafile) as BundleMetafile;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Normalize an outdir-relative output path into one graph key ("./a.js" and "a.js"
+ * are the same file; Windows separators become "/").
+ *
+ * @param file - An outdir-relative output path.
+ * @returns The normalized POSIX key.
+ * @example
+ * ```ts
+ * toKey("./chunk-1.js"); // "chunk-1.js"
+ * ```
+ */
+function toKey(file: string): string {
+  return path.posix.normalize(file.split(path.sep).join("/"));
+}
+
+/**
+ * Collect the chunks the JS entry points import STATICALLY, transitively, from the
+ * metafile import graph. Only `import-statement` edges are followed: a chunk reached
+ * only through a dynamic `import()` stays lazy and is never preloaded. These are the
+ * files the browser would otherwise discover only after the entry finished
+ * downloading (a request waterfall); the pages phase emits one
+ * `<link rel="modulepreload">` per path so they load in parallel with the entry.
+ * The walk starts from the `entry-point` artifacts, not from the metafile: Bun also
+ * tags each lazy chunk with an `entryPoint`, and a lazy chunk may import the entry.
+ *
+ * @param result - The JS pass result (artifacts + metafile; no metafile → no preloads).
+ * @param outdir - The bundler output directory the metafile paths are relative to.
+ * @param outDir - The publish root the web paths are made relative to.
+ * @returns The publish-root-relative paths of the static chunks (entries excluded).
+ * @example
+ * ```ts
+ * staticEntryChunks(result, "dist/assets", "dist"); // ["assets/chunk-9f8e.js"]
+ * ```
+ */
+export function staticEntryChunks(
+  result: BuildRunnerResult,
+  outdir: string,
+  outDir: string
+): string[] {
+  const metafile = parseMetafile(result.metafile);
+  if (!metafile) return [];
+
+  // Static import edges per output, keyed by normalized outdir-relative path.
+  const graph = new Map(
+    Object.entries(metafile.outputs).map(([file, output]) => [
+      toKey(file),
+      (output.imports ?? [])
+        .filter(edge => edge.kind === "import-statement")
+        .map(edge => toKey(edge.path))
+    ])
+  );
+
+  // Start from the real entry points (artifact kind), outdir-relative.
+  const entries = result.outputs
+    .filter(output => output.kind === "entry-point" && output.path.endsWith(".js"))
+    .map(output => toKey(path.relative(path.resolve(outdir), path.resolve(output.path))));
+
+  // Walk static edges transitively; every newly reached output is a chunk to preload.
+  const seen = new Set(entries);
+  const queue = [...entries];
+  const chunks: string[] = [];
+  for (let file = queue.shift(); file !== undefined; file = queue.shift()) {
+    for (const target of graph.get(file) ?? []) {
+      if (seen.has(target)) continue;
+      seen.add(target);
+      queue.push(target);
+      chunks.push(normalizeAssetPath(path.join(outdir, target), outDir));
+    }
+  }
+  return chunks;
+}
+
+/**
  * Run one bundler pass for a single asset kind and record the hashed output
  * paths under `state.buildCache` keyed by the original entry basename. Lazy
  * split chunks are emitted to disk but excluded from the recorded manifest
@@ -305,7 +432,8 @@ async function runOne(
     target: "browser",
     naming: FINGERPRINT_NAMING,
     external: kind === "css" ? [...CSS_EXTERNAL_FONT_GLOBS] : [],
-    define
+    define,
+    metafile: kind === "js"
   });
   if (!result.success) {
     throw new Error(`[web] build.bundle ${kind} build failed`);
@@ -331,6 +459,13 @@ async function runOne(
     `${kind}:outputs`,
     result.outputs.map(output => normalizeAssetPath(output.path, outDir))
   );
+
+  // The chunks the JS entry imports statically, published under `js:preload`: the pages
+  // phase emits a `<link rel="modulepreload">` per chunk so the browser fetches them in
+  // parallel with the entry instead of after it. Dynamic-import-only chunks stay lazy.
+  if (kind === "js") {
+    ctx.state.buildCache.set("js:preload", staticEntryChunks(result, outdir, outDir));
+  }
   ctx.log.debug("build:bundle", { kind, count: result.outputs.length });
 }
 

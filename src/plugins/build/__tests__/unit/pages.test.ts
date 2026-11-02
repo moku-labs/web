@@ -6,6 +6,8 @@ import type { VNode } from "preact";
 import { h } from "preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RouteDefinition, TypedRoute } from "../../../router/types";
+import type { BundleRunner } from "../../phases/bundle";
+import { bundle } from "../../phases/bundle";
 import { renderPages } from "../../phases/pages";
 import { makeCtx } from "../helpers";
 
@@ -51,6 +53,43 @@ function makeEntries(routes: { name: string; pattern: string }[]): () => TypedRo
       match: () => null
     }));
 }
+
+/**
+ * A fake `Bun.build` JS pass shaped like a real split build: the entry imports a
+ * shared chunk statically and a route chunk through `import()`. The route chunk
+ * imports a second shared chunk statically, so that one is dynamic-only too.
+ */
+const splitRunner: BundleRunner = async opts => ({
+  success: true,
+  outputs: [
+    { path: path.join(opts.outdir, "spa-e1.js"), kind: "entry-point" },
+    { path: path.join(opts.outdir, "chunk-static1.js"), kind: "chunk" },
+    { path: path.join(opts.outdir, "chunk-lazy1.js"), kind: "chunk" },
+    { path: path.join(opts.outdir, "chunk-lazydep.js"), kind: "chunk" }
+  ],
+  metafile: {
+    outputs: {
+      "./spa-e1.js": {
+        entryPoint: "src/spa.ts",
+        imports: [
+          { path: "./chunk-lazy1.js", kind: "dynamic-import" },
+          { path: "./chunk-static1.js", kind: "import-statement" }
+        ]
+      },
+      "./chunk-static1.js": { imports: [] },
+      "./chunk-lazy1.js": {
+        entryPoint: "src/route.ts",
+        imports: [
+          // Real Bun shape: a lazy chunk may import the entry back statically.
+          { path: "./spa-e1.js", kind: "import-statement" },
+          { path: "./chunk-static1.js", kind: "import-statement" },
+          { path: "./chunk-lazydep.js", kind: "import-statement" }
+        ]
+      },
+      "./chunk-lazydep.js": { imports: [] }
+    }
+  }
+});
 
 describe("build/phases/pages", () => {
   let tmp: string;
@@ -374,6 +413,46 @@ describe("build/phases/pages", () => {
 
     const html = readFileSync(path.join(tmp, "index.html"), "utf8");
     expect(html).not.toContain("stylesheet");
+  });
+
+  /** Bundle with {@link splitRunner}, render the home page, return its HTML. */
+  async function buildHomeWithSplitChunks(): Promise<string> {
+    const home = makeRoute("/", { render: () => h("h1", {}, "Home") });
+    const ctx = makeCtx({
+      config: { outDir: tmp },
+      requireMap: {
+        router: {
+          mode: () => "ssg",
+          manifest: () => [home],
+          entries: makeEntries([{ name: "home", pattern: "/" }])
+        },
+        i18n: { locales: () => ["en"], defaultLocale: () => "en" },
+        head: { render: () => "" }
+      }
+    });
+    await bundle(ctx, { runner: splitRunner, cssEntrypoints: [], jsEntrypoints: ["src/spa.ts"] });
+    await renderPages(ctx);
+    return readFileSync(path.join(tmp, "index.html"), "utf8");
+  }
+
+  it("emits a modulepreload in <head> for a chunk the entry imports statically", async () => {
+    // Bug caught: the built HTML had only the entry <script>. The browser found the
+    // static chunks after the entry finished downloading (a request waterfall that
+    // delayed island hydration by ~250 ms on slow 4G).
+    const html = await buildHomeWithSplitChunks();
+    const head = html.slice(0, html.indexOf("</head>"));
+    expect(head).toContain(
+      '<script type="module" src="/assets/spa-e1.js"></script><link rel="modulepreload" href="/assets/chunk-static1.js">'
+    );
+  });
+
+  it("emits no modulepreload for a chunk reached only through a dynamic import()", async () => {
+    // Bug caught: preloading every "chunk" output would eagerly fetch route-lazy
+    // code (and its own static deps) on every page, defeating the lazy split.
+    const html = await buildHomeWithSplitChunks();
+    expect(html).not.toContain("chunk-lazy1.js");
+    expect(html).not.toContain("chunk-lazydep.js");
+    expect(html.match(/rel="modulepreload"/g)).toHaveLength(1);
   });
 
   it("fills <!--moku:head/body/assets--> placeholders when a template is configured", async () => {
