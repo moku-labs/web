@@ -72,9 +72,8 @@ export function dataApi(ctx: DataPluginContext): DataProvider {
   return {
     /**
      * READ (browser) — fetch (and cache) the persisted data for a page path.
-     * Concurrent calls for one path share one in-flight request. While a preload
-     * bundle is in flight, it waits for the bundle and fetches the single file
-     * only if the bundle did not bring the path.
+     * Concurrent calls for one path share one in-flight request. It never waits
+     * for an in-flight preload bundle: an uncached path is fetched at once.
      * Returns the raw JSON as `unknown`, which the route uses directly as `ctx.data`
      * (no route `.parse()`); returns `null` if the fetch or JSON parse fails (so
      * `spa` can fall back to HTML).
@@ -88,11 +87,6 @@ export function dataApi(ctx: DataPluginContext): DataProvider {
      */
     async at(path: string): Promise<unknown | null> {
       if (ctx.state.cache.has(path)) return ctx.state.cache.get(path);
-      // A preload bundle in flight will likely bring this path: wait for it first.
-      if (ctx.state.bundle) {
-        await ctx.state.bundle;
-        if (ctx.state.cache.has(path)) return ctx.state.cache.get(path);
-      }
       const inFlight = ctx.state.pending.get(path);
       if (inFlight) return inFlight;
 
