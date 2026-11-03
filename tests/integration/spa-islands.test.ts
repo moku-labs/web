@@ -43,7 +43,9 @@ function makeSpaApp() {
     pluginConfigs: {
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
-      content: { providers: [fileSystemContent({ contentDir: FIXTURE_CONTENT_DIR })] },
+      content: {
+        providers: [fileSystemContent({ contentDir: FIXTURE_CONTENT_DIR, shikiLanguages: ["ts"] })]
+      },
       head: {},
       spa: { progressBar: false, islands: [counter] },
       router: { routes }

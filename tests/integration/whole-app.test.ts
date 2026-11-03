@@ -38,7 +38,9 @@ function bootApp(routes: ReturnType<typeof defineRoutes>, mode: "ssg" | "spa" | 
     pluginConfigs: {
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
-      content: { providers: [fileSystemContent({ contentDir: FIXTURE_CONTENT_DIR })] },
+      content: {
+        providers: [fileSystemContent({ contentDir: FIXTURE_CONTENT_DIR, shikiLanguages: ["ts"] })]
+      },
       router: { routes }
     }
   });
@@ -75,7 +77,11 @@ describe("integration: framework boots (whole app)", () => {
         pluginConfigs: {
           site: SITE,
           router: { routes: defineRoutes({}) },
-          content: { providers: [fileSystemContent({ contentDir: FIXTURE_CONTENT_DIR })] }
+          content: {
+            providers: [
+              fileSystemContent({ contentDir: FIXTURE_CONTENT_DIR, shikiLanguages: ["ts"] })
+            ]
+          }
         }
       })
     ).toThrow(/\[web\]/);

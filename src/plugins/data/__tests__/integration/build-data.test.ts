@@ -42,7 +42,9 @@ async function loadArticles(): Promise<{ bySlug: Map<string, Article>; cards: Ar
     plugins: [i18nPlugin, contentPlugin],
     pluginConfigs: {
       i18n: { locales: ["en"], defaultLocale: "en" },
-      content: { providers: [fileSystemContent({ contentDir: FIXTURE_DIR })] }
+      content: {
+        providers: [fileSystemContent({ contentDir: FIXTURE_DIR, shikiLanguages: ["ts"] })]
+      }
     }
   });
   const bySlug = new Map<string, Article>();
@@ -107,7 +109,9 @@ function makeApp(
     pluginConfigs: {
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
-      content: { providers: [fileSystemContent({ contentDir: FIXTURE_DIR })] },
+      content: {
+        providers: [fileSystemContent({ contentDir: FIXTURE_DIR, shikiLanguages: ["ts"] })]
+      },
       build: { outDir, feeds: false, sitemap: false, images: false, ogImage: false, minify: false },
       router: { routes },
       data
