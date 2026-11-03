@@ -2,10 +2,10 @@
  * @file spa plugin — client head-sync adapter over head's pure compose.
  *
  * The dependency on `head` is structural: `spa` reuses the head plugin's
- * composition (it never forks it). At navigation time the SPA already holds the
- * freshly-fetched document — whose `<head>` was produced by `head.compose` at
- * build time — so head-sync is a faithful re-application of that composed head
- * onto the live document, NOT a second composition implementation.
+ * composition (it never forks it). On the HTML path the SPA holds the
+ * freshly-fetched document, whose `<head>` the build composed; on the DATA path the
+ * kernel composes the same head with `head.render`. Either way head-sync re-applies
+ * that composed head onto the live document, NOT a second composition implementation.
  * @see README.md
  */
 import type { Api as HeadApi } from "../head/types";
@@ -72,13 +72,13 @@ function replaceAllBySelector(selector: string, doc: Document): void {
 }
 
 /**
- * Syncs the live document `<head>` after a navigation from the fetched document
+ * Syncs the live document `<head>` after a navigation from a parsed document
  * (whose head was composed by the `head` plugin). Recomputes
  * title/meta/canonical/JSON-LD/hreflang/`<html lang>` once and applies them.
  * The `head` API is accepted to bind the structural dependency (spec/09 deps).
  *
  * @param _head - The head plugin API (dependency binding; composition reused via the fetched doc).
- * @param doc - The fetched document parsed from the navigated page's HTML.
+ * @param doc - The parsed document: the navigated page's HTML, or its head from `head.render`.
  * @example
  * syncHead(headApi, parsedDoc);
  */

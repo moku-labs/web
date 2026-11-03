@@ -153,8 +153,7 @@ export function createApi(ctx: ApiContext): Api {
 
     /**
      * Resolve the FINAL document title for a route's head config — the same value `render`
-     * emits in its `<title>` element. Pulled by `spa` on the client DATA path so a
-     * client-side navigation's `document.title` matches the SSG output.
+     * emits in its `<title>` element.
      *
      * @param head - The route's head config (may be `undefined` for head-less routes).
      * @returns The final document title string.

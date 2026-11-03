@@ -91,7 +91,7 @@ Helpers (pure, app-free — `helpers`, like `route`/`defineRoutes`): `createUrls
 Pattern syntax: `{name}` required param, `{name:?}` optional, `{lang:?}` is the locale-prefix slot (excluded from specificity). On a `{lang:?}` route the DEFAULT locale is served at BARE paths (see §10); required `{lang}` routes are unchanged.
 
 ### RouterApi (`ctx.require(routerPlugin)` / `app.router`)
-- `match(pathname) => { params, route } | null` — specificity-sorted; most specific wins.
+- `match(pathname) => { params, name, route } | null` — specificity-sorted; most specific wins.
 - `toUrl(name, params) => string` — substitute params; throws on unknown name. Param values are percent-encoded into the URL (and `match` decodes captured groups), so raw values like `"a/b"` or `"café"` round-trip safely.
 - `entries() => readonly TypedRoute[]` — URL-utility view, specificity order.
 - `manifest() => readonly RouteDefinition[]` — full defs with `_handlers` (load/render/head/generate), declaration order (build).

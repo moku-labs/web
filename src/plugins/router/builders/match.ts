@@ -52,7 +52,7 @@ export function createMatchFunction(
  *
  * @param compiled - The compiled routes, sorted by specificity (most specific first).
  * @param pathname - The pathname to match.
- * @returns `{ params, route }` for the first matching route, or `null`.
+ * @returns `{ params, name, route }` for the first matching route, or `null`.
  * @example
  * ```ts
  * matchRoute(compiled, "/en/hello/");
@@ -61,10 +61,10 @@ export function createMatchFunction(
 export function matchRoute(
   compiled: readonly CompiledRoute[],
   pathname: string
-): { params: Record<string, string>; route: RouteDefinition } | null {
+): { params: Record<string, string>; name: string; route: RouteDefinition } | null {
   for (const entry of compiled) {
     const params = entry.matchFn(pathname);
-    if (params) return { params, route: entry.definition };
+    if (params) return { params, name: entry.name, route: entry.definition };
   }
   // eslint-disable-next-line unicorn/no-null -- `match` contract returns `null` when no route matches
   return null;

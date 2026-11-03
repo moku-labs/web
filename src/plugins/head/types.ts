@@ -165,7 +165,8 @@ export type ResolvedRoute = {
  */
 export type Api = {
   /**
-   * Compose the final `<head>` inner HTML for a route. Pulled synchronously by `build`.
+   * Compose the final `<head>` inner HTML for a route. Pulled synchronously by `build`, and by
+   * `spa` for head-sync on client DATA-path navigation.
    *
    * @param route - The resolved route descriptor (incl. its `.head()` HeadConfig).
    * @param data - The page data object passed to the route's loader/render.
@@ -195,7 +196,7 @@ export type Api = {
   /**
    * Resolve the FINAL document title for a route's head config — the same value `render`
    * emits in its `<title>` element (`titleTemplate` applied; a route-pinned `title`-keyed
-   * element wins). Used by `spa` to sync `document.title` on client DATA-path navigation.
+   * element wins).
    *
    * @param head - The route's head config (may be `undefined` for head-less routes).
    * @returns The final document title string.

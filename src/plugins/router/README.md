@@ -44,7 +44,7 @@ Reachable via `app.router` and `ctx.require(routerPlugin)`.
 
 | Method | Signature | Notes |
 |---|---|---|
-| `match` | `(pathname: string) => { params; route: RouteDefinition } \| null` | Scans the specificity-sorted table; the most specific match wins, else `null`. |
+| `match` | `(pathname: string) => { params; name: string; route: RouteDefinition } \| null` | Scans the specificity-sorted table; the most specific match wins, else `null`. |
 | `toUrl` | `(routeName: string, params: Record<string, string>) => string` | Substitutes `{param}` / `{param:?}` into the named route's pattern; throws on an unknown name. |
 | `entries` | `() => readonly TypedRoute[]` | URL-utility view (`pattern`/`name`/`meta` + `toUrl`/`toFile`/`match`), in **specificity** order. |
 | `manifest` | `() => readonly RouteDefinition[]` | Full definitions carrying `_handlers` (load/layout/render/head/generate/toJson/toFile), in **declaration** order — the type-preserving API return `build` consumes. |

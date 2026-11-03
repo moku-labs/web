@@ -441,11 +441,13 @@ export type RouterApi = {
    * Match a pathname against the compiled route table (specificity-sorted).
    *
    * @param pathname - URL pathname, e.g. `/en/hello/`.
-   * @returns `{ params, route }` for the most specific match, or `null` if none.
+   * @returns `{ params, name, route }` for the most specific match, or `null` if none.
    * @example
    * const hit = ctx.require(routerPlugin).match("/en/hello/");
    */
-  match(pathname: string): { params: Record<string, string>; route: RouteDefinition } | null;
+  match(
+    pathname: string
+  ): { params: Record<string, string>; name: string; route: RouteDefinition } | null;
   /**
    * Build a URL for a named route from params.
    *

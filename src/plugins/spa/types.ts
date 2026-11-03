@@ -506,7 +506,7 @@ export type SpaDataReader = (path: string) => Promise<unknown | null>;
 export interface SpaKernelDeps {
   /** Router plugin API — used for client-side route matching (`match`) + the resolved `mode`. */
   router: RouterApi;
-  /** Head plugin API — its pure compose is reused for client head-sync. */
+  /** Head plugin API — `render` composes the head on the DATA path's client head-sync. */
   head: HeadApi;
   /**
    * The OPTIONAL `data` reader. Present only when the `data` plugin is composed.
