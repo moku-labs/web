@@ -8,7 +8,8 @@ const baseOptions: FileSystemContentOptions = {
   trustedContent: false,
   extraRemarkPlugins: [],
   extraRehypePlugins: [],
-  shikiTheme: "github-dark"
+  shikiTheme: "github-dark",
+  shikiLanguages: ["ts"]
 };
 
 /** Render markdown through the node provider's pipeline (exercises ensureProcessor) for the options. */

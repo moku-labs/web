@@ -208,6 +208,7 @@ describe("content/pipeline/mermaid", () => {
       const provider = fileSystemContent({
         contentDir: "./content",
         trustedContent: true,
+        shikiLanguages: ["ts"],
         mermaid: { renderDiagrams }
       });
 
@@ -225,6 +226,7 @@ describe("content/pipeline/mermaid", () => {
       const provider = fileSystemContent({
         contentDir: "./content",
         trustedContent: true,
+        shikiLanguages: ["ts"],
         mermaid: { renderDiagrams: neverRender }
       });
 

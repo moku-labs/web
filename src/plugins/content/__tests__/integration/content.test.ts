@@ -34,7 +34,9 @@ function buildApp(
     plugins: [i18nPlugin, contentPlugin],
     pluginConfigs: {
       i18n,
-      content: { providers: [fileSystemContent({ contentDir: FIXTURE_DIR })] }
+      content: {
+        providers: [fileSystemContent({ contentDir: FIXTURE_DIR, shikiLanguages: ["ts"] })]
+      }
     }
   });
 }
@@ -67,7 +69,9 @@ describe("content plugin integration", () => {
       plugins: [i18nPlugin, contentPlugin, probePlugin],
       pluginConfigs: {
         i18n: { locales: ["en"], defaultLocale: "en" },
-        content: { providers: [fileSystemContent({ contentDir: FIXTURE_DIR })] }
+        content: {
+          providers: [fileSystemContent({ contentDir: FIXTURE_DIR, shikiLanguages: ["ts"] })]
+        }
       }
     });
     await app.content.loadAll();
