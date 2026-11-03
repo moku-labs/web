@@ -22,11 +22,10 @@ function makeRouter(
   } as unknown as RouterApi;
 }
 
-/** Minimal head API stub: `composeTitle` is a pass-through (no template), spy-able per test. */
-function makeHead(composeTitle?: (head?: { title?: string }) => string): HeadApi {
+/** Minimal head API stub: `render` emits the route's title (no template), spy-able per test. */
+function makeHead(render?: (route: { head?: { title?: string } }) => string): HeadApi {
   return {
-    render: () => "",
-    composeTitle: composeTitle ?? (head => head?.title ?? "")
+    render: render ?? (route => `<title>${route.head?.title ?? ""}</title>`)
   } as unknown as HeadApi;
 }
 
@@ -49,7 +48,7 @@ interface DataSetup {
   route?: RouteDefinition | undefined;
   raw?: unknown;
   mode?: "ssg" | "spa" | "hybrid";
-  composeTitle?: (head?: { title?: string }) => string;
+  render?: (route: { head?: { title?: string } }) => string;
 }
 
 /** A kernel wired with the data reader enabled + the given matched route + raw payload. */
@@ -60,7 +59,7 @@ function setupData(options: DataSetup = {}) {
   const dataAt = vi.fn(() => Promise.resolve(raw));
   const deps: SpaKernelDeps = {
     router: makeRouter(options.mode ?? "hybrid", options.route),
-    head: makeHead(options.composeTitle),
+    head: makeHead(options.render),
     dataAt
   };
   const kernel = createSpaKernel(state, {}, emit, deps);
@@ -487,14 +486,16 @@ describe("kernel.processNav — client DATA path (data plugin composed)", () => 
     );
   });
 
-  it("DATA path resolves document.title through head.composeTitle (titleTemplate applied)", async () => {
-    // The raw route title must NOT land in document.title — composeTitle owns the final value
+  it("DATA path resolves document.title through head.render (titleTemplate applied)", async () => {
+    // The raw route title must NOT land in document.title — render owns the final value
     // (template applied; a route-pinned title element wins), matching the SSG <title> output.
-    const composeTitle = vi.fn((head?: { title?: string }) => `${head?.title} — Site`);
+    const render = vi.fn(
+      (route: { head?: { title?: string } }) => `<title>${route.head?.title} — Site</title>`
+    );
     const { emit, kernel } = setupData({
       route: makeDataRoute(),
       raw: { title: "Page 2" },
-      composeTitle
+      render
     });
     kernel.init();
 
@@ -503,7 +504,7 @@ describe("kernel.processNav — client DATA path (data plugin composed)", () => 
       expect(emit).toHaveBeenCalledWith("spa:navigated", { url: "/en/page/" })
     );
 
-    expect(composeTitle).toHaveBeenCalledWith({ title: "Page 2" });
+    expect(render.mock.calls[0]?.[0].head).toEqual({ title: "Page 2" });
     expect(document.title).toBe("Page 2 — Site");
   });
 

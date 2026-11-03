@@ -9,6 +9,7 @@
 
 import { dataPlugin } from "../data";
 import { headPlugin } from "../head";
+import type { ResolvedRoute } from "../head/types";
 import { routerPlugin } from "../router";
 import { isClientOnlyRoute } from "../router/iso-match";
 import type {
@@ -101,25 +102,41 @@ function usesHtml(deps: SpaKernelDeps, path: string): boolean {
 }
 
 /**
- * Apply the matched route's `head` config to the live document (minimal client
- * head-sync for the DATA path: title only — the full meta sync runs on the
- * HTML-over-fetch path from the fetched `<head>`). The title is resolved through
- * `head.composeTitle` — the SAME composition `render` uses (`titleTemplate` applied;
- * a route-pinned `title` element wins) — so a client-side navigation's
- * `document.title` matches the SSG output instead of the raw route title.
+ * Apply the matched route's `head` config to the live document on the DATA path.
+ * Composes the page's head through `head.render` (the SAME composition the build
+ * wrote into the page's HTML) and hands it to {@link syncHead}, so title, meta,
+ * canonical, JSON-LD, hreflang and `<html lang>` follow exactly the HTML path.
  *
- * @param head - The head plugin API (resolves the final templated title).
+ * @param head - The head plugin API (composes the page's head).
+ * @param pathname - The destination pathname.
+ * @param name - The matched route's name (builds the canonical and hreflang URLs).
  * @param route - The matched route definition.
  * @param routeContext - The render context (params/data/locale).
  * @example
- * syncDataHead(deps.head, hit.route, { params, data, locale });
+ * syncDataHead(deps.head, "/en/hello/", hit.name, hit.route, { params, data, locale });
  */
 function syncDataHead(
   head: SpaKernelDeps["head"],
+  pathname: string,
+  name: string,
   route: RouteDefinition,
   routeContext: RouteContext<RouteState>
 ): void {
-  document.title = head.composeTitle(route._handlers.head?.(routeContext));
+  // The same route descriptor the build's pages phase composes from.
+  const resolved: ResolvedRoute = {
+    path: pathname,
+    name,
+    params: routeContext.params,
+    locale: routeContext.locale
+  };
+  const headConfig = route._handlers.head?.(routeContext);
+  if (headConfig) resolved.head = headConfig;
+
+  // A document shaped like a fetched page, so both navigation paths share one sync.
+  const html = head.render(resolved, routeContext.data);
+  const doc = new DOMParser().parseFromString(`<head>${html}</head>`, "text/html");
+  doc.documentElement.lang = routeContext.locale;
+  syncHead(head, doc);
 }
 
 /**
@@ -348,6 +365,8 @@ export function createSpaKernel(
     route: RouteDefinition;
     /** The Preact VNode produced by the route's own `render`. */
     vnode: ReturnType<NonNullable<RouteDefinition["_handlers"]["render"]>>;
+    /** The matched route's name (builds the canonical and hreflang URLs in head-sync). */
+    name: string;
     /** The render context (params/data/locale/url) reused for head-sync. */
     routeContext: RouteContext<RouteState>;
     /** The live swap-region element the VNode renders into. */
@@ -409,7 +428,7 @@ export function createSpaKernel(
     const region = document.querySelector(resolved.swapSelector);
     if (!region) return false;
 
-    return { route: hit.route, vnode, routeContext, region };
+    return { route: hit.route, name: hit.name, vnode, routeContext, region };
   };
 
   /**
@@ -435,14 +454,14 @@ export function createSpaKernel(
 
     // The nav was already announced by `navigate` (before the data fetch); here just lazy-load
     // the Preact render layer on demand.
-    const { route, vnode, routeContext, region } = resolvedRender;
+    const { route, name, vnode, routeContext, region } = resolvedRender;
     const { renderVNode } = await import("./render");
 
     // Re-check after the async import: the abort can also land while it loads.
     if (signal?.aborted) return;
 
     // Sync the document head and tear down the outgoing page-specific islands.
-    syncDataHead(deps.head, route, routeContext);
+    syncDataHead(deps.head, pathname, name, route, routeContext);
     unmountPageSpecific(state, emit);
     const routeSlice = islandRouteContext(pathname);
 

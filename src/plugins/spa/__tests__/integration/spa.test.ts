@@ -6,6 +6,7 @@ import { h } from "preact";
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { dataPlugin } from "../../../data";
 import { headPlugin } from "../../../head";
+import { jsonLd, og } from "../../../head/primitives";
 import { i18nPlugin } from "../../../i18n";
 import { defineRoutes, route, routerPlugin } from "../../../router";
 import { sitePlugin } from "../../../site";
@@ -143,6 +144,11 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   return { promise, resolve: value => settlers[0]?.(value) };
 }
 
+/** Read an attribute of the first live element matching a selector. */
+function attribute(selector: string, name: string): string | null | undefined {
+  return document.querySelector(selector)?.getAttribute(name);
+}
+
 let app: ReturnType<typeof makeApp>;
 
 beforeEach(() => {
@@ -274,6 +280,53 @@ describe("spa integration", () => {
     // a link click / the Navigation API does this for the interceptor, but app.spa.navigate /
     // ctx.navigate bypass it, so the kernel pushState's itself. Else back/refresh/deep-link break.
     expect(location.pathname).toBe("/doc/");
+  });
+
+  it("client DATA path: syncs the whole head of the new page, not only the title", async () => {
+    const { createApp } = makeCore();
+    const routes = defineRoutes({
+      home: route("/")
+        .render(() => undefined as never)
+        .head(() => ({ title: "Home" })),
+      doc: route("/doc/")
+        .load(() => ({ body: "from-data" }))
+        .render(() => h("section", { id: "page" }, "doc page") as ReturnType<typeof h>)
+        .head(() => ({
+          title: "Doc",
+          description: "Doc description",
+          image: "/doc.png",
+          elements: [og("og:type", "article"), jsonLd({ name: "Doc" })]
+        }))
+    });
+    app = createApp({
+      plugins: [sitePlugin, i18nPlugin, routerPlugin, headPlugin, spaPlugin, dataPlugin],
+      pluginConfigs: {
+        site: SITE,
+        i18n: { locales: ["en"], defaultLocale: "en" },
+        head: { titleTemplate: "%s | Site" },
+        spa: { progressBar: false },
+        router: { routes }
+      }
+    });
+    await app.start();
+    document.head.innerHTML = `<title>Home</title><meta name="description" content="Home description"><link rel="canonical" href="https://spa.dev/"><meta property="og:url" content="https://spa.dev/"><meta property="og:type" content="website"><meta property="og:image" content="https://spa.dev/home.png"><script type="application/ld+json">{"name":"Home"}</script>`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(Response.json({ body: "from-data" }, { status: 200 })))
+    );
+
+    app.spa.navigate("/doc/");
+    await vi.waitFor(() => expect(document.querySelector("#page")?.textContent).toBe("doc page"));
+
+    expect(document.title).toBe("Doc | Site");
+    expect(attribute('meta[name="description"]', "content")).toBe("Doc description");
+    expect(attribute('link[rel="canonical"]', "href")).toBe("https://spa.dev/doc/");
+    expect(attribute('meta[property="og:url"]', "content")).toBe("https://spa.dev/doc/");
+    expect(attribute('meta[property="og:type"]', "content")).toBe("article");
+    expect(attribute('meta[property="og:image"]', "content")).toBe("https://spa.dev/doc.png");
+    const jsonLdScripts = document.querySelectorAll('script[type="application/ld+json"]');
+    expect([...jsonLdScripts].map(script => script.textContent)).toEqual(['{"name":"Doc"}']);
+    vi.unstubAllGlobals();
   });
 
   it("a programmatic navigation runs once where pushState fires the Navigation API's navigate", async () => {

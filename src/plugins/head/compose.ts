@@ -242,8 +242,7 @@ export function composeHead(input: ComposeInput): HeadElement[] {
  * {@link composeHead} emits in its `<title>` element. A route-supplied `title`-keyed
  * element wins the keyed last-wins de-dupe over the templated base title (how a route
  * pins a bare title past `titleTemplate`), so it must win here too; otherwise the
- * template is applied to `head.title ?? site.name()`. Reused by `spa` for the client
- * DATA-path `document.title` sync, so client-side navigation matches the SSG output.
+ * template is applied to `head.title ?? site.name()`.
  *
  * @param head - The route's head config (may be `undefined` for head-less routes).
  * @param defaults - The normalized head defaults (provides `titleTemplate`).

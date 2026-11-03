@@ -121,7 +121,7 @@ Why not `<link rel="prefetch">`: sites serve HTML with `Cache-Control: max-age=0
 | Plugin | Pulled via | Used for |
 |---|---|---|
 | [`router`](../router/README.md) | `ctx.require(routerPlugin)` | Client-side route matching (`match`), the resolved global `mode()`, and `toUrl` link building. |
-| [`head`](../head/README.md) | `ctx.require(headPlugin)` | Binds the structural dependency for client head-sync; the composed head is re-applied from the fetched document (never re-composed). |
+| [`head`](../head/README.md) | `ctx.require(headPlugin)` | Client head-sync: the HTML path re-applies the composed head from the fetched document; the DATA path composes it with `head.render` and applies it the same way. |
 | [`data`](../data/README.md) *(optional)* | `ctx.require(dataPlugin)`, guarded by `ctx.has("data")` | Enables the client DATA path; the reader's `at(path)` is bound as `deps.dataAt`. Absent → HTML-over-fetch only. |
 
 ## Events
@@ -181,7 +181,7 @@ Per spec/08 §4, `onStop` receives **`{ global }` only** — no `state`, `log`, 
 
 ### Head-sync and progress bar
 
-Head-sync re-applies the composed `<head>` from the fetched document — title, `<html lang>`, a fixed set of single-element meta/canonical selectors (replace/append/remove), and full-replace groups (JSON-LD, `hreflang` alternates, `article:*`). It is a faithful re-application of `head`'s build-time composition, not a second implementation. The progress bar is an in-house NProgress-style `<div data-progress>` (no `nprogress` dependency): a 150 ms start delay (so fast navs show nothing), trickle to a 90% ceiling, complete to 100% then linger 200 ms. It is a no-op shell when disabled or headless.
+Head-sync re-applies the composed `<head>` from the fetched document (on the DATA path, from `head.render` for the matched route) — title, `<html lang>`, a fixed set of single-element meta/canonical selectors (replace/append/remove), and full-replace groups (JSON-LD, `hreflang` alternates, `article:*`). It is a faithful re-application of `head`'s build-time composition, not a second implementation. The progress bar is an in-house NProgress-style `<div data-progress>` (no `nprogress` dependency): a 150 ms start delay (so fast navs show nothing), trickle to a 90% ceiling, complete to 100% then linger 200 ms. It is a no-op shell when disabled or headless.
 
 ## Files
 

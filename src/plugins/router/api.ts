@@ -143,7 +143,7 @@ export function createApi(ctx: RouterRegisterContext): RouterApi {
      * Match a pathname against the compiled route table (specificity-sorted).
      *
      * @param pathname - URL pathname, e.g. `/en/hello/`.
-     * @returns `{ params, route }` for the most specific match, or `null`.
+     * @returns `{ params, name, route }` for the most specific match, or `null`.
      * @example
      * ```ts
      * api.match("/en/hello/");
