@@ -8,7 +8,7 @@
  * the shell itself imports zero node code, so `contentPlugin` is browser-safe.
  */
 import type { FunctionComponent } from "preact";
-import type { BundledTheme, ThemeRegistrationAny } from "shiki";
+import type { BundledLanguage, BundledTheme, LanguageInput, ThemeRegistrationAny } from "shiki";
 import type { Pluggable, Processor } from "unified";
 import type { Stage } from "../../config";
 
@@ -349,6 +349,13 @@ export type FileSystemContentOptions = {
    * or a custom `ThemeRegistration` object. Passed straight through to `@shikijs/rehype`.
    */
   shikiTheme?: BundledTheme | ThemeRegistrationAny;
+  /**
+   * Shiki grammars to load: bundled language names or custom grammars. Passed to
+   * `@shikijs/rehype` as `langs`. Defaults to every bundled grammar, about 2 s per
+   * process. A fence in a language that is not loaded renders as plain code. Shiki
+   * keeps one highlighter per process, so the lists of several apps add up.
+   */
+  shikiLanguages?: readonly (BundledLanguage | LanguageInput)[];
   /** Author applied to articles whose frontmatter omits author. Defaults to undefined. */
   defaultAuthor?: string;
   /**

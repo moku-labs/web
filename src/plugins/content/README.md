@@ -65,6 +65,7 @@ Per-source options live on the provider, not here. The Node `fileSystemContent(o
 | `contentDir` | `string` | — (required) | Absolute or project-relative path to the article root. |
 | `trustedContent` | `boolean` | `false` | SECURITY GATE. When `false`, `rehype-sanitize` runs as the final step. Set `true` only for fully author-controlled Markdown — it skips sanitize entirely. |
 | `shikiTheme` | `BundledTheme \| ThemeRegistrationAny` | `"github-dark"` | Passed straight to `@shikijs/rehype`. |
+| `shikiLanguages` | `readonly (BundledLanguage \| LanguageInput)[]` | every bundled grammar | Passed to `@shikijs/rehype` as `langs`. A short list saves about 2 s per process. A fence in a language that is not loaded renders as plain code. Shiki keeps one highlighter per process, so the lists of several apps add up. |
 | `defaultAuthor` | `string` | `undefined` | Applied to articles whose frontmatter omits `author`. |
 | `extraRemarkPlugins` | `readonly Pluggable[]` | `[]` | Concatenated **after** the framework remark defaults (additive — never replaces them). |
 | `extraRehypePlugins` | `readonly Pluggable[]` | `[]` | Concatenated after the custom transforms, before Shiki + sanitize (additive). |

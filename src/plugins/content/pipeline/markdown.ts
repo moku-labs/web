@@ -94,7 +94,7 @@ function applyRehypePlugins(
  * second app gets its own because state is per-app.
  *
  * @param state - Plugin state holding the processor singleton slot.
- * @param config - Resolved plugin configuration (trustedContent, shikiTheme, extras).
+ * @param config - Resolved plugin configuration (trustedContent, shikiTheme, shikiLanguages, extras).
  * @returns The shared unified processor (created on first call, cached after).
  * @example
  * ```ts
@@ -117,7 +117,8 @@ export function ensureProcessor(
   applyRehypePlugins(processor, config);
 
   // Add syntax highlighting before any output stage runs.
-  processor.use(rehypeShiki, { theme: config.shikiTheme ?? DEFAULT_SHIKI_THEME });
+  const langs = config.shikiLanguages && { langs: [...config.shikiLanguages] };
+  processor.use(rehypeShiki, { theme: config.shikiTheme ?? DEFAULT_SHIKI_THEME, ...langs });
 
   // Sanitize untrusted content LAST — the XSS boundary; trusted content opts out.
   const shouldSanitize = !config.trustedContent;
