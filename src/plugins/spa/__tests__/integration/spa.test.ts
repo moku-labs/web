@@ -162,6 +162,7 @@ afterEach(async () => {
   document.body.innerHTML = "";
   document.head.innerHTML = "";
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("spa integration", () => {
@@ -288,7 +289,7 @@ describe("spa integration", () => {
       home: route("/")
         .render(() => undefined as never)
         .head(() => ({ title: "Home" })),
-      doc: route("/doc/")
+      doc: route("/{lang:?}/doc/")
         .load(() => ({ body: "from-data" }))
         .render(() => h("section", { id: "page" }, "doc page") as ReturnType<typeof h>)
         .head(() => ({
@@ -302,7 +303,7 @@ describe("spa integration", () => {
       plugins: [sitePlugin, i18nPlugin, routerPlugin, headPlugin, spaPlugin, dataPlugin],
       pluginConfigs: {
         site: SITE,
-        i18n: { locales: ["en"], defaultLocale: "en" },
+        i18n: { locales: ["en", "uk"], defaultLocale: "en" },
         head: { titleTemplate: "%s | Site" },
         spa: { progressBar: false },
         router: { routes }
@@ -315,18 +316,19 @@ describe("spa integration", () => {
       vi.fn(() => Promise.resolve(Response.json({ body: "from-data" }, { status: 200 })))
     );
 
-    app.spa.navigate("/doc/");
+    app.spa.navigate("/uk/doc/");
     await vi.waitFor(() => expect(document.querySelector("#page")?.textContent).toBe("doc page"));
 
     expect(document.title).toBe("Doc | Site");
     expect(attribute('meta[name="description"]', "content")).toBe("Doc description");
-    expect(attribute('link[rel="canonical"]', "href")).toBe("https://spa.dev/doc/");
-    expect(attribute('meta[property="og:url"]', "content")).toBe("https://spa.dev/doc/");
+    expect(attribute('link[rel="canonical"]', "href")).toBe("https://spa.dev/uk/doc/");
+    expect(attribute('meta[property="og:url"]', "content")).toBe("https://spa.dev/uk/doc/");
+    expect(attribute('link[hreflang="en"]', "href")).toBe("https://spa.dev/doc/");
+    expect(document.documentElement.lang).toBe("uk");
     expect(attribute('meta[property="og:type"]', "content")).toBe("article");
     expect(attribute('meta[property="og:image"]', "content")).toBe("https://spa.dev/doc.png");
     const jsonLdScripts = document.querySelectorAll('script[type="application/ld+json"]');
     expect([...jsonLdScripts].map(script => script.textContent)).toEqual(['{"name":"Doc"}']);
-    vi.unstubAllGlobals();
   });
 
   it("a programmatic navigation runs once where pushState fires the Navigation API's navigate", async () => {

@@ -181,7 +181,7 @@ Per spec/08 §4, `onStop` receives **`{ global }` only** — no `state`, `log`, 
 
 ### Head-sync and progress bar
 
-Head-sync re-applies the composed `<head>` from the fetched document (on the DATA path, from `head.render` for the matched route) — title, `<html lang>`, a fixed set of single-element meta/canonical selectors (replace/append/remove), and full-replace groups (JSON-LD, `hreflang` alternates, `article:*`). It is a faithful re-application of `head`'s build-time composition, not a second implementation. The progress bar is an in-house NProgress-style `<div data-progress>` (no `nprogress` dependency): a 150 ms start delay (so fast navs show nothing), trickle to a 90% ceiling, complete to 100% then linger 200 ms. It is a no-op shell when disabled or headless.
+Head-sync re-applies the composed `<head>` from the fetched document (on the DATA path, from `head.render` for the matched route) — title, `<html lang>`, a fixed set of single-element meta/canonical selectors (replace/append/remove), and full-replace groups (JSON-LD, `hreflang` alternates, `article:*`). It is a faithful re-application of `head`'s composition, not a second implementation. The DATA path syncs from `head.render` alone, so a tag these selectors match must come from `.head()`: placed statically in a custom shell template, it is removed on the first DATA navigation. The progress bar is an in-house NProgress-style `<div data-progress>` (no `nprogress` dependency): a 150 ms start delay (so fast navs show nothing), trickle to a 90% ceiling, complete to 100% then linger 200 ms. It is a no-op shell when disabled or headless.
 
 ## Files
 
