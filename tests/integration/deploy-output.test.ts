@@ -33,7 +33,9 @@ function makeDeployApp() {
     pluginConfigs: {
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
-      content: { providers: [fileSystemContent({ contentDir: FIXTURE_CONTENT_DIR })] },
+      content: {
+        providers: [fileSystemContent({ contentDir: FIXTURE_CONTENT_DIR, shikiLanguages: ["ts"] })]
+      },
       deploy: { target: "cloudflare-pages", outDir: "dist" },
       router: { routes: defineRoutes({ home: route("/") }) }
     }

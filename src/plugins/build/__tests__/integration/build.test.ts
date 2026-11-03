@@ -36,7 +36,9 @@ async function loadFixtureArticles(): Promise<Map<string, Article>> {
     plugins: [i18nPlugin, contentPlugin],
     pluginConfigs: {
       i18n: { locales: ["en"], defaultLocale: "en" },
-      content: { providers: [fileSystemContent({ contentDir: FIXTURE_DIR })] }
+      content: {
+        providers: [fileSystemContent({ contentDir: FIXTURE_DIR, shikiLanguages: ["ts", "js"] })]
+      }
     }
   });
   const byLocale = await app.content.loadAll();
@@ -83,7 +85,9 @@ function buildApp(outDir: string, bySlug: Map<string, Article>, extraPlugins: un
     pluginConfigs: {
       site: SITE,
       i18n: { locales: ["en"], defaultLocale: "en" },
-      content: { providers: [fileSystemContent({ contentDir: FIXTURE_DIR })] },
+      content: {
+        providers: [fileSystemContent({ contentDir: FIXTURE_DIR, shikiLanguages: ["ts", "js"] })]
+      },
       build: { outDir, feeds: true, sitemap: true, images: false, ogImage: false, minify: false },
       router: { routes }
     }
@@ -253,7 +257,9 @@ describe("build integration", () => {
         site: SITE,
         router: { routes },
         i18n: { locales: ["en", "uk"], defaultLocale: "en" },
-        content: { providers: [fileSystemContent({ contentDir: FIXTURE_DIR })] },
+        content: {
+          providers: [fileSystemContent({ contentDir: FIXTURE_DIR, shikiLanguages: ["ts", "js"] })]
+        },
         build: {
           outDir: out,
           feeds: false,
@@ -317,7 +323,7 @@ describe("build integration", () => {
     // loader, so loadAll ran once per page — each re-reading + re-rendering every article
     // (≈189 full loads/build → 19s). loadAll must memoize so per-page calls re-read nothing.
     const out = path.join(tmp, "dist");
-    const provider = fileSystemContent({ contentDir: FIXTURE_DIR });
+    const provider = fileSystemContent({ contentDir: FIXTURE_DIR, shikiLanguages: ["ts", "js"] });
     const readSpy = vi.spyOn(provider, "readArticle");
 
     // 10 pages whose loaders each pull the full set via loadAll() (the hot pattern).
@@ -410,7 +416,9 @@ describe("build integration", () => {
         site: SITE,
         router: { routes },
         i18n: { locales: ["en", "uk"], defaultLocale: "en" },
-        content: { providers: [fileSystemContent({ contentDir: FIXTURE_DIR })] },
+        content: {
+          providers: [fileSystemContent({ contentDir: FIXTURE_DIR, shikiLanguages: ["ts", "js"] })]
+        },
         build: { outDir: out, localeRedirects: true, images: false, ogImage: false }
       }
     });

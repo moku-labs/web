@@ -26,7 +26,11 @@ function makeCtx(
     emit,
     locales: () => overrides.locales ?? ["en", "uk"],
     defaultLocale: () => overrides.defaultLocale ?? "en",
-    provider: fileSystemContent({ contentDir: FIXTURE_DIR, shikiTheme: "github-dark" })
+    provider: fileSystemContent({
+      contentDir: FIXTURE_DIR,
+      shikiTheme: "github-dark",
+      shikiLanguages: ["ts"]
+    })
   };
   return { ctx, state, emit };
 }

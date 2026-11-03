@@ -15,7 +15,12 @@ function makeApi(contentDir: string) {
     emit: vi.fn(),
     locales: () => ["en", "ru"],
     defaultLocale: () => "en",
-    provider: fileSystemContent({ contentDir, trustedContent: true, embed: true })
+    provider: fileSystemContent({
+      contentDir,
+      trustedContent: true,
+      embed: true,
+      shikiLanguages: ["ts"]
+    })
   };
   return createContentApi(ctx);
 }
