@@ -91,7 +91,7 @@ function currentLocationUrl(): string {
  * @returns `"html"` for the HTML path, `"data"` for the client DATA path, `undefined` for a
  *   client-only route (it renders from the URL, nothing to load).
  * @example
- * prefetchKind({ router, head, dataAt }, "/en/about/"); // "data": the data reader serves it
+ * prefetchKind(deps, "/en/about/"); // "data" when the data plugin is composed
  */
 function prefetchKind(deps: SpaKernelDeps, path: string): PrefetchKind | undefined {
   // Mirrors `resolveDataRender` without its fetch.

@@ -6,8 +6,8 @@
 // Sites serve HTML with `max-age=0, must-revalidate`, so a browser `<link rel=prefetch>` is
 // revalidated on the tap and saves nothing. This cache keeps the preloaded HTML in memory and the
 // kernel's navigation takes it from here. A page the client DATA path renders is warmed through the
-// `data` reader instead, which caches it and shares one request per path. A pure factory (no ctx, no module singletons): the
-// kernel keeps the one live preloader on `state.prefetch` (spec/08 §6) and disposes it on stop.
+// `data` reader instead, which caches it and shares one request per path. A pure factory (no ctx,
+// no module singletons): the kernel keeps the one live preloader on `state.prefetch` (spec/08 §6) and disposes it on stop.
 
 import { fetchPage, pathWithSearch, resolveLinkTarget } from "./router";
 
@@ -198,9 +198,9 @@ export function createPrefetcher(options: PrefetchOptions): Prefetcher {
     const url = resolveLinkTarget(anchor);
     if (!url || anchor?.hasAttribute("download")) return undefined;
     const path = pathWithSearch(url);
-    return path !== pathWithSearch(location) && options.kindOf(path) !== undefined
-      ? path
-      : undefined;
+    const isOtherPreloadablePage =
+      path !== pathWithSearch(location) && options.kindOf(path) !== undefined;
+    return isOtherPreloadablePage ? path : undefined;
   };
 
   /**
@@ -224,18 +224,24 @@ export function createPrefetcher(options: PrefetchOptions): Prefetcher {
    * startHtml("/about"); // { promise, startedAt, controller }
    */
   const startHtml = (path: string): PrefetchEntry | undefined => {
+    // Drop the expired entries, then skip a path that is still cached.
     for (const [key, entry] of cache) {
       if (isExpired(entry)) drop(key, entry);
     }
     if (cache.has(path)) return undefined;
+
+    // Make room: drop the oldest entries while the cache is full.
     for (const [key, entry] of cache) {
       if (cache.size < MAX_ENTRIES) break;
       drop(key, entry);
     }
+
+    // Start the fetch and keep it.
     const controller = new AbortController();
     const promise = fetchPage(path, controller.signal);
     const entry: PrefetchEntry = { promise, startedAt: now(), controller };
     cache.set(path, entry);
+
     // A failed preload removes only its own entry and never surfaces as an unhandled rejection.
     promise.catch(() => {
       if (cache.get(path) === entry) cache.delete(path);
@@ -277,12 +283,15 @@ export function createPrefetcher(options: PrefetchOptions): Prefetcher {
    */
   const drain = (): void => {
     cancelDrain = undefined;
+
+    // Fill the free slots from the queue.
     while (visibleInFlight < VISIBLE_CONCURRENCY) {
       const path = queue.shift();
       if (path === undefined) return;
       const started = start(path);
       if (!started) continue;
       visibleInFlight += 1;
+
       // Settled either way (taken, failed or evicted): free the slot, drain the rest.
       started
         .catch(() => "")

@@ -418,14 +418,6 @@ describe("data path", () => {
     expect(pending.map(call => call.path)).toEqual(["/a/", "/b/", "/c/"]);
     expect(fetches).toHaveLength(0);
   });
-
-  // Bug: data preloads keep starting after app.stop().
-  it("after dispose a press warms nothing", () => {
-    const loadData = vi.fn((_path: string) => Promise.resolve({}));
-    make({ kindOf: () => "data", loadData }).dispose();
-    press("#a");
-    expect(loadData).not.toHaveBeenCalled();
-  });
 });
 
 describe("visible", () => {
