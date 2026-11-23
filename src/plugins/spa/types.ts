@@ -40,6 +40,8 @@ export type SpaEvents = {
   "spa:navigate": { from: string; to: string };
   /** The swap completed and the new URL is active. */
   "spa:navigated": { url: string };
+  /** `updateUrl` moved the address within the current route, with no navigation. */
+  "spa:url": { url: string };
   /** A island instance attached to an element. */
   "spa:island-mount": { name: string; el: Element };
   /** A island instance detached from an element. */
@@ -287,6 +289,17 @@ export interface IslandContext<S = undefined> {
    * ctx.navigate(ctx.url("issue", { id, issueId }));
    */
   readonly navigate: (path: string, options?: NavigateOptions) => void;
+  /**
+   * Move the address to another path of the SAME route, with no navigation: no fetch, no
+   * swap, no `onNavStart`/`onNavEnd`. For an island that already shows the page (a player
+   * on its next episode). `ctx.params` follows the new path. Throws for another route.
+   *
+   * @param path - A path of the current route (e.g. `ctx.url("watch", { id, ep })`).
+   * @returns void
+   * @example
+   * ctx.updateUrl(ctx.url("watch", { id, ep: "2" }));
+   */
+  readonly updateUrl: (path: string) => void;
   /** The live per-instance state (the object returned by `spec.state`). `undefined` for legacy hooks-only islands. */
   readonly state: S;
   /**
@@ -555,6 +568,15 @@ export interface SpaKernel {
    */
   processNav(path: string, options?: NavigateOptions): void;
   /**
+   * Move the address to another path of the current route, with no navigation.
+   *
+   * @param path - A path of the current route.
+   * @returns void
+   * @example
+   * kernel.updateUrl("/watch/a/2/");
+   */
+  updateUrl(path: string): void;
+  /**
    * Cross a boundary the SPA cannot swap (different layout / auth split) with a REAL
    * full-page load — detaches the interceptor first so the navigation isn't caught.
    *
@@ -602,6 +624,8 @@ export interface SpaState {
    * uses — so `islands.ts` never imports the kernel.
    */
   navigate: ((path: string, options?: NavigateOptions) => void) | null;
+  /** The kernel's `updateUrl`, bound at init (null until then); read by `ctx.updateUrl`. */
+  updateUrl: ((path: string) => void) | null;
   /** The single shared SPA kernel instance (null until onInit builds it). */
   kernel: SpaKernel | null;
   /**
@@ -643,6 +667,18 @@ export type SpaApi = {
    * app.spa.hardNavigate("/signin/"); // sign-out / 401: leave the app chrome for the auth split
    */
   hardNavigate(url: string): void;
+  /**
+   * Move the address to another path of the SAME route, with no navigation: no fetch, no
+   * swap, no head sync, no `onNavStart`/`onNavEnd`. For a client that already shows the page.
+   * Mounted islands read the new `params`; emits `spa:url`. No-op headless or for the
+   * current path; throws for a path of another route.
+   *
+   * @param path - A path of the current route.
+   * @returns void
+   * @example
+   * app.spa.updateUrl("/watch/a/2/"); // the player moved to episode 2
+   */
+  updateUrl(path: string): void;
   /**
    * Read the current resolved URL.
    *

@@ -20,6 +20,7 @@ function stubCtx(el: HTMLElement) {
     locale: "",
     url: () => "",
     navigate: () => {},
+    updateUrl: () => {},
     state: {},
     set: () => {},
     flush: () => {},

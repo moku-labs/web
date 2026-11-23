@@ -248,6 +248,17 @@ function buildContext(state: SpaState, instance: IslandInstance): IslandContext<
       state.navigate?.(path, options);
     },
     /**
+     * Move the address within the current route, with no navigation (delegates to the
+     * kernel through `state.updateUrl`). No-op before the kernel binds.
+     *
+     * @param path - A path of the current route.
+     * @example
+     * ctx.updateUrl(ctx.url("watch", { id, ep: "2" }));
+     */
+    updateUrl(path): void {
+      state.updateUrl?.(path);
+    },
+    /**
      * The live per-instance state (`undefined` for legacy hooks-only islands).
      *
      * @returns The current state.
@@ -743,6 +754,19 @@ export function notifyNavStart(state: SpaState): void {
     instance.data = data;
     runHook(instance, "onNavStart");
   }
+}
+
+/**
+ * Gives every mounted instance the route slice of a new URL of the SAME page (`spa.updateUrl`):
+ * no hook runs and `instance.data` stays as it is, since nothing was fetched.
+ *
+ * @param state - The plugin state holding live instances.
+ * @param route - The matched-route slice for the new URL (params/meta/locale/url).
+ * @example
+ * updateRoute(state, route);
+ */
+export function updateRoute(state: SpaState, route: RouteSlice): void {
+  for (const instance of state.instances.values()) instance.route = route;
 }
 
 /**

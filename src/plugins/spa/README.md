@@ -2,7 +2,7 @@
 
 > **Isomorphic default** — the client runtime: island hydration, intercepted navigation, document-head sync, and a progress bar (inert on Node).
 
-`spa` layers progressive client-side navigation over the static site. It intercepts in-app links, swaps a single page region without a full reload, syncs the document `<head>`, drives an in-house top progress bar, and manages island (island) lifecycles. It is a default plugin — mounted automatically at **`app.spa`** by `createApp`, so consumers reach its registration/control surface (`register`/`navigate`/`current`) without importing `spaPlugin`. Internally it depends on [`router`](../router/README.md) and [`head`](../head/README.md) (resolved via `ctx.require` in `onInit`) and optionally captures the [`data`](../data/README.md) reader by name to enable client DATA rendering. It emits four notification-only events (`spa:navigate`, `spa:navigated`, `spa:island-mount`, `spa:island-unmount`) and listens to nothing.
+`spa` layers progressive client-side navigation over the static site. It intercepts in-app links, swaps a single page region without a full reload, syncs the document `<head>`, drives an in-house top progress bar, and manages island (island) lifecycles. It is a default plugin — mounted automatically at **`app.spa`** by `createApp`, so consumers reach its registration/control surface (`register`/`navigate`/`current`) without importing `spaPlugin`. Internally it depends on [`router`](../router/README.md) and [`head`](../head/README.md) (resolved via `ctx.require` in `onInit`) and optionally captures the [`data`](../data/README.md) reader by name to enable client DATA rendering. It emits five notification-only events (`spa:navigate`, `spa:navigated`, `spa:url`, `spa:island-mount`, `spa:island-unmount`) and listens to nothing.
 
 `spa` is the **one plugin that genuinely owns a browser resource**, so it is the only default that needs `onStart`/`onStop`: `onStart` boots navigation listeners + scroll restoration + island mounting; `onStop` tears them down. Because `onStart` is a no-op when `typeof document === "undefined"`, the plugin is inert in the Node SSG/build pipeline and boots only in a browser — the isomorphic guarantee. The single most important design decision is the **pure `createSpaKernel` factory**: built once in `onInit` and stored on `ctx.state.kernel`, it closes over injected state/config/emit/deps only (never the Moku ctx, never module singletons), so it is unit-testable with a mock state and a spy emit. `index.ts` is wiring only (≤30 lines) — all logic lives in the domain files.
 
@@ -45,6 +45,7 @@ The surface mounted at `app.spa` is the **registration / control** side. The DOM
 |---|---|---|
 | `register` | `(island: IslandDef) => void` | Register a island (keyed by name, last-registered-wins). A duplicate name logs a `spa:island-collision` warning via `ctx.log.warn` before overwriting. |
 | `navigate` | `(path: string) => void` | Programmatically navigate (pathname, optionally with search/hash). Delegates to the kernel's `processNav`; no-op without a DOM or before boot. |
+| `updateUrl` | `(path: string) => void` | Move the address to another path of the SAME route, with no navigation (see [Moving the address within one route](#moving-the-address-within-one-route)). Islands call it as `ctx.updateUrl(path)`. No-op without a DOM or for the current path; throws for a path of another route. |
 | `current` | `() => string` | Read the current resolved URL (`pathname + search`). Returns a copy of `ctx.state.currentUrl`; no raw state is exposed. |
 
 ### Exported helper: `createIsland(name, hooks)`
@@ -140,6 +141,7 @@ Why not `<link rel="prefetch">`: sites serve HTML with `Cache-Control: max-age=0
 |---|---|---|
 | `spa:navigate` | `{ from: string; to: string }` | A navigation has been intercepted and is starting. |
 | `spa:navigated` | `{ url: string }` | The swap completed and the new URL is active. |
+| `spa:url` | `{ url: string }` | `updateUrl` moved the address within the current route, with no navigation. |
 | `spa:island-mount` | `{ name: string; el: Element }` | A island instance attached to an element. |
 | `spa:island-unmount` | `{ name: string; el: Element }` | A island instance detached from an element. |
 
@@ -186,6 +188,10 @@ Per spec/08 §4, `onStop` receives **`{ global }` only** — no `state`, `log`, 
 ### Navigation interception
 
 `attachRouter` prefers the **Navigation API** when supported, falling back to a **History API** click/popstate path otherwise. A programmatic navigation (`app.spa.navigate` / `ctx.navigate`) commits the URL with its own `history.pushState`; where the Navigation API exists that `pushState` fires a `navigate` event too, and the interceptor leaves exactly that one alone, so the navigation runs once, not twice. It carries its own abort signal: any later navigation (a link, back/forward, or another `navigate`) aborts it, so a page that loads late never swaps in over the one the viewer went to. Internal-link classification skips modifier-key clicks, `target="_blank"`, cross-origin URLs, and static assets (`.xml`/`.json`/images/fonts/PDF). Scroll position is saved per path in `sessionStorage` (best-effort) and restored on back/forward.
+
+### Moving the address within one route
+
+`updateUrl(path)` moves the address within one route, for a client that already shows the page (a video player swiping to the next episode of `/watch/{id}/{ep}/`). It replaces the history entry with its own `history.replaceState`, which the Navigation API interceptor leaves alone, as with a programmatic `navigate`. Then it records the URL, gives every mounted island the new route slice (`ctx.params` reads the new path; `ctx.data` stays, nothing is fetched) and emits `spa:url`. No fetch, no swap, no head sync, no scroll, no progress bar, no `onNavStart`/`onNavEnd`. A path of another route throws `[web] spa.updateUrl: "<path>" is another route.`: that is a navigation, so use `navigate()`.
 
 ### Head-sync and progress bar
 
