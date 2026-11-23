@@ -20,7 +20,7 @@ const live: Prefetcher[] = [];
 
 /** A preloader that `afterEach` disposes, so no listener leaks into the next test. */
 function make(options: Partial<PrefetchOptions> = {}): Prefetcher {
-  const prefetcher = createPrefetcher({ mode: "intent", usesHtml: () => true, ...options });
+  const prefetcher = createPrefetcher({ mode: "intent", kindOf: () => "html", ...options });
   live.push(prefetcher);
   return prefetcher;
 }
@@ -363,13 +363,68 @@ describe("eligibility", () => {
     expect(fetches).toHaveLength(1);
   });
 
-  // Bug: HTML is fetched for a route the DATA path renders.
-  it("no fetch when usesHtml is false", () => {
-    make({ usesHtml: path => path !== "/b/" });
+  // Bug: a client-only route (no HTML, no data to load) is preloaded.
+  it("nothing starts for a path with no kind", () => {
+    const loadData = vi.fn((_path: string) => Promise.resolve({}));
+    make({ kindOf: path => (path === "/b/" ? undefined : "html"), loadData });
     press("#b");
     expect(fetches).toHaveLength(0);
+    expect(loadData).not.toHaveBeenCalled();
     press("#a");
     expect(fetches).toHaveLength(1);
+  });
+});
+
+describe("data path", () => {
+  // Bug: with the data plugin composed, prefetch preloads nothing, or HTML the DATA path never reads.
+  it("a press warms loadData for the path and fetches no HTML; take() misses", () => {
+    const loadData = vi.fn((_path: string) => Promise.resolve({ body: "b" }));
+    const prefetcher = make({ kindOf: () => "data", loadData });
+    press("#b");
+    expect(loadData).toHaveBeenCalledTimes(1);
+    expect(loadData).toHaveBeenCalledWith("/b/");
+    expect(fetches).toHaveLength(0);
+    expect(prefetcher.take("/b/")).toBeUndefined();
+  });
+
+  // Bug: data preloads skip the Save-Data / 2g rule.
+  it("no loadData with save-data on or on 2g", () => {
+    const loadData = vi.fn((_path: string) => Promise.resolve({}));
+    make({ kindOf: () => "data", loadData });
+    connection({ saveData: true });
+    press("#a");
+    connection({ effectiveType: "2g" });
+    press("#a");
+    expect(loadData).not.toHaveBeenCalled();
+  });
+
+  // Bug: visible mode on the DATA path starts every link at once, or stalls after a failure.
+  it("visible: data warms run two at a time; a failed one frees its slot", async () => {
+    vi.stubGlobal("requestIdleCallback", (callback: () => void) => setTimeout(callback, 0));
+    const pending: Array<{ path: string; fail: () => void }> = [];
+    const loadData = vi.fn((path: string) => {
+      const { promise, reject } = Promise.withResolvers<unknown>();
+      pending.push({ path, fail: () => reject(new Error("network")) });
+      return promise;
+    });
+    const prefetcher = make({ mode: "visible", kindOf: () => "data", loadData });
+    prefetcher.observe();
+    observer().enter(el("#a"), el("#b"), el("#c"));
+    await flush();
+    expect(pending.map(call => call.path)).toEqual(["/a/", "/b/"]);
+
+    pending[0]?.fail();
+    await flush();
+    expect(pending.map(call => call.path)).toEqual(["/a/", "/b/", "/c/"]);
+    expect(fetches).toHaveLength(0);
+  });
+
+  // Bug: data preloads keep starting after app.stop().
+  it("after dispose a press warms nothing", () => {
+    const loadData = vi.fn((_path: string) => Promise.resolve({}));
+    make({ kindOf: () => "data", loadData }).dispose();
+    press("#a");
+    expect(loadData).not.toHaveBeenCalled();
   });
 });
 

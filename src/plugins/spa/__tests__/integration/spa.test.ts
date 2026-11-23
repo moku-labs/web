@@ -430,6 +430,55 @@ function serveAbout() {
 }
 
 /**
+ * Build a router+head+spa+data app whose About page renders on the client DATA path.
+ *
+ * @param spa - The spa config under test.
+ * @returns The app.
+ */
+function makeDataApp(spa: SpaConfig = {}) {
+  const { createApp } = makeCore();
+  const routes = defineRoutes({
+    home: route("/")
+      .render(() => undefined as never)
+      .head(() => ({ title: "Home" })),
+    about: route("/about/")
+      .load(() => ({ body: "from-data" }))
+      .render(
+        ctx =>
+          h(
+            "section",
+            { id: "page" },
+            `about:${(ctx.data as { body: string }).body}`
+          ) as ReturnType<typeof h>
+      )
+      .head(() => ({ title: "About" }))
+  });
+  return createApp({
+    plugins: [sitePlugin, i18nPlugin, routerPlugin, headPlugin, spaPlugin, dataPlugin],
+    pluginConfigs: {
+      site: SITE,
+      i18n: { locales: ["en"], defaultLocale: "en" },
+      head: {},
+      spa: { progressBar: false, ...spa },
+      router: { routes }
+    }
+  });
+}
+
+/**
+ * Stub `fetch` to serve the About page's data sidecar, a fresh response per call.
+ *
+ * @returns The spy that counts the requests.
+ */
+function serveAboutData() {
+  const fetchSpy = vi.fn((_path: string, _init?: RequestInit) =>
+    Promise.resolve(Response.json({ body: "from-data" }, { status: 200 }))
+  );
+  vi.stubGlobal("fetch", fetchSpy);
+  return fetchSpy;
+}
+
+/**
  * Dispatch an event on the About link, the way the browser does under a tap or the mouse.
  *
  * @param type - The event type: `pointerdown`, `touchstart` or `mouseover`.
@@ -612,6 +661,46 @@ describe("spa prefetch integration", () => {
     expect(observers).toHaveLength(0);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(fetchSpy).toHaveBeenCalledWith("/about/", { signal: expect.any(AbortSignal) });
+  });
+
+  // Bug: with the data plugin composed, prefetch fetches nothing, and the tap waits for the data.
+  it('prefetch "intent" + data plugin: a pointerdown loads the page data once; the tap adds no request', async () => {
+    vi.stubGlobal("navigation", undefined);
+    app = makeDataApp({ prefetch: "intent" });
+    await app.start();
+    const fetchSpy = serveAboutData();
+
+    onLink("pointerdown");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("/_data/about/index.json");
+    await new Promise(resolve => setTimeout(resolve, 0));
+    clickLink();
+    await vi.waitFor(() =>
+      expect(document.querySelector("#page")?.textContent).toBe("about:from-data")
+    );
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(location.pathname).toBe("/about/");
+  });
+
+  // Bug: the DATA-path fix starts preloads on an app that never opted in.
+  it("prefetch left out + data plugin: press fetches nothing, the click loads the data once", async () => {
+    vi.stubGlobal("navigation", undefined);
+    app = makeDataApp();
+    await app.start();
+    const fetchSpy = serveAboutData();
+
+    onLink("pointerdown");
+    onLink("mouseover");
+    await pastHoverDelay();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    clickLink();
+    await vi.waitFor(() =>
+      expect(document.querySelector("#page")?.textContent).toBe("about:from-data")
+    );
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("/_data/about/index.json");
   });
 
   // Bug: SpaConfig.prefetch widened to `string`, so a typo like "hover" compiles.

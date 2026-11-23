@@ -1,11 +1,12 @@
 /**
- * @file spa plugin — opt-in in-memory HTML preload cache (`spa.prefetch`).
+ * @file spa plugin — opt-in preloads (`spa.prefetch`): an in-memory HTML cache, or the data reader's cache.
  * @see README.md
  */
 
 // Sites serve HTML with `max-age=0, must-revalidate`, so a browser `<link rel=prefetch>` is
 // revalidated on the tap and saves nothing. This cache keeps the preloaded HTML in memory and the
-// kernel's navigation takes it from here. A pure factory (no ctx, no module singletons): the
+// kernel's navigation takes it from here. A page the client DATA path renders is warmed through the
+// `data` reader instead, which caches it and shares one request per path. A pure factory (no ctx, no module singletons): the
 // kernel keeps the one live preloader on `state.prefetch` (spec/08 §6) and disposes it on stop.
 
 import { fetchPage, pathWithSearch, resolveLinkTarget } from "./router";
@@ -41,12 +42,17 @@ interface PrefetchEntry {
   controller: AbortController;
 }
 
+/** How a navigation loads a page: fetched HTML, or the page data through the `data` reader. */
+export type PrefetchKind = "html" | "data";
+
 /** What {@link createPrefetcher} needs from the kernel. */
 export interface PrefetchOptions {
   /** The preload mode; `false` never reaches here (the kernel builds no preloader). */
   mode: "intent" | "visible";
-  /** True when a navigation to this path would fetch HTML (not the DATA path). */
-  usesHtml: (path: string) => boolean;
+  /** How a navigation to this path loads it; `undefined` when nothing can be preloaded. */
+  kindOf: (path: string) => PrefetchKind | undefined;
+  /** Loads a `"data"` page's data into the reader's cache. Absent: `"data"` paths preload nothing. */
+  loadData?: ((path: string) => Promise<unknown>) | undefined;
   /** Injected for tests. Defaults to `Date.now`. */
   now?: () => number;
 }
@@ -141,10 +147,10 @@ function whenIdle(task: () => void): () => void {
  * Build the preloader: press and hover listeners on `document` at once, and for
  * `"visible"` one IntersectionObserver that {@link Prefetcher.observe} feeds.
  *
- * @param options - The mode, the HTML-path check and the clock.
+ * @param options - The mode, the path kind check, the data loader and the clock.
  * @returns The live preloader.
  * @example
- * createPrefetcher({ mode: "intent", usesHtml: () => true }).take("/about"); // undefined
+ * createPrefetcher({ mode: "intent", kindOf: () => "html" }).take("/about"); // undefined
  */
 export function createPrefetcher(options: PrefetchOptions): Prefetcher {
   const now = options.now ?? Date.now;
@@ -188,24 +194,36 @@ export function createPrefetcher(options: PrefetchOptions): Prefetcher {
    */
   const pathOf = (anchor: HTMLAnchorElement | null | undefined): string | undefined => {
     // The click interceptor's rule (an <a>, not _blank, same origin, not a static asset), plus:
-    // no download link, not the current page, and only a page the HTML path renders.
+    // no download link, not the current page, and only a page there is something to preload for.
     const url = resolveLinkTarget(anchor);
     if (!url || anchor?.hasAttribute("download")) return undefined;
     const path = pathWithSearch(url);
-    return path !== pathWithSearch(location) && options.usesHtml(path) ? path : undefined;
+    return path !== pathWithSearch(location) && options.kindOf(path) !== undefined
+      ? path
+      : undefined;
   };
 
   /**
-   * Start one preload, unless the connection forbids it or the path is already cached.
+   * Warm a DATA-path page through the `data` reader. The reader caches the data and shares one
+   * request per path, so a repeat costs nothing and the navigation's own read is a hit.
+   *
+   * @param path - The page path.
+   * @returns Settles when the data is loaded or failed (never rejects), or `undefined` without a loader.
+   * @example
+   * startData("/en/hello/"); // the tap's dataAt("/en/hello/") then makes no request
+   */
+  const startData = (path: string): Promise<unknown> | undefined =>
+    options.loadData?.(path).catch(() => "");
+
+  /**
+   * Start one HTML preload, unless the path is already cached.
    *
    * @param path - The page path.
    * @returns The new entry, or `undefined` when nothing started.
    * @example
-   * start("/about"); // { promise, startedAt, controller }
+   * startHtml("/about"); // { promise, startedAt, controller }
    */
-  const start = (path: string): PrefetchEntry | undefined => {
-    // Checked at every start: the connection can change while the page is open.
-    if (isConstrained()) return undefined;
+  const startHtml = (path: string): PrefetchEntry | undefined => {
     for (const [key, entry] of cache) {
       if (isExpired(entry)) drop(key, entry);
     }
@@ -223,6 +241,20 @@ export function createPrefetcher(options: PrefetchOptions): Prefetcher {
       if (cache.get(path) === entry) cache.delete(path);
     });
     return entry;
+  };
+
+  /**
+   * Start one preload on the path the navigation will take, unless the connection forbids it.
+   *
+   * @param path - The page path.
+   * @returns Settles when the preload is done, or `undefined` when nothing started.
+   * @example
+   * start("/about"); // Promise of the HTML, or of the warmed data
+   */
+  const start = (path: string): Promise<unknown> | undefined => {
+    // Checked at every start: the connection can change while the page is open.
+    if (isConstrained()) return undefined;
+    return options.kindOf(path) === "data" ? startData(path) : startHtml(path)?.promise;
   };
 
   /**
@@ -248,11 +280,11 @@ export function createPrefetcher(options: PrefetchOptions): Prefetcher {
     while (visibleInFlight < VISIBLE_CONCURRENCY) {
       const path = queue.shift();
       if (path === undefined) return;
-      const entry = start(path);
-      if (!entry) continue;
+      const started = start(path);
+      if (!started) continue;
       visibleInFlight += 1;
       // Settled either way (taken, failed or evicted): free the slot, drain the rest.
-      entry.promise
+      started
         .catch(() => "")
         .then(() => {
           visibleInFlight -= 1;

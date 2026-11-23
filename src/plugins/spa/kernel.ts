@@ -28,7 +28,7 @@ import {
   unmountAll,
   unmountPageSpecific
 } from "./islands";
-import { createPrefetcher, loadWithPrefetch } from "./prefetch";
+import { createPrefetcher, loadWithPrefetch, type PrefetchKind } from "./prefetch";
 import { createProgressBar, type ProgressBar } from "./progress";
 import {
   attachRouter,
@@ -84,21 +84,22 @@ function currentLocationUrl(): string {
 }
 
 /**
- * Whether a navigation to `path` renders from fetched HTML, so a preload of it is used.
+ * How a navigation to `path` loads the page, so the preload warms the same source.
  *
  * @param deps - The router and the optional data reader.
  * @param path - The page path (pathname + search).
- * @returns False when the client DATA path renders the page.
+ * @returns `"html"` for the HTML path, `"data"` for the client DATA path, `undefined` for a
+ *   client-only route (it renders from the URL, nothing to load).
  * @example
- * usesHtml({ router, head }, "/en/about/"); // true: no data reader, every page is HTML
+ * prefetchKind({ router, head, dataAt }, "/en/about/"); // "data": the data reader serves it
  */
-function usesHtml(deps: SpaKernelDeps, path: string): boolean {
-  // Mirrors `resolveDataRender` without its fetch: ssg mode, no route with a `render`, or a
-  // route that is not client-only while no `data` reader is composed.
-  if (deps.router.mode() === "ssg") return true;
+function prefetchKind(deps: SpaKernelDeps, path: string): PrefetchKind | undefined {
+  // Mirrors `resolveDataRender` without its fetch.
+  if (deps.router.mode() === "ssg") return "html";
   const route = deps.router.match(path.split("?")[0] ?? path)?.route;
-  if (!route?._handlers.render) return true;
-  return !isClientOnlyRoute(deps.router.mode(), route) && !deps.dataAt;
+  if (!route?._handlers.render) return "html";
+  if (isClientOnlyRoute(deps.router.mode(), route)) return undefined;
+  return deps.dataAt ? "data" : "html";
 }
 
 /**
@@ -676,8 +677,9 @@ export function createSpaKernel(
       if (resolved.prefetch !== false) {
         state.prefetch = createPrefetcher({
           mode: resolved.prefetch,
-          // eslint-disable-next-line jsdoc/require-jsdoc -- binds the HTML-path check to these deps
-          usesHtml: path => usesHtml(deps, path)
+          // eslint-disable-next-line jsdoc/require-jsdoc -- binds the path kind check to these deps
+          kindOf: path => prefetchKind(deps, path),
+          loadData: deps.dataAt
         });
       }
 
