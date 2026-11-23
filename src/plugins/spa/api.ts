@@ -55,6 +55,16 @@ export function createApi(ctx: SpaContext): SpaApi {
       ctx.state.kernel?.hardNavigate(url);
     },
     /**
+     * Move the address within the current route, with no navigation (client runtime).
+     *
+     * @param path - A path of the current route.
+     * @example
+     * app.spa.updateUrl("/watch/a/2/");
+     */
+    updateUrl(path) {
+      ctx.state.kernel?.updateUrl(path);
+    },
+    /**
      * Read the current resolved URL.
      *
      * @returns The current pathname + search.

@@ -3,7 +3,7 @@
  * domain files (kernel/router/head/progress/islands/lifecycle); index wires.
  *
  * Depends: router, head.
- * Emits: spa:navigate, spa:navigated, spa:island-mount, spa:island-unmount.
+ * Emits: spa:navigate, spa:navigated, spa:url, spa:island-mount, spa:island-unmount.
  * @see README.md
  */
 import { createPlugin } from "../../config";
@@ -19,8 +19,9 @@ import { createState, defaultSpaConfig } from "./state";
  * SPA plugin — progressive client-side navigation layered over the static site:
  * swaps a page region on navigation, with an optional progress bar and View
  * Transitions. Register interactive islands with {@link createIsland}. Depends
- * on router and head; emits `spa:navigate`, `spa:navigated`, `spa:island-mount`,
- * and `spa:island-unmount`.
+ * on router and head; emits `spa:navigate`, `spa:navigated`, `spa:url` (from
+ * `updateUrl`, which moves the address within one route with no navigation),
+ * `spa:island-mount`, and `spa:island-unmount`.
  *
  * @example Enable view transitions and a custom swap region
  * ```ts

@@ -10,8 +10,8 @@ import { jsonLd, og } from "../../../head/primitives";
 import { i18nPlugin } from "../../../i18n";
 import { defineRoutes, route, routerPlugin } from "../../../router";
 import { sitePlugin } from "../../../site";
-import { spaPlugin } from "../../index";
-import type { SpaApi, SpaConfig } from "../../types";
+import { createIsland, spaPlugin } from "../../index";
+import type { IslandContext, SpaApi, SpaConfig } from "../../types";
 
 const SITE = {
   name: "SPA Test",
@@ -117,8 +117,15 @@ function stubChromeNavigation(): {
   });
   const replace = History.prototype.replaceState;
   vi.spyOn(history, "replaceState").mockImplementation(function (this: History, data, unused, url) {
-    for (const listener of listeners)
-      listener({ ...pushEvent(String(url)), navigationType: "replace" });
+    // Chrome marks a history.replaceState as a same-document replace.
+    for (const listener of listeners) {
+      const event = pushEvent(String(url));
+      listener({
+        ...event,
+        destination: { ...event.destination, sameDocument: true },
+        navigationType: "replace"
+      });
+    }
     replace.call(this, data, unused, url);
   });
   return {
@@ -400,6 +407,60 @@ describe("spa integration", () => {
     expect(history.length).toBe(entries);
     expect(location.pathname).toBe("/replaced/");
     expect(fetchSpy).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it("updateUrl moves the address within a route with no navigation; an island reads the new params", async () => {
+    stubChromeNavigation();
+    const { createApp } = makeCore();
+    const routes = defineRoutes({
+      home: route("/")
+        .render(() => undefined as never)
+        .head(() => ({ title: "Home" })),
+      watch: route("/watch/{id}/{ep}/")
+        .generate(() => [{ id: "a", ep: "1" }])
+        .render(() => undefined as never)
+        .head(() => ({ title: "Watch" }))
+    });
+    const seen: Array<string | undefined> = [];
+    const onNavEnd = vi.fn();
+    let playerContext: IslandContext<object> | undefined;
+    const player = createIsland("player", {
+      onMount(ctx) {
+        seen.push(ctx.params.ep);
+        playerContext = ctx;
+      },
+      onNavEnd
+    });
+    history.replaceState({}, "", "/watch/a/1/");
+    document.body.innerHTML = `<header><div data-island="player"></div></header><main><section id="page">episode</section></main>`;
+    app = createApp({
+      plugins: [sitePlugin, i18nPlugin, routerPlugin, headPlugin, spaPlugin, dataPlugin],
+      pluginConfigs: {
+        site: SITE,
+        i18n: { locales: ["en"], defaultLocale: "en" },
+        head: {},
+        spa: { progressBar: false, islands: [player] },
+        router: { routes }
+      }
+    });
+    await app.start();
+    const fetchSpy = vi.fn(() => Promise.resolve(new Response("", { status: 200 })));
+    vi.stubGlobal("fetch", fetchSpy);
+    const region = document.querySelector("#page");
+
+    app.spa.updateUrl("/watch/a/2/");
+    playerContext?.updateUrl("/watch/a/3/");
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(location.pathname).toBe("/watch/a/3/");
+    expect(app.spa.current()).toBe("/watch/a/3/");
+    expect(playerContext?.params.ep).toBe("3");
+    expect(seen).toEqual(["1"]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(onNavEnd).not.toHaveBeenCalled();
+    expect(document.querySelector("#page")).toBe(region);
+    expect(region?.textContent).toBe("episode");
     vi.unstubAllGlobals();
   });
 

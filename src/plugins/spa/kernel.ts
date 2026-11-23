@@ -26,7 +26,8 @@ import {
   type RouteSlice,
   scanAndMount,
   unmountAll,
-  unmountPageSpecific
+  unmountPageSpecific,
+  updateRoute
 } from "./islands";
 import { createPrefetcher, loadWithPrefetch, type PrefetchKind } from "./prefetch";
 import { createProgressBar, type ProgressBar } from "./progress";
@@ -100,6 +101,19 @@ function prefetchKind(deps: SpaKernelDeps, path: string): PrefetchKind | undefin
   if (!route?._handlers.render) return "html";
   if (isClientOnlyRoute(deps.router.mode(), route)) return undefined;
   return deps.dataAt ? "data" : "html";
+}
+
+/**
+ * The route a URL matches, by its pathname (search stripped).
+ *
+ * @param deps - The router.
+ * @param url - The URL (pathname + optional search).
+ * @returns The matched route, or `undefined` when none matches.
+ * @example
+ * routeOf(deps, "/watch/a/2/?t=1"); // the watch route
+ */
+function routeOf(deps: SpaKernelDeps, url: string): RouteDefinition | undefined {
+  return deps.router.match(url.split("?")[0] ?? url)?.route;
 }
 
 /**
@@ -629,6 +643,43 @@ export function createSpaKernel(
       });
   };
 
+  /**
+   * Move the address to another path of the current route, with no navigation: the client
+   * already shows the page. `pushingOwnUrl` marks the `history.replaceState`, so the Navigation
+   * API interceptor leaves its `navigate` event alone. Mounted islands get the new route slice
+   * (`params`) without a fetch, so `ctx.data` stays. No hooks, no swap, no scroll, no head sync.
+   *
+   * @param path - A path of the current route (pathname + optional search).
+   * @example
+   * updateUrl("/watch/a/2/");
+   */
+  const updateUrl = (path: string): void => {
+    // Nothing to move headless or onto the current path.
+    if (typeof document === "undefined") return;
+    if (path === state.currentUrl) return;
+
+    // Only within one route: a different route is a navigation.
+    const route = routeOf(deps, path);
+    if (!route || route !== routeOf(deps, state.currentUrl)) {
+      throw new Error(
+        `${ERROR_PREFIX} spa.updateUrl: "${path}" is another route.\n  Use navigate() to change routes.`
+      );
+    }
+
+    // Replace the history entry as our own write, so the interceptor does not navigate.
+    pushingOwnUrl = true;
+    try {
+      history.replaceState(history.state, "", path);
+    } finally {
+      pushingOwnUrl = false;
+    }
+
+    // Record the URL, hand the islands its params, announce it.
+    state.currentUrl = path;
+    updateRoute(state, islandRouteContext(path));
+    emit("spa:url", { url: path });
+  };
+
   return {
     /**
      * Register config islands and seed currentUrl from the document.
@@ -646,6 +697,7 @@ export function createSpaKernel(
       state.navigate = (path: string, options?: NavigateOptions): void => {
         navigateProgrammatic(path, options);
       };
+      state.updateUrl = updateUrl;
     },
     /**
      * Boot navigation interception + initial scan (throws if already started).
@@ -718,6 +770,16 @@ export function createSpaKernel(
      */
     processNav(path, options?: NavigateOptions): void {
       navigateProgrammatic(path, options);
+    },
+    /**
+     * Move the address to another path of the current route, with no navigation.
+     *
+     * @param path - A path of the current route.
+     * @example
+     * kernel.updateUrl("/watch/a/2/");
+     */
+    updateUrl(path): void {
+      updateUrl(path);
     },
     /**
      * Cross a boundary the SPA cannot swap (a different layout, the auth split) with a REAL

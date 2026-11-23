@@ -1006,3 +1006,99 @@ describe("kernel — prefetch", () => {
     await vi.waitFor(() => expect(observedHrefs(observe)).toContain("/elsewhere/"));
   });
 });
+
+describe("kernel.updateUrl — moves the address within one route, no navigation", () => {
+  const watch = { pattern: "/watch/{id}/{ep}/", _meta: {}, _handlers: {} } as RouteDefinition;
+  const about = { pattern: "/about/", _meta: {}, _handlers: {} } as RouteDefinition;
+
+  /** A router that matches `/watch/{id}/{ep}/` and `/about/` by path. */
+  const router = {
+    mode: () => "hybrid",
+    match: (path: string) => {
+      const [, id, ep] = /^\/watch\/([^/]+)\/([^/]+)\/$/.exec(path) ?? [];
+      if (id && ep) return { params: { id, ep }, route: watch };
+      // eslint-disable-next-line unicorn/no-null -- RouterApi.match returns `... | null` on no match
+      return path === "/about/" ? { params: {}, route: about } : null;
+    },
+    toUrl: () => ""
+  } as unknown as RouterApi;
+
+  /** A kernel on `/watch/a/1/` with spies on both history writers. */
+  function setupWatch() {
+    history.replaceState({}, "", "/watch/a/1/");
+    const state: SpaState = createState({ global: {}, config: {} });
+    const emit = vi.fn();
+    const kernel = createSpaKernel(state, {}, emit, { router, head: makeHead() });
+    kernel.init();
+    const replaceState = vi.spyOn(history, "replaceState");
+    const pushState = vi.spyOn(history, "pushState");
+    return { state, emit, kernel, replaceState, pushState };
+  }
+
+  it("replaces the history entry once, never pushes, and follows currentUrl", () => {
+    const { state, kernel, replaceState, pushState } = setupWatch();
+
+    kernel.updateUrl("/watch/a/2/");
+
+    expect(replaceState).toHaveBeenCalledOnce();
+    expect(replaceState).toHaveBeenCalledWith(history.state, "", "/watch/a/2/");
+    expect(pushState).not.toHaveBeenCalled();
+    expect(state.currentUrl).toBe("/watch/a/2/");
+    expect(location.pathname).toBe("/watch/a/2/");
+  });
+
+  it("emits spa:url once with the new url, and no navigation event", () => {
+    const { emit, kernel } = setupWatch();
+
+    kernel.updateUrl("/watch/a/2/");
+
+    expect(emit).toHaveBeenCalledOnce();
+    expect(emit).toHaveBeenCalledWith("spa:url", { url: "/watch/a/2/" });
+  });
+
+  it("is a no-op for the current path", () => {
+    const { emit, kernel, replaceState } = setupWatch();
+
+    kernel.updateUrl("/watch/a/1/");
+
+    expect(replaceState).not.toHaveBeenCalled();
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("throws a [web] error for a path of another route", () => {
+    const { state, kernel, replaceState } = setupWatch();
+
+    expect(() => kernel.updateUrl("/about/")).toThrow(
+      '[web] spa.updateUrl: "/about/" is another route.\n  Use navigate() to change routes.'
+    );
+    expect(replaceState).not.toHaveBeenCalled();
+    expect(state.currentUrl).toBe("/watch/a/1/");
+  });
+
+  it("sets the route slice of mounted islands and leaves their data alone", () => {
+    const { state, kernel } = setupWatch();
+    state.registeredIslands.set("player", { name: "player", hooks: {} });
+    document.body.innerHTML = `<header><div data-island="player"></div></header><main><section id="page"></section></main>`;
+    kernel.scan();
+    const [instance] = state.instances.values();
+    const data = { kept: true };
+    if (instance) instance.data = data;
+
+    kernel.updateUrl("/watch/a/2/");
+
+    expect(instance?.ctx.params).toEqual({ id: "a", ep: "2" });
+    expect(instance?.data).toBe(data);
+  });
+
+  it("is a no-op without a DOM: no throw, no history call", () => {
+    const { kernel, emit, replaceState } = setupWatch();
+    const original = globalThis.document;
+    // @ts-expect-error — simulate a headless environment.
+    delete globalThis.document;
+
+    expect(() => kernel.updateUrl("/watch/a/2/")).not.toThrow();
+    globalThis.document = original;
+    expect(replaceState).not.toHaveBeenCalled();
+    expect(emit).not.toHaveBeenCalled();
+  });
+});

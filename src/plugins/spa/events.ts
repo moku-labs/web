@@ -19,6 +19,9 @@ export function spaEvents(register: RegisterFunction) {
       "A navigation has been intercepted and is starting."
     ),
     "spa:navigated": register<{ url: string }>("The swap completed and the new URL is active."),
+    "spa:url": register<{ url: string }>(
+      "updateUrl moved the address within the current route, with no navigation."
+    ),
     "spa:island-mount": register<{ name: string; el: Element }>(
       "A island instance attached to an element."
     ),

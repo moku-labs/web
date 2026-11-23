@@ -15,6 +15,7 @@ const makeKernel = (dispose: () => void): SpaKernel => ({
   register() {},
   hardNavigate() {},
   processNav() {},
+  updateUrl() {},
   scan() {},
   dispose
 });
