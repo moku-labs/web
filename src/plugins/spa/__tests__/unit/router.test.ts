@@ -881,6 +881,31 @@ describe("Navigation API intercept handlers", () => {
     expect(event.intercept).not.toHaveBeenCalled();
   });
 
+  // Bug: WebKit reports `userInitiated: false` for a link tap. A tap on the open URL is a replace,
+  // so the guard took it for a script and the browser loaded the whole page again.
+  it("keeps a WebKit tap on a link to the open page in the document: scroll to top", async () => {
+    Object.defineProperty(globalThis, "location", {
+      value: { origin: "http://localhost:3000", pathname: "/mypage/", search: "" },
+      configurable: true
+    });
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    const onStart = vi.fn();
+    const listener = attachAndCapture({ onStart, onEnd: vi.fn(), onError: vi.fn() });
+    const event = fakeNavEvent({
+      navigationType: "replace",
+      userInitiated: false,
+      sourceElement: {} as Element,
+      destination: { url: "http://localhost:3000/mypage/", sameDocument: false }
+    });
+
+    listener(event);
+    expect(event.intercept).toHaveBeenCalledOnce();
+    await runIntercept(event);
+    expect(scrollTo).toHaveBeenCalledOnce();
+    expect(onStart).not.toHaveBeenCalled();
+  });
+
   // Each row breaks one condition of the script-replace guard; each must still be swapped.
   it.each([
     {

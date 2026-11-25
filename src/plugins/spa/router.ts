@@ -64,8 +64,13 @@ interface NavigateEvent extends Event {
   readonly hashChange: boolean;
   /** The navigation type. */
   readonly navigationType: "push" | "replace" | "reload" | "traverse";
-  /** Whether a person started it (a real link tap, the back button); `false` for a script. */
+  /**
+   * Whether a person started it (a real link tap, the back button); `false` for a script. WebKit
+   * reports `false` for a link tap too: read it together with `sourceElement`.
+   */
   readonly userInitiated: boolean;
+  /** The link or form that started the navigation, `null` for a script (WebKit, Chromium). */
+  readonly sourceElement?: Element | null;
   /** Aborts when this navigation is superseded by a newer one (or canceled). */
   readonly signal: AbortSignal;
   /**
@@ -551,11 +556,12 @@ export function attachNavigationApi(
     if (isOwnPush()) return;
     const url = new URL(navEvent.destination.url);
     // A script's location.replace() asks for a new document: LIFF's liff.state redirect waits
-    // for it. The kernel's own replace is a same-document history.replaceState.
+    // for it. The kernel's own replace is a same-document history.replaceState. A link tap is
+    // never a script: WebKit marks it `userInitiated: false`, and a tap on the open URL is a
+    // replace, which would load the whole page again.
+    const fromPerson = navEvent.userInitiated || Boolean(navEvent.sourceElement);
     const isScriptReplace =
-      navEvent.navigationType === "replace" &&
-      !navEvent.userInitiated &&
-      !navEvent.destination.sameDocument;
+      navEvent.navigationType === "replace" && !fromPerson && !navEvent.destination.sameDocument;
     const shouldSkipIntercept =
       !navEvent.canIntercept || navEvent.hashChange || navEvent.downloadRequest || isScriptReplace;
     if (shouldSkipIntercept) return;
