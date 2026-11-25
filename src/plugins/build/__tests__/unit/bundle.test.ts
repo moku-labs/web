@@ -89,6 +89,23 @@ describe("build/phases/bundle", () => {
     expect(js).toEqual({ "main.js": "assets/main.js" });
   });
 
+  // Bug: a file the bundle imports `with { type: "file" }` (a stylesheet loaded later) came out as
+  // an "asset" artifact, landed in the manifest and was injected as `<script type="module">`: the
+  // browser fetched it at once. Source maps likewise.
+  it("records only entry points: assets and source maps get no tag", async () => {
+    const runner = vi.fn(async () => ({
+      success: true,
+      outputs: [
+        { path: "dist/assets/spa-ab12.js", kind: "entry-point" },
+        { path: "dist/assets/fonts-9f8e.css", kind: "asset" },
+        { path: "dist/assets/spa-ab12.js.map", kind: "sourcemap" }
+      ]
+    }));
+    const ctx = makeCtx({ config: { outDir: "./dist", minify: true } });
+    await bundle(ctx, { runner, cssEntrypoints: [], jsEntrypoints: ["spa.ts"] });
+    expect(ctx.state.buildCache.get("js")).toEqual({ "spa-ab12.js": "assets/spa-ab12.js" });
+  });
+
   it("requests content-hashed naming for EVERY output kind (entry points included)", async () => {
     // Bun's default naming only hashes chunks/assets — entry points keep stable
     // names ("main.css"), which a CDN/browser can cache stale across deploys.
