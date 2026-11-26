@@ -493,7 +493,9 @@ export function createSpaKernel(
       // `renderVNode` clears the static SSR children on first render into this region,
       // then lets Preact own + diff it on subsequent navs (clearing again would desync
       // Preact's retained vdom from the live DOM → a blank region on the next nav).
-      renderVNode(vnode, region);
+      // The live region, looked up when the swap runs: an HTML swap queued before this one
+      // may have replaced the element `region` points at.
+      renderVNode(vnode, document.querySelector(resolved.swapSelector) ?? region);
       scanAndMount(state, emit, resolved.swapSelector, routeSlice);
       notifyNavEnd(state, routeSlice);
       state.prefetch?.observe();
