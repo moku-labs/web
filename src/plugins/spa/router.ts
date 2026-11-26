@@ -4,6 +4,7 @@
  */
 
 import type { ScrollMode } from "../router/types";
+import { skipActiveTransition, trackTransition, type ViewTransitionHandle } from "./transition";
 
 /** Teardown handle returned by the router attach step. */
 export type RouterTeardown = () => void;
@@ -281,71 +282,6 @@ function prefersReducedMotion(): boolean {
   );
 }
 
-/** The handle `document.startViewTransition` returns: the parts the swap reads. */
-interface ViewTransitionHandle {
-  finished?: Promise<unknown>;
-  ready?: Promise<unknown>;
-  skipTransition?: () => void;
-}
-
-/** The view transition now running, so the next swap can skip it: one at a time. */
-let activeTransition: ViewTransitionHandle | undefined;
-/** The last tap that landed on `<html>` while a transition ran, replayed when it ends. */
-let pendingTap: { x: number; y: number } | undefined;
-
-/**
- * Remember a tap that the running transition swallowed. While a view transition runs the
- * browser hit-tests to its `::view-transition` pseudo-elements, so a tap reaches `<html>`
- * and never the link under the finger.
- *
- * @param event - The click, listened for in the capture phase.
- * @example
- * document.addEventListener("click", rememberSwallowedTap, true);
- */
-function rememberSwallowedTap(event: MouseEvent): void {
-  if (event.target !== document.documentElement) return;
-  pendingTap = { x: event.clientX, y: event.clientY };
-}
-
-/**
- * Replay the swallowed tap on the link that is now under its point. The click goes through
- * the router like any tap, so a link the SPA leaves to the browser stays the browser's.
- *
- * @example
- * replaySwallowedTap(); // after the last transition finished
- */
-function replaySwallowedTap(): void {
-  const tap = pendingTap;
-  pendingTap = undefined;
-  if (!tap || typeof document.elementsFromPoint !== "function") return;
-  const hits = document.elementsFromPoint(tap.x, tap.y);
-  const link = hits.map(element => element.closest("a")).find(Boolean);
-  link?.click();
-}
-
-/**
- * Track a started transition: skip the one it replaces, listen for swallowed taps while it
- * runs, and replay the last one when it ends. A transition that a newer one replaced ends
- * nothing: the newer one owns the listener and the replay.
- *
- * @param transition - The handle `startViewTransition` returned.
- * @example
- * trackTransition(document.startViewTransition(doSwap));
- */
-function trackTransition(transition: ViewTransitionHandle | undefined): void {
-  if (!transition) return;
-  if (!activeTransition) document.addEventListener("click", rememberSwallowedTap, true);
-  activeTransition = transition;
-  // eslint-disable-next-line jsdoc/require-jsdoc -- inline end-of-transition cleanup
-  const end = (): void => {
-    if (activeTransition !== transition) return;
-    activeTransition = undefined;
-    document.removeEventListener("click", rememberSwallowedTap, true);
-    replaySwallowedTap();
-  };
-  Promise.resolve(transition.finished).then(end).catch(end);
-}
-
 /**
  * Run a DOM-mutating swap, optionally wrapped in the View Transitions API when
  * enabled and supported (instant swap otherwise — never throws).
@@ -365,6 +301,9 @@ function trackTransition(transition: ViewTransitionHandle | undefined): void {
  *     engine, including those without the `types` dictionary form);
  *   • the standards-track `types` option (`:active-view-transition-type(slide)`) when the
  *     engine supports the `startViewTransition({ update, types })` dictionary form.
+ * Only one transition runs at a time: a new swap skips the running one, and a tap that a
+ * transition swallowed is replayed on its link when the last one ends (`transition.ts`).
+ *
  * Empty `types` ⇒ the default root crossfade. A shared `view-transition-name` left on an
  * element across the swap (e.g. a card and the panel it opens) morphs one into the other.
  *
@@ -407,7 +346,7 @@ export function runSwap(
 
   // A navigation that lands while a transition runs: skip the running one first, so two
   // transitions never overlap (its update still applies; only its animation is dropped).
-  activeTransition?.skipTransition?.();
+  skipActiveTransition();
 
   let result: ViewTransitionHandle | undefined;
   if (hasTypes) {

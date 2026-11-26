@@ -13,6 +13,7 @@ import {
   saveScrollPosition,
   swapRegion
 } from "../../router";
+import { resetTransitionTracking } from "../../transition";
 
 beforeEach(() => {
   document.body.innerHTML = "";
@@ -26,6 +27,10 @@ afterEach(() => {
   // motion), so a leaked `matches: true` stub would otherwise flip later tests to "instant".
   vi.unstubAllGlobals();
   sessionStorage.clear();
+  // Runs even when a test fails: no stubbed transition API and no tracked transition leaks on.
+  delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
+  delete (document as unknown as { elementsFromPoint?: unknown }).elementsFromPoint;
+  resetTransitionTracking();
 });
 
 /** A fake NavigateEvent that records intercept() registration. */
@@ -611,8 +616,6 @@ describe("swapRegion / runSwap (View Transitions)", () => {
     );
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(tabClicks).toHaveLength(1);
-    delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
-    delete (document as unknown as { elementsFromPoint?: unknown }).elementsFromPoint;
   });
 
   it("a swap started while a transition runs skips the running one first: never two at once", async () => {
@@ -638,7 +641,6 @@ describe("swapRegion / runSwap (View Transitions)", () => {
     expect(startViewTransition).toHaveBeenCalledTimes(2);
     expect(skippedBeforeSecondStart).toBe(true);
     await new Promise(resolve => setTimeout(resolve, 0));
-    delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
   });
 
   it("swapRegion finds the region when its swap runs: a swap queued behind another still lands", () => {
@@ -661,7 +663,6 @@ describe("swapRegion / runSwap (View Transitions)", () => {
     expect(swapRegion(pageDoc("mylist"), "main > section", vt, vi.fn())).toBe(true);
     for (const update of queued) update();
     expect(document.querySelector("#page")?.textContent).toBe("mylist");
-    delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
   });
 
   it("swapRegion returns false (no swap) when the fetched document lacks the region", () => {

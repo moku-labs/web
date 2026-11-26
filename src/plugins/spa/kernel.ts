@@ -3,7 +3,9 @@
  *
  * `createSpaKernel(state, config, emit, deps)` is a PURE factory: it closes over
  * the injected state/config/emit/deps only — never the Moku ctx, never module
- * singletons. It is unit-testable with a mock state object and a spy emit.
+ * singletons. It is unit-testable with a mock state object and a spy emit. The one
+ * document-wide exception is the view-transition tracker (`transition.ts`), which the
+ * kernel releases on teardown.
  * @see README.md
  */
 
@@ -42,6 +44,7 @@ import {
   swapRegion
 } from "./router";
 import { resolveSpaConfig } from "./state";
+import { resetTransitionTracking } from "./transition";
 import type {
   // eslint-disable-next-line unicorn/prevent-abbreviations -- canonical public type name per spec
   IslandDef,
@@ -479,6 +482,8 @@ export function createSpaKernel(
     syncDataHead(deps.head, pathname, name, route, routeContext);
     unmountPageSpecific(state, emit);
     const routeSlice = islandRouteContext(pathname);
+    // Set when the render threw and the page loads in full: no swap completed to announce.
+    let renderFailed = false;
 
     /**
      * Render the VNode into the region and re-mount its islands in one paint — the
@@ -493,14 +498,15 @@ export function createSpaKernel(
       // `renderVNode` clears the static SSR children on first render into this region,
       // then lets Preact own + diff it on subsequent navs (clearing again would desync
       // Preact's retained vdom from the live DOM → a blank region on the next nav).
-      // The live region, looked up when the swap runs: an HTML swap queued before this one
-      // may have replaced the element `region` points at.
       try {
+        // The live region, looked up when the swap runs: an HTML swap queued before this one
+        // may have replaced the element `region` points at.
         renderVNode(vnode, document.querySelector(resolved.swapSelector) ?? region);
       } catch (error) {
         // renderVNode cleared the region before the throw. Inside a view transition the throw only
         // rejects the transition's promises, so report it and load the page in full instead of
         // leaving the region empty.
+        renderFailed = true;
         reportError(error);
         handleError();
         location.href = pathname;
@@ -511,6 +517,8 @@ export function createSpaKernel(
       state.prefetch?.observe();
     };
     runSwap(renderAndMount, pendingTransition, applyPendingScroll);
+    // An instant swap ran right here: a failed render is already loading the page in full.
+    if (renderFailed) return;
 
     // Record the new URL and announce the completed navigation.
     state.currentUrl = pathname;
@@ -812,6 +820,7 @@ export function createSpaKernel(
       state.prefetch?.dispose();
       // eslint-disable-next-line unicorn/no-null -- `prefetch` is `Prefetcher | null`
       state.prefetch = null;
+      resetTransitionTracking();
       location.assign(url);
     },
     /**
@@ -836,6 +845,7 @@ export function createSpaKernel(
       state.prefetch?.dispose();
       // eslint-disable-next-line unicorn/no-null -- `prefetch` is `Prefetcher | null`
       state.prefetch = null;
+      resetTransitionTracking();
       unmountAll(state, emit);
       progress = undefined;
       state.started = false;

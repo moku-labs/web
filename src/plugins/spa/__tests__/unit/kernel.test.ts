@@ -5,6 +5,7 @@ import type { Api as HeadApi } from "../../../head/types";
 import type { RouteDefinition, RouterApi } from "../../../router/types";
 import { createSpaKernel, resolveSpaConfig } from "../../kernel";
 import { createState } from "../../state";
+import { resetTransitionTracking } from "../../transition";
 import type { SpaConfig, SpaKernel, SpaKernelDeps, SpaState } from "../../types";
 
 /** happy-dom's own Location: several tests below swap `globalThis.location` for a stub. */
@@ -115,6 +116,12 @@ afterEach(() => {
   document.body.innerHTML = "";
   document.head.innerHTML = "";
   vi.restoreAllMocks();
+  // Runs even when a test fails: no stubbed global, location or transition API leaks on.
+  vi.unstubAllGlobals();
+  Object.defineProperty(globalThis, "location", { value: happyLocation, configurable: true });
+  Reflect.deleteProperty(document, "startViewTransition");
+  Reflect.deleteProperty(document, "elementsFromPoint");
+  resetTransitionTracking();
 });
 
 describe("resolveSpaConfig", () => {
@@ -354,6 +361,50 @@ describe("double-boot guard", () => {
     kernel.dispose();
   });
 
+  // Bug: a stop during a view transition left the tap listener on, and the swallowed tap was replayed
+  // on a link after the app was gone (a full page load nobody asked for).
+  it("dispose during a view transition drops the swallowed tap: nothing is replayed", async () => {
+    const html = `<main><section id="page"><a id="link" href="/next/">next</a></section></main>`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(new Response(html, { status: 200 })))
+    );
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    let endTransition!: () => void;
+    const finished = new Promise<void>(resolve => {
+      endTransition = resolve;
+    });
+    Object.defineProperty(document, "startViewTransition", {
+      configurable: true,
+      value: (update: () => void) => {
+        update();
+        return { finished, ready: Promise.resolve() };
+      }
+    });
+    const linkClicks = vi.fn();
+    Object.defineProperty(document, "elementsFromPoint", {
+      configurable: true,
+      value: () => [document.querySelector("#link")]
+    });
+    const { emit, kernel } = setup({ viewTransitions: "crossfade" });
+    kernel.init();
+    kernel.processNav("/after/");
+    await vi.waitFor(() => expect(emit).toHaveBeenCalledWith("spa:navigated", { url: "/after/" }));
+    document.querySelector("#link")?.addEventListener("click", event => {
+      event.preventDefault();
+      linkClicks();
+    });
+
+    document.documentElement.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 })
+    );
+    kernel.dispose();
+    endTransition();
+    await finished;
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(linkClicks).not.toHaveBeenCalled();
+  });
+
   it("hardNavigate detaches the interceptor, then does a real location.assign", () => {
     const { state, kernel } = setup();
     kernel.init();
@@ -483,7 +534,6 @@ describe("kernel.processNav — client DATA path (data plugin composed)", () => 
     await vi.waitFor(() =>
       expect(emit).toHaveBeenCalledWith("spa:navigated", { url: "/en/hello/" })
     );
-    Reflect.deleteProperty(document, "startViewTransition");
     expect(document.querySelector("#page")?.textContent).toBe("data:From Data");
   });
 
@@ -530,8 +580,37 @@ describe("kernel.processNav — client DATA path (data plugin composed)", () => 
 
     kernel.processNav("/en/hello/");
     await vi.waitFor(() => expect(hrefSetter).toHaveBeenCalledWith("/en/hello/"));
-    Reflect.deleteProperty(document, "startViewTransition");
     expect(reportError).toHaveBeenCalledWith(expect.objectContaining({ message: "render failed" }));
+  });
+
+  it("a DATA render that throws without a view transition never announces spa:navigated", async () => {
+    // Bug: the failed render loads the page in full, yet the kernel still recorded the URL and
+    // emitted "the swap completed" for a swap that never happened.
+    const { state, emit, kernel } = setupData({
+      route: makeDataRoute({ render: () => h(BrokenComponent, {}) })
+    });
+    kernel.init();
+    const from = state.currentUrl;
+    vi.stubGlobal("reportError", vi.fn());
+    const hrefSetter = vi.fn();
+    Object.defineProperty(globalThis, "location", {
+      configurable: true,
+      value: {
+        pathname: "/",
+        search: "",
+        get href() {
+          return "";
+        },
+        set href(v: string) {
+          hrefSetter(v);
+        }
+      }
+    });
+
+    kernel.processNav("/en/hello/");
+    await vi.waitFor(() => expect(hrefSetter).toHaveBeenCalledWith("/en/hello/"));
+    expect(emit).not.toHaveBeenCalledWith("spa:navigated", expect.anything());
+    expect(state.currentUrl).toBe(from);
   });
 
   it("announces the nav (spa:navigate) BEFORE awaiting the data fetch — feedback during the load", async () => {
