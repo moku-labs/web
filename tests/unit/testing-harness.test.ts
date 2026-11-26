@@ -120,6 +120,45 @@ describe("mountIsland — teardown & cross-island api", () => {
     expect(pong).toBe("pong");
   });
 
+  it("resolves ctx.require from options.plugins; a missing stub throws naming the plugin", () => {
+    const probe = { name: "probe" } as never;
+    const other = { name: "other" } as never;
+    let pong = "";
+    const consumer = createIsland("require-consumer", {
+      onMount: ctx => {
+        pong = (ctx.require(probe) as { ping(): string }).ping();
+      }
+    });
+    mountIsland(consumer, { plugins: { probe: { ping: () => "pong" } } });
+    expect(pong).toBe("pong");
+
+    const missing = createIsland("require-missing", {
+      onMount: ctx => {
+        ctx.require(other);
+      }
+    });
+    expect(() => mountIsland(missing, { plugins: { probe: {} } })).toThrow(
+      '[web] mountIsland: no stub for plugin "other".\n  Pass it in options.plugins.'
+    );
+    expect(() => mountIsland(missing)).toThrow(/no stub for plugin "other"/);
+  });
+
+  it("renderIsland's base ctx.require throws naming the plugin unless overridden", () => {
+    const probe = { name: "probe" } as never;
+    const view = (_: object, ctx: { require: (plugin: never) => unknown }) => {
+      ctx.require(probe);
+      return "<i></i>";
+    };
+    expect(() => renderIsland(view as never, { state: {} })).toThrow(
+      '[web] mountIsland: no stub for plugin "probe".\n  Pass it in options.plugins.'
+    );
+    const result = renderIsland(view as never, {
+      state: {},
+      ctx: { require: (() => ({})) as never }
+    });
+    expect(result.html()).toBe("<i></i>");
+  });
+
   it("registers the island's own api so it resolves by name", () => {
     const provider = createIsland<object, { ping(): string }>("provider", {
       api: () => ({ ping: () => "pong" })

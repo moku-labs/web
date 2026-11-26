@@ -25,7 +25,10 @@ function stubCtx(el: HTMLElement) {
     set: () => {},
     flush: () => {},
     cleanup: () => {},
-    island: () => undefined
+    island: () => undefined,
+    require: (() => {
+      throw new Error("ctx.require is not available in this stub");
+    }) as never
   };
 }
 

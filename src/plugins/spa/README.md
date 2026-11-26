@@ -149,7 +149,27 @@ Why not `<link rel="prefetch">`: sites serve HTML with `Cache-Control: max-age=0
 
 ### Island lifecycle
 
-A island is a `{ name, hooks }` definition (`IslandDef`) created via `createIsland` and matched at mount time against the `data-island` attribute of elements inside the swap region. Each mounted element gets a `IslandInstance`; every hook receives a `IslandContext` (`{ el, data }`, where `data` is the page payload parsed from the inline `script#__DATA__`, or `{}` when absent/invalid).
+A island is a `{ name, hooks }` definition (`IslandDef`) created via `createIsland` and matched at mount time against the `data-island` attribute of elements inside the swap region. Each mounted element gets a `IslandInstance`; every hook, `render` and `events` handler receives the same `IslandContext`:
+
+| Member | What it is |
+|---|---|
+| `el`, `data` | The bound element; the page payload parsed from the inline `script#__DATA__` (`{}` when absent/invalid). |
+| `params`, `meta`, `locale`, `url` | The matched route's slice (live across navigations). |
+| `navigate`, `updateUrl` | Programmatic navigation; move the address within the same route. |
+| `state`, `set`, `flush`, `cleanup` | Per-instance state, batched render, teardown disposers. |
+| `island(name)` | Another island's registered `api`, or `undefined`. |
+| `require(plugin)` | Any plugin registered in the app, by instance, typed by the plugin. |
+
+`ctx.require(plugin)` is the same call a plugin makes in its own hooks. It is not limited to the `depends` of `spa`, and it throws the core "not registered" error for a plugin the app lacks. Islands mount after `spa` init, so a real app never meets the before-init error; a headless ctx built without the plugin throws `[web] spa: ctx.require("<name>") called before the spa plugin initialized.` In tests, `mountIsland(island, { plugins: { replicant: stubApi } })` resolves it from stubs keyed by plugin name.
+
+```ts
+export const coinsIsland = createIsland("coins", {
+  onMount: ctx => {
+    const replicant = ctx.require(replicantPlugin); // typed ReplicantApi
+    ctx.el.textContent = String(replicant.state().coins);
+  }
+});
+```
 
 Instances are classified as **persistent** (outside the swap area — survive navigation, receive `onNavStart`/`onNavEnd`, never `onUnMount` on nav) or **page-specific** (inside the swap area — full unmount/destroy/create/mount cycle on every navigation).
 

@@ -878,6 +878,8 @@ export function initSpa(ctx: SpaContext): void {
   }
   const kernel = createSpaKernel(ctx.state, ctx.config, ctx.emit, deps);
   ctx.state.kernel = kernel;
+  // The island context's `ctx.require` reads through state (the same seam as `state.navigate`).
+  ctx.state.require = ctx.require;
   kernel.init();
 }
 
