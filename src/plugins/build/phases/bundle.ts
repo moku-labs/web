@@ -443,10 +443,12 @@ async function runOne(
   // chunks (kind "chunk") are deliberately NOT recorded: this manifest feeds the
   // pages phase's <link>/<script> injection, and script-tagging a chunk would
   // eagerly load it on every page — the entry's rewritten `import("./chunk-…")`
-  // already fetches it on demand.
+  // already fetches it on demand. Only entry points get a tag: an "asset" (a file imported
+  // `with { type: "file" }`, an emitted font) or a "sourcemap" injected as a module script would
+  // be fetched at once by every page. An output with no kind counts as an entry point.
   const hashed: BuildCacheEntry = {};
   for (const output of result.outputs) {
-    if (output.kind === "chunk") continue;
+    if (output.kind !== undefined && output.kind !== "entry-point") continue;
     hashed[path.basename(output.path)] = normalizeAssetPath(output.path, outDir);
   }
 
