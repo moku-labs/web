@@ -5,7 +5,8 @@ import type { Api as HeadApi } from "../../../head/types";
 import type { RouteDefinition, RouterApi } from "../../../router/types";
 import { createSpaKernel, resolveSpaConfig } from "../../kernel";
 import { createState } from "../../state";
-import type { SpaKernel, SpaKernelDeps, SpaState } from "../../types";
+import { resetTransitionTracking } from "../../transition";
+import type { SpaConfig, SpaKernel, SpaKernelDeps, SpaState } from "../../types";
 
 /** happy-dom's own Location: several tests below swap `globalThis.location` for a stub. */
 const happyLocation = globalThis.location;
@@ -49,6 +50,12 @@ interface DataSetup {
   raw?: unknown;
   mode?: "ssg" | "spa" | "hybrid";
   render?: (route: { head?: { title?: string } }) => string;
+  config?: SpaConfig;
+}
+
+/** A component that throws while Preact renders it. */
+function BrokenComponent(): never {
+  throw new Error("render failed");
 }
 
 /** A kernel wired with the data reader enabled + the given matched route + raw payload. */
@@ -62,7 +69,7 @@ function setupData(options: DataSetup = {}) {
     head: makeHead(options.render),
     dataAt
   };
-  const kernel = createSpaKernel(state, {}, emit, deps);
+  const kernel = createSpaKernel(state, options.config ?? {}, emit, deps);
   return { state, emit, kernel, dataAt };
 }
 
@@ -109,6 +116,12 @@ afterEach(() => {
   document.body.innerHTML = "";
   document.head.innerHTML = "";
   vi.restoreAllMocks();
+  // Runs even when a test fails: no stubbed global, location or transition API leaks on.
+  vi.unstubAllGlobals();
+  Object.defineProperty(globalThis, "location", { value: happyLocation, configurable: true });
+  Reflect.deleteProperty(document, "startViewTransition");
+  Reflect.deleteProperty(document, "elementsFromPoint");
+  resetTransitionTracking();
 });
 
 describe("resolveSpaConfig", () => {
@@ -348,6 +361,50 @@ describe("double-boot guard", () => {
     kernel.dispose();
   });
 
+  // Bug: a stop during a view transition left the tap listener on, and the swallowed tap was replayed
+  // on a link after the app was gone (a full page load nobody asked for).
+  it("dispose during a view transition drops the swallowed tap: nothing is replayed", async () => {
+    const html = `<main><section id="page"><a id="link" href="/next/">next</a></section></main>`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(new Response(html, { status: 200 })))
+    );
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    let endTransition!: () => void;
+    const finished = new Promise<void>(resolve => {
+      endTransition = resolve;
+    });
+    Object.defineProperty(document, "startViewTransition", {
+      configurable: true,
+      value: (update: () => void) => {
+        update();
+        return { finished, ready: Promise.resolve() };
+      }
+    });
+    const linkClicks = vi.fn();
+    Object.defineProperty(document, "elementsFromPoint", {
+      configurable: true,
+      value: () => [document.querySelector("#link")]
+    });
+    const { emit, kernel } = setup({ viewTransitions: "crossfade" });
+    kernel.init();
+    kernel.processNav("/after/");
+    await vi.waitFor(() => expect(emit).toHaveBeenCalledWith("spa:navigated", { url: "/after/" }));
+    document.querySelector("#link")?.addEventListener("click", event => {
+      event.preventDefault();
+      linkClicks();
+    });
+
+    document.documentElement.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 })
+    );
+    kernel.dispose();
+    endTransition();
+    await finished;
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(linkClicks).not.toHaveBeenCalled();
+  });
+
   it("hardNavigate detaches the interceptor, then does a real location.assign", () => {
     const { state, kernel } = setup();
     kernel.init();
@@ -448,6 +505,112 @@ describe("kernel.processNav — client DATA path (data plugin composed)", () => 
     expect(document.title).toBe("From Data");
     expect(state.currentUrl).toBe("/en/hello/");
     expect(fetchSpy).not.toHaveBeenCalled(); // DATA path, not HTML-over-fetch
+  });
+
+  it("a DATA swap queued behind a running transition renders into the live region, not the replaced one", async () => {
+    // Bug: an earlier HTML swap lands while this navigation waits for its transition, so the
+    // region this navigation looked up is detached by the time its update runs. Rendering into it
+    // leaves the page on the old navigation's content.
+    const { emit, kernel } = setupData({
+      route: makeDataRoute(),
+      raw: { title: "From Data" },
+      config: { viewTransitions: true }
+    });
+    kernel.init();
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    Object.defineProperty(document, "startViewTransition", {
+      configurable: true,
+      value: (update: () => void) => {
+        // The earlier navigation's queued swap replaces the region first.
+        const fresh = document.createElement("section");
+        fresh.id = "page";
+        document.querySelector("#page")?.replaceWith(fresh);
+        update();
+        return { finished: Promise.resolve(), ready: Promise.resolve() };
+      }
+    });
+
+    kernel.processNav("/en/hello/");
+    await vi.waitFor(() =>
+      expect(emit).toHaveBeenCalledWith("spa:navigated", { url: "/en/hello/" })
+    );
+    expect(document.querySelector("#page")?.textContent).toBe("data:From Data");
+  });
+
+  it("a DATA render that throws inside a view transition reports the error and loads the page in full", async () => {
+    // Bug: renderVNode clears the region, then the component throws. Inside startViewTransition the
+    // error only rejects `finished`/`ready`, which runSwap swallows, and tryDataRender's catch has
+    // already returned: the region stays empty (the black content area) and nothing is reported.
+    const { kernel } = setupData({
+      route: makeDataRoute({ render: () => h(BrokenComponent, {}) }),
+      config: { viewTransitions: true }
+    });
+    kernel.init();
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    const reportError = vi.fn();
+    vi.stubGlobal("reportError", reportError);
+    Object.defineProperty(document, "startViewTransition", {
+      configurable: true,
+      value: (update: () => void) => {
+        // The browser runs the update itself: its throw only rejects the transition's promises.
+        let finished: Promise<void>;
+        try {
+          update();
+          finished = Promise.resolve();
+        } catch (error) {
+          finished = Promise.reject(error);
+        }
+        return { finished, ready: finished };
+      }
+    });
+    const hrefSetter = vi.fn();
+    Object.defineProperty(globalThis, "location", {
+      configurable: true,
+      value: {
+        pathname: "/",
+        search: "",
+        get href() {
+          return "";
+        },
+        set href(v: string) {
+          hrefSetter(v);
+        }
+      }
+    });
+
+    kernel.processNav("/en/hello/");
+    await vi.waitFor(() => expect(hrefSetter).toHaveBeenCalledWith("/en/hello/"));
+    expect(reportError).toHaveBeenCalledWith(expect.objectContaining({ message: "render failed" }));
+  });
+
+  it("a DATA render that throws without a view transition never announces spa:navigated", async () => {
+    // Bug: the failed render loads the page in full, yet the kernel still recorded the URL and
+    // emitted "the swap completed" for a swap that never happened.
+    const { state, emit, kernel } = setupData({
+      route: makeDataRoute({ render: () => h(BrokenComponent, {}) })
+    });
+    kernel.init();
+    const from = state.currentUrl;
+    vi.stubGlobal("reportError", vi.fn());
+    const hrefSetter = vi.fn();
+    Object.defineProperty(globalThis, "location", {
+      configurable: true,
+      value: {
+        pathname: "/",
+        search: "",
+        get href() {
+          return "";
+        },
+        set href(v: string) {
+          hrefSetter(v);
+        }
+      }
+    });
+
+    kernel.processNav("/en/hello/");
+    await vi.waitFor(() => expect(hrefSetter).toHaveBeenCalledWith("/en/hello/"));
+    expect(emit).not.toHaveBeenCalledWith("spa:navigated", expect.anything());
+    expect(state.currentUrl).toBe(from);
   });
 
   it("announces the nav (spa:navigate) BEFORE awaiting the data fetch — feedback during the load", async () => {

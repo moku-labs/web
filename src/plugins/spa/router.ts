@@ -4,6 +4,7 @@
  */
 
 import type { ScrollMode } from "../router/types";
+import { skipActiveTransition, trackTransition, type ViewTransitionHandle } from "./transition";
 
 /** Teardown handle returned by the router attach step. */
 export type RouterTeardown = () => void;
@@ -300,6 +301,9 @@ function prefersReducedMotion(): boolean {
  *     engine, including those without the `types` dictionary form);
  *   • the standards-track `types` option (`:active-view-transition-type(slide)`) when the
  *     engine supports the `startViewTransition({ update, types })` dictionary form.
+ * Only one transition runs at a time: a new swap skips the running one, and a tap that a
+ * transition swallowed is replayed on its link when the last one ends (`transition.ts`).
+ *
  * Empty `types` ⇒ the default root crossfade. A shared `view-transition-name` left on an
  * element across the swap (e.g. a card and the panel it opens) morphs one into the other.
  *
@@ -319,7 +323,7 @@ export function runSwap(
   const docWithVt = document as Document & {
     startViewTransition?: (
       cb: (() => void) | { update: () => void; types?: string[] }
-    ) => { finished?: Promise<unknown>; ready?: Promise<unknown> } | undefined;
+    ) => ViewTransitionHandle | undefined;
   };
   const canUseViewTransitions =
     transition.enabled && !reduced && typeof docWithVt.startViewTransition === "function";
@@ -340,7 +344,11 @@ export function runSwap(
     if (hasTypes && root) delete root.dataset.viewTransition;
   };
 
-  let result: { finished?: Promise<unknown>; ready?: Promise<unknown> } | undefined;
+  // A navigation that lands while a transition runs: skip the running one first, so two
+  // transitions never overlap (its update still applies; only its animation is dropped).
+  skipActiveTransition();
+
+  let result: ViewTransitionHandle | undefined;
   if (hasTypes) {
     try {
       // Standards-track dictionary form: also drives `:active-view-transition-type(...)`.
@@ -360,6 +368,7 @@ export function runSwap(
   // applies. The skip is benign, so own that one rejection HERE rather than leaking an "Uncaught (in
   // promise)" to every consumer's console. (Nothing else reads `ready`; this purely marks it handled.)
   Promise.resolve(result?.ready).catch(() => {});
+  trackTransition(result);
 }
 
 /**
@@ -394,7 +403,10 @@ export function swapRegion(
   if (!newContent || !currentContent) return false;
   runSwap(
     () => {
-      currentContent.replaceWith(newContent);
+      // Look the region up again when the swap runs: a swap queued behind a running
+      // transition finds the region that transition put in, not the detached old one.
+      const liveContent = document.querySelector(swapSelector) ?? currentContent;
+      liveContent.replaceWith(newContent);
       onSwapped();
     },
     transition,
