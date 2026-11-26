@@ -495,7 +495,17 @@ export function createSpaKernel(
       // Preact's retained vdom from the live DOM → a blank region on the next nav).
       // The live region, looked up when the swap runs: an HTML swap queued before this one
       // may have replaced the element `region` points at.
-      renderVNode(vnode, document.querySelector(resolved.swapSelector) ?? region);
+      try {
+        renderVNode(vnode, document.querySelector(resolved.swapSelector) ?? region);
+      } catch (error) {
+        // renderVNode cleared the region before the throw. Inside a view transition the throw only
+        // rejects the transition's promises, so report it and load the page in full instead of
+        // leaving the region empty.
+        reportError(error);
+        handleError();
+        location.href = pathname;
+        return;
+      }
       scanAndMount(state, emit, resolved.swapSelector, routeSlice);
       notifyNavEnd(state, routeSlice);
       state.prefetch?.observe();

@@ -52,6 +52,11 @@ interface DataSetup {
   config?: SpaConfig;
 }
 
+/** A component that throws while Preact renders it. */
+function BrokenComponent(): never {
+  throw new Error("render failed");
+}
+
 /** A kernel wired with the data reader enabled + the given matched route + raw payload. */
 function setupData(options: DataSetup = {}) {
   const state: SpaState = createState({ global: {}, config: {} });
@@ -480,6 +485,53 @@ describe("kernel.processNav — client DATA path (data plugin composed)", () => 
     );
     Reflect.deleteProperty(document, "startViewTransition");
     expect(document.querySelector("#page")?.textContent).toBe("data:From Data");
+  });
+
+  it("a DATA render that throws inside a view transition reports the error and loads the page in full", async () => {
+    // Bug: renderVNode clears the region, then the component throws. Inside startViewTransition the
+    // error only rejects `finished`/`ready`, which runSwap swallows, and tryDataRender's catch has
+    // already returned: the region stays empty (the black content area) and nothing is reported.
+    const { kernel } = setupData({
+      route: makeDataRoute({ render: () => h(BrokenComponent, {}) }),
+      config: { viewTransitions: true }
+    });
+    kernel.init();
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    const reportError = vi.fn();
+    vi.stubGlobal("reportError", reportError);
+    Object.defineProperty(document, "startViewTransition", {
+      configurable: true,
+      value: (update: () => void) => {
+        // The browser runs the update itself: its throw only rejects the transition's promises.
+        let finished: Promise<void>;
+        try {
+          update();
+          finished = Promise.resolve();
+        } catch (error) {
+          finished = Promise.reject(error);
+        }
+        return { finished, ready: finished };
+      }
+    });
+    const hrefSetter = vi.fn();
+    Object.defineProperty(globalThis, "location", {
+      configurable: true,
+      value: {
+        pathname: "/",
+        search: "",
+        get href() {
+          return "";
+        },
+        set href(v: string) {
+          hrefSetter(v);
+        }
+      }
+    });
+
+    kernel.processNav("/en/hello/");
+    await vi.waitFor(() => expect(hrefSetter).toHaveBeenCalledWith("/en/hello/"));
+    Reflect.deleteProperty(document, "startViewTransition");
+    expect(reportError).toHaveBeenCalledWith(expect.objectContaining({ message: "render failed" }));
   });
 
   it("announces the nav (spa:navigate) BEFORE awaiting the data fetch — feedback during the load", async () => {
