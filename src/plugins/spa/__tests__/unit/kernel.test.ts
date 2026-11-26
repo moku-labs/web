@@ -354,6 +354,52 @@ describe("double-boot guard", () => {
     kernel.dispose();
   });
 
+  // Bug: a stop during a view transition left the tap listener on, and the swallowed tap was replayed
+  // on a link after the app was gone (a full page load nobody asked for).
+  it("dispose during a view transition drops the swallowed tap: nothing is replayed", async () => {
+    const html = `<main><section id="page"><a id="link" href="/next/">next</a></section></main>`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(new Response(html, { status: 200 })))
+    );
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    let endTransition!: () => void;
+    const finished = new Promise<void>(resolve => {
+      endTransition = resolve;
+    });
+    Object.defineProperty(document, "startViewTransition", {
+      configurable: true,
+      value: (update: () => void) => {
+        update();
+        return { finished, ready: Promise.resolve() };
+      }
+    });
+    const linkClicks = vi.fn();
+    Object.defineProperty(document, "elementsFromPoint", {
+      configurable: true,
+      value: () => [document.querySelector("#link")]
+    });
+    const { emit, kernel } = setup({ viewTransitions: "crossfade" });
+    kernel.init();
+    kernel.processNav("/after/");
+    await vi.waitFor(() => expect(emit).toHaveBeenCalledWith("spa:navigated", { url: "/after/" }));
+    document.querySelector("#link")?.addEventListener("click", event => {
+      event.preventDefault();
+      linkClicks();
+    });
+
+    document.documentElement.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 })
+    );
+    kernel.dispose();
+    endTransition();
+    await finished;
+    await new Promise(resolve => setTimeout(resolve, 0));
+    Reflect.deleteProperty(document, "startViewTransition");
+    Reflect.deleteProperty(document, "elementsFromPoint");
+    expect(linkClicks).not.toHaveBeenCalled();
+  });
+
   it("hardNavigate detaches the interceptor, then does a real location.assign", () => {
     const { state, kernel } = setup();
     kernel.init();

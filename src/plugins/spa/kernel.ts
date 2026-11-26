@@ -42,6 +42,7 @@ import {
   swapRegion
 } from "./router";
 import { resolveSpaConfig } from "./state";
+import { resetTransitionTracking } from "./transition";
 import type {
   // eslint-disable-next-line unicorn/prevent-abbreviations -- canonical public type name per spec
   IslandDef,
@@ -812,6 +813,7 @@ export function createSpaKernel(
       state.prefetch?.dispose();
       // eslint-disable-next-line unicorn/no-null -- `prefetch` is `Prefetcher | null`
       state.prefetch = null;
+      resetTransitionTracking();
       location.assign(url);
     },
     /**
@@ -836,6 +838,7 @@ export function createSpaKernel(
       state.prefetch?.dispose();
       // eslint-disable-next-line unicorn/no-null -- `prefetch` is `Prefetcher | null`
       state.prefetch = null;
+      resetTransitionTracking();
       unmountAll(state, emit);
       progress = undefined;
       state.started = false;
