@@ -281,6 +281,71 @@ function prefersReducedMotion(): boolean {
   );
 }
 
+/** The handle `document.startViewTransition` returns: the parts the swap reads. */
+interface ViewTransitionHandle {
+  finished?: Promise<unknown>;
+  ready?: Promise<unknown>;
+  skipTransition?: () => void;
+}
+
+/** The view transition now running, so the next swap can skip it: one at a time. */
+let activeTransition: ViewTransitionHandle | undefined;
+/** The last tap that landed on `<html>` while a transition ran, replayed when it ends. */
+let pendingTap: { x: number; y: number } | undefined;
+
+/**
+ * Remember a tap that the running transition swallowed. While a view transition runs the
+ * browser hit-tests to its `::view-transition` pseudo-elements, so a tap reaches `<html>`
+ * and never the link under the finger.
+ *
+ * @param event - The click, listened for in the capture phase.
+ * @example
+ * document.addEventListener("click", rememberSwallowedTap, true);
+ */
+function rememberSwallowedTap(event: MouseEvent): void {
+  if (event.target !== document.documentElement) return;
+  pendingTap = { x: event.clientX, y: event.clientY };
+}
+
+/**
+ * Replay the swallowed tap on the link that is now under its point. The click goes through
+ * the router like any tap, so a link the SPA leaves to the browser stays the browser's.
+ *
+ * @example
+ * replaySwallowedTap(); // after the last transition finished
+ */
+function replaySwallowedTap(): void {
+  const tap = pendingTap;
+  pendingTap = undefined;
+  if (!tap || typeof document.elementsFromPoint !== "function") return;
+  const hits = document.elementsFromPoint(tap.x, tap.y);
+  const link = hits.map(element => element.closest("a")).find(Boolean);
+  link?.click();
+}
+
+/**
+ * Track a started transition: skip the one it replaces, listen for swallowed taps while it
+ * runs, and replay the last one when it ends. A transition that a newer one replaced ends
+ * nothing: the newer one owns the listener and the replay.
+ *
+ * @param transition - The handle `startViewTransition` returned.
+ * @example
+ * trackTransition(document.startViewTransition(doSwap));
+ */
+function trackTransition(transition: ViewTransitionHandle | undefined): void {
+  if (!transition) return;
+  if (!activeTransition) document.addEventListener("click", rememberSwallowedTap, true);
+  activeTransition = transition;
+  // eslint-disable-next-line jsdoc/require-jsdoc -- inline end-of-transition cleanup
+  const end = (): void => {
+    if (activeTransition !== transition) return;
+    activeTransition = undefined;
+    document.removeEventListener("click", rememberSwallowedTap, true);
+    replaySwallowedTap();
+  };
+  Promise.resolve(transition.finished).then(end).catch(end);
+}
+
 /**
  * Run a DOM-mutating swap, optionally wrapped in the View Transitions API when
  * enabled and supported (instant swap otherwise — never throws).
@@ -319,7 +384,7 @@ export function runSwap(
   const docWithVt = document as Document & {
     startViewTransition?: (
       cb: (() => void) | { update: () => void; types?: string[] }
-    ) => { finished?: Promise<unknown>; ready?: Promise<unknown> } | undefined;
+    ) => ViewTransitionHandle | undefined;
   };
   const canUseViewTransitions =
     transition.enabled && !reduced && typeof docWithVt.startViewTransition === "function";
@@ -340,7 +405,11 @@ export function runSwap(
     if (hasTypes && root) delete root.dataset.viewTransition;
   };
 
-  let result: { finished?: Promise<unknown>; ready?: Promise<unknown> } | undefined;
+  // A navigation that lands while a transition runs: skip the running one first, so two
+  // transitions never overlap (its update still applies; only its animation is dropped).
+  activeTransition?.skipTransition?.();
+
+  let result: ViewTransitionHandle | undefined;
   if (hasTypes) {
     try {
       // Standards-track dictionary form: also drives `:active-view-transition-type(...)`.
@@ -360,6 +429,7 @@ export function runSwap(
   // applies. The skip is benign, so own that one rejection HERE rather than leaking an "Uncaught (in
   // promise)" to every consumer's console. (Nothing else reads `ready`; this purely marks it handled.)
   Promise.resolve(result?.ready).catch(() => {});
+  trackTransition(result);
 }
 
 /**
@@ -394,7 +464,10 @@ export function swapRegion(
   if (!newContent || !currentContent) return false;
   runSwap(
     () => {
-      currentContent.replaceWith(newContent);
+      // Look the region up again when the swap runs: a swap queued behind a running
+      // transition finds the region that transition put in, not the detached old one.
+      const liveContent = document.querySelector(swapSelector) ?? currentContent;
+      liveContent.replaceWith(newContent);
       onSwapped();
     },
     transition,

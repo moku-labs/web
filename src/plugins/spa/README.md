@@ -112,7 +112,7 @@ Why not `<link rel="prefetch">`: sites serve HTML with `Cache-Control: max-age=0
 | Field | Type | Default | Notes |
 |---|---|---|---|
 | `swapSelector` | `string` | `"main > section"` | CSS selector for the DOM region replaced on each navigation. |
-| `viewTransitions` | `boolean \| TransitionMode` | `false` | Opt-in `document.startViewTransition` wrapping. `true` is `"crossfade"`, `false` is `"none"`. Instant swap when unsupported or under `prefers-reduced-motion`. |
+| `viewTransitions` | `boolean \| TransitionMode` | `false` | Opt-in `document.startViewTransition` wrapping. `true` is `"crossfade"`, `false` is `"none"`. Instant swap when unsupported or under `prefers-reduced-motion`. One transition at a time: a navigation during a transition skips the running one. A link tap that lands on `<html>` during a transition is replayed on the link under it when the transition ends. |
 | `progressBar` | `boolean` | `true` | Toggle the in-house top progress bar shown during navigation. |
 | `islands` | `IslandDef[]` | `[]` | Islands to auto-register at init (in addition to runtime `register`). |
 | `prefetch` | `false \| "intent" \| "visible"` | `false` | Preload a linked page (its HTML, or its data on the DATA path) before the tap. See [Preloading](#preloading). |

@@ -5,7 +5,7 @@ import type { Api as HeadApi } from "../../../head/types";
 import type { RouteDefinition, RouterApi } from "../../../router/types";
 import { createSpaKernel, resolveSpaConfig } from "../../kernel";
 import { createState } from "../../state";
-import type { SpaKernel, SpaKernelDeps, SpaState } from "../../types";
+import type { SpaConfig, SpaKernel, SpaKernelDeps, SpaState } from "../../types";
 
 /** happy-dom's own Location: several tests below swap `globalThis.location` for a stub. */
 const happyLocation = globalThis.location;
@@ -49,6 +49,12 @@ interface DataSetup {
   raw?: unknown;
   mode?: "ssg" | "spa" | "hybrid";
   render?: (route: { head?: { title?: string } }) => string;
+  config?: SpaConfig;
+}
+
+/** A component that throws while Preact renders it. */
+function BrokenComponent(): never {
+  throw new Error("render failed");
 }
 
 /** A kernel wired with the data reader enabled + the given matched route + raw payload. */
@@ -62,7 +68,7 @@ function setupData(options: DataSetup = {}) {
     head: makeHead(options.render),
     dataAt
   };
-  const kernel = createSpaKernel(state, {}, emit, deps);
+  const kernel = createSpaKernel(state, options.config ?? {}, emit, deps);
   return { state, emit, kernel, dataAt };
 }
 
@@ -448,6 +454,84 @@ describe("kernel.processNav — client DATA path (data plugin composed)", () => 
     expect(document.title).toBe("From Data");
     expect(state.currentUrl).toBe("/en/hello/");
     expect(fetchSpy).not.toHaveBeenCalled(); // DATA path, not HTML-over-fetch
+  });
+
+  it("a DATA swap queued behind a running transition renders into the live region, not the replaced one", async () => {
+    // Bug: an earlier HTML swap lands while this navigation waits for its transition, so the
+    // region this navigation looked up is detached by the time its update runs. Rendering into it
+    // leaves the page on the old navigation's content.
+    const { emit, kernel } = setupData({
+      route: makeDataRoute(),
+      raw: { title: "From Data" },
+      config: { viewTransitions: true }
+    });
+    kernel.init();
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    Object.defineProperty(document, "startViewTransition", {
+      configurable: true,
+      value: (update: () => void) => {
+        // The earlier navigation's queued swap replaces the region first.
+        const fresh = document.createElement("section");
+        fresh.id = "page";
+        document.querySelector("#page")?.replaceWith(fresh);
+        update();
+        return { finished: Promise.resolve(), ready: Promise.resolve() };
+      }
+    });
+
+    kernel.processNav("/en/hello/");
+    await vi.waitFor(() =>
+      expect(emit).toHaveBeenCalledWith("spa:navigated", { url: "/en/hello/" })
+    );
+    Reflect.deleteProperty(document, "startViewTransition");
+    expect(document.querySelector("#page")?.textContent).toBe("data:From Data");
+  });
+
+  it("a DATA render that throws inside a view transition reports the error and loads the page in full", async () => {
+    // Bug: renderVNode clears the region, then the component throws. Inside startViewTransition the
+    // error only rejects `finished`/`ready`, which runSwap swallows, and tryDataRender's catch has
+    // already returned: the region stays empty (the black content area) and nothing is reported.
+    const { kernel } = setupData({
+      route: makeDataRoute({ render: () => h(BrokenComponent, {}) }),
+      config: { viewTransitions: true }
+    });
+    kernel.init();
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    const reportError = vi.fn();
+    vi.stubGlobal("reportError", reportError);
+    Object.defineProperty(document, "startViewTransition", {
+      configurable: true,
+      value: (update: () => void) => {
+        // The browser runs the update itself: its throw only rejects the transition's promises.
+        let finished: Promise<void>;
+        try {
+          update();
+          finished = Promise.resolve();
+        } catch (error) {
+          finished = Promise.reject(error);
+        }
+        return { finished, ready: finished };
+      }
+    });
+    const hrefSetter = vi.fn();
+    Object.defineProperty(globalThis, "location", {
+      configurable: true,
+      value: {
+        pathname: "/",
+        search: "",
+        get href() {
+          return "";
+        },
+        set href(v: string) {
+          hrefSetter(v);
+        }
+      }
+    });
+
+    kernel.processNav("/en/hello/");
+    await vi.waitFor(() => expect(hrefSetter).toHaveBeenCalledWith("/en/hello/"));
+    Reflect.deleteProperty(document, "startViewTransition");
+    expect(reportError).toHaveBeenCalledWith(expect.objectContaining({ message: "render failed" }));
   });
 
   it("announces the nav (spa:navigate) BEFORE awaiting the data fetch — feedback during the load", async () => {

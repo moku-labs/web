@@ -50,6 +50,14 @@ function runIntercept(event: { intercept: { mock: { calls: unknown[][] } } }): P
   return options.handler();
 }
 
+/** A fetched page whose `main > section#page` region holds the given text. */
+function pageDoc(text: string): Document {
+  return new DOMParser().parseFromString(
+    `<html><body><main><section id="page">${text}</section></main></body></html>`,
+    "text/html"
+  );
+}
+
 /** Attach the Navigation API to a mock and return the registered navigate listener. */
 function attachAndCapture(handlers: RouterHandlers): (e: unknown) => void {
   let captured: ((e: unknown) => void) | undefined;
@@ -557,6 +565,103 @@ describe("swapRegion / runSwap (View Transitions)", () => {
     const onSwapped = vi.fn();
     expect(swapRegion(doc, "main > section", { enabled: false, types: [] }, onSwapped)).toBe(false);
     expect(onSwapped).not.toHaveBeenCalled();
+  });
+
+  it("a tap that lands on <html> during a transition replays on the link under it once the transition ends", async () => {
+    // WebKit/Blink hit-test to the ::view-transition pseudo-elements while a transition runs, so
+    // a tab tap 50–300 ms after a card tap reaches <html>, never the link: the navigation is lost.
+    document.body.innerHTML = `<nav><a id="tab" href="/mylist">マイリスト</a></nav>`;
+    const tab = document.querySelector<HTMLAnchorElement>("#tab");
+    const tabClicks: number[] = [];
+    tab?.addEventListener("click", event => {
+      event.preventDefault();
+      tabClicks.push(1);
+    });
+    const elementsFromPoint = vi.fn((_x: number, _y: number) => [tab, document.body]);
+    (document as unknown as { elementsFromPoint: typeof elementsFromPoint }).elementsFromPoint =
+      elementsFromPoint;
+    let resolveFinished!: () => void;
+    const finished = new Promise<void>(r => {
+      resolveFinished = r;
+    });
+    const startViewTransition = vi.fn((cb: () => void) => {
+      cb();
+      return { finished };
+    });
+    (
+      document as unknown as { startViewTransition: typeof startViewTransition }
+    ).startViewTransition = startViewTransition;
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+
+    runSwap(() => {}, { enabled: true, types: [] });
+    document.documentElement.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, clientX: 40, clientY: 700 })
+    );
+    expect(tabClicks).toHaveLength(0); // nothing replays while the transition still runs
+
+    resolveFinished();
+    await finished;
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(elementsFromPoint).toHaveBeenCalledWith(40, 700);
+    expect(tabClicks).toHaveLength(1);
+
+    // After the transition a tap on <html> is a plain tap again: nothing is replayed.
+    document.documentElement.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, clientX: 40, clientY: 700 })
+    );
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(tabClicks).toHaveLength(1);
+    delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
+    delete (document as unknown as { elementsFromPoint?: unknown }).elementsFromPoint;
+  });
+
+  it("a swap started while a transition runs skips the running one first: never two at once", async () => {
+    const skipFirst = vi.fn();
+    const transitions = [
+      { finished: new Promise<void>(() => {}), skipTransition: skipFirst },
+      { finished: Promise.resolve(), skipTransition: vi.fn() }
+    ];
+    let skippedBeforeSecondStart = false;
+    const startViewTransition = vi.fn((cb: () => void) => {
+      const call = startViewTransition.mock.calls.length;
+      if (call === 2) skippedBeforeSecondStart = skipFirst.mock.calls.length === 1;
+      cb();
+      return transitions[call - 1];
+    });
+    (
+      document as unknown as { startViewTransition: typeof startViewTransition }
+    ).startViewTransition = startViewTransition;
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+
+    runSwap(() => {}, { enabled: true, types: [] });
+    runSwap(() => {}, { enabled: true, types: [] });
+    expect(startViewTransition).toHaveBeenCalledTimes(2);
+    expect(skippedBeforeSecondStart).toBe(true);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
+  });
+
+  it("swapRegion finds the region when its swap runs: a swap queued behind another still lands", () => {
+    // Two navigations back to back: the first swap's update has not run yet when the second
+    // swapRegion is called. The second must replace the region the first one put in, not the
+    // detached old one, or the page shows the wrong (or no) content.
+    document.body.innerHTML = `<main><section id="page">old</section></main>`;
+    const queued: Array<() => void> = [];
+    const startViewTransition = vi.fn((cb: () => void) => {
+      queued.push(cb); // the browser runs the update later, after it captured the old state
+      return { finished: new Promise<void>(() => {}), skipTransition: vi.fn() };
+    });
+    (
+      document as unknown as { startViewTransition: typeof startViewTransition }
+    ).startViewTransition = startViewTransition;
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    const vt = { enabled: true, types: [] };
+
+    expect(swapRegion(pageDoc("series"), "main > section", vt, vi.fn())).toBe(true);
+    expect(swapRegion(pageDoc("mylist"), "main > section", vt, vi.fn())).toBe(true);
+    for (const update of queued) update();
+    expect(document.querySelector("#page")?.textContent).toBe("mylist");
+    delete (document as unknown as { startViewTransition?: unknown }).startViewTransition;
   });
 
   it("swapRegion returns false (no swap) when the fetched document lacks the region", () => {
