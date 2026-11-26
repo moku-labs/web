@@ -120,6 +120,50 @@ describe("ctx.navigate", () => {
   });
 });
 
+describe("ctx.require", () => {
+  /** A stand-in plugin instance: the bound `require` only needs it to pass through. */
+  const probePlugin = { name: "probe" } as never;
+
+  it("resolves the plugin API through the require bound on state", () => {
+    const state = freshState();
+    const api = { ping: () => "pong" };
+    const bound = vi.fn(() => api);
+    state.require = bound as never;
+    let received: unknown;
+    state.registeredIslands.set("c", {
+      name: "c",
+      hooks: {
+        onMount(ctx) {
+          received = ctx.require(probePlugin);
+        }
+      }
+    });
+    document.body.innerHTML = `<main><section><div data-island="c"></div></section></main>`;
+
+    scanAndMount(state, vi.fn(), "main > section");
+
+    expect(bound).toHaveBeenCalledWith(probePlugin);
+    expect(received).toBe(api);
+  });
+
+  it("throws the spa error naming the plugin before init", () => {
+    const state = freshState();
+    state.registeredIslands.set("c", {
+      name: "c",
+      hooks: {
+        onMount(ctx) {
+          ctx.require(probePlugin);
+        }
+      }
+    });
+    document.body.innerHTML = `<main><section><div data-island="c"></div></section></main>`;
+
+    expect(() => scanAndMount(state, vi.fn(), "main > section")).toThrow(
+      '[web] spa: ctx.require("probe") called before the spa plugin initialized.\n  Mount islands through createApp, or pass the plugin api to mountIsland.'
+    );
+  });
+});
+
 describe("extractPageData", () => {
   it("parses the inline script#__DATA__ payload", () => {
     document.body.innerHTML = `<script id="__DATA__" type="application/json">{"a":1}</script>`;

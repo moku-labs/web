@@ -31,11 +31,26 @@ import type {
   IslandDef,
   IslandRender,
   PageData,
-  RenderResult
+  RenderResult,
+  SpaRequire
 } from "./plugins/spa/types";
 
 /** The swap selector the harness uses to bound page-specific islands. */
 const SWAP_SELECTOR = "main > section";
+
+/**
+ * The harness's `ctx.require` for a plugin nobody stubbed: fails with the plugin's name.
+ *
+ * @param name - The registered name of the plugin that was asked for.
+ * @throws {Error} Always, naming the plugin and the `options.plugins` fix.
+ * @example
+ * missingStub("replicant"); // throws: no stub for plugin "replicant"
+ */
+function missingStub(name: string): never {
+  throw new Error(
+    `[web] mountIsland: no stub for plugin "${name}".\n  Pass it in options.plugins.`
+  );
+}
 
 /** One captured spa emit (the kernel's `spa:island-mount` / `-unmount`). */
 export interface CapturedEmit {
@@ -137,6 +152,14 @@ export interface MountIslandOptions {
   persistent?: boolean;
   /** Stubbed sibling-island apis resolved by `ctx.island(name)`. */
   islands?: Record<string, unknown>;
+  /**
+   * Stubbed plugin apis keyed by plugin name, resolved by `ctx.require(plugin)`. A plugin
+   * that is not listed throws, naming it.
+   *
+   * @example
+   * mountIsland(coinsIsland, { plugins: { replicant: { state: () => ({ coins: 3 }) } } });
+   */
+  plugins?: Record<string, unknown>;
 }
 
 /**
@@ -179,6 +202,13 @@ export function mountIsland<S extends object = object, A = unknown>(
       state.islandApis.set(name, api);
     }
   }
+
+  // `ctx.require(plugin)` looks the stub up by the plugin's name (the real kernel binds the core one).
+  const stubs = options.plugins ?? {};
+  state.require = (plugin => {
+    if (!Object.hasOwn(stubs, plugin.name)) return missingStub(plugin.name);
+    return stubs[plugin.name];
+  }) as SpaRequire;
 
   // 2. Build the DOM: a swap region + the host (created, or the provided element).
   const host = options.el ?? document.createElement("div");
@@ -422,7 +452,8 @@ export function renderIsland<S extends object>(
     set: noopStub,
     flush: noopStub,
     cleanup: noopStub,
-    island: noopStub
+    island: noopStub,
+    require: ((plugin: { name: string }) => missingStub(plugin.name)) as unknown as SpaRequire
   } as unknown as IslandContext<S>;
   const ctx = { ...baseContext, ...input.ctx } as IslandContext<S>;
 

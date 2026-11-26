@@ -310,6 +310,24 @@ function buildContext(state: SpaState, instance: IslandInstance): IslandContext<
      */
     island<T = unknown>(name: string): T | undefined {
       return state.islandApis.get(name) as T | undefined;
+    },
+    /**
+     * Resolve any registered plugin to its typed api (delegates to the plugin context's
+     * `require` through `state.require`). Throws before the spa plugin initialized.
+     *
+     * @param plugin - The plugin instance to resolve.
+     * @returns The public api of the plugin.
+     * @throws {Error} When `state.require` is not bound yet.
+     * @example
+     * ctx.require(replicantPlugin).state();
+     */
+    require(plugin) {
+      if (state.require === null) {
+        throw new Error(
+          `${ERROR_PREFIX} spa: ctx.require("${plugin.name}") called before the spa plugin initialized.\n  Mount islands through createApp, or pass the plugin api to mountIsland.`
+        );
+      }
+      return state.require(plugin);
     }
   };
 }

@@ -464,6 +464,26 @@ describe("spa integration", () => {
     vi.unstubAllGlobals();
   });
 
+  it("an island reads another plugin's api with ctx.require", async () => {
+    const { createApp, createPlugin } = makeCore();
+    const probe = createPlugin("island-probe", {
+      api: () => ({ greeting: () => "hello from probe" })
+    });
+    let greeting = "";
+    const reader = createIsland("reader", {
+      onMount(ctx) {
+        greeting = ctx.require(probe).greeting();
+      }
+    });
+    document.body.innerHTML = `<main><section id="page"><div data-island="reader"></div></section></main>`;
+    app = makeApp(createApp, [probe], { islands: [reader] });
+
+    await app.start();
+
+    expect(greeting).toBe("hello from probe");
+    expect(greeting).toBe(app.require(probe).greeting());
+  });
+
   it("type-level: app.spa is SpaApi with register/navigate/current", () => {
     const { createApp } = makeCore();
     app = makeApp(createApp);

@@ -64,7 +64,7 @@ export type ExtractApi<PluginCandidate> = PluginCandidate extends {
   ? PluginApi
   : never;
 
-/** Generic `require` closure for pulling dependency plugin APIs at init time. */
+/** Generic `require` closure: resolves a registered plugin instance to its typed public API. */
 export type SpaRequire = <
   PluginCandidate extends {
     readonly name: string;
@@ -90,7 +90,7 @@ export interface SpaContext {
   state: SpaState;
   /** Resolved, frozen spa config. */
   readonly config: Readonly<SpaConfig>;
-  /** Resolve a depended-upon plugin instance to its public API. */
+  /** Resolve a registered plugin instance to its public API. */
   require: SpaRequire;
   /**
    * Whether a plugin is registered (by name). Used to detect the OPTIONAL `data`
@@ -343,6 +343,26 @@ export interface IslandContext<S = undefined> {
    * ctx.island<LightboxApi>("lightbox")?.open(slides, index);
    */
   island<T = unknown>(name: string): T | undefined;
+  /**
+   * Resolve any plugin registered in the app to its typed public API, by instance: the same
+   * call a plugin makes in its own hooks (`ctx.require(plugin)`). Not limited to the `depends`
+   * of `spa`. Throws the core "not registered" error for a plugin the app does not have.
+   * Available in every hook, `state`, `render`, `api` and `events` handler (they share this ctx).
+   * Islands mount after `spa` init, so a real app never hits the before-init error; a headless
+   * ctx built without the plugin throws one naming the plugin (`mountIsland` takes stubs in
+   * `options.plugins`).
+   *
+   * @param plugin - The plugin instance to resolve (e.g. `replicantPlugin`).
+   * @returns The public API of the plugin, typed by the plugin.
+   * @example
+   * onMount: ctx => {
+   *   const replicant = ctx.require(replicantPlugin); // typed ReplicantApi
+   *   ctx.el.textContent = String(replicant.state().coins);
+   * }
+   */
+  require<PluginCandidate extends Parameters<SpaRequire>[0]>(
+    plugin: PluginCandidate
+  ): ExtractApi<PluginCandidate>;
 }
 
 /** Lifecycle hooks a island may implement. Generic over the per-instance state `S`. */
@@ -626,6 +646,11 @@ export interface SpaState {
   navigate: ((path: string, options?: NavigateOptions) => void) | null;
   /** The kernel's `updateUrl`, bound at init (null until then); read by `ctx.updateUrl`. */
   updateUrl: ((path: string) => void) | null;
+  /**
+   * The plugin context's `require`, bound at init (null until then). The island context's
+   * `ctx.require` reads through this, the same seam as `navigate`, so `islands.ts` never imports core.
+   */
+  require: SpaRequire | null;
   /** The single shared SPA kernel instance (null until onInit builds it). */
   kernel: SpaKernel | null;
   /**

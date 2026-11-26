@@ -165,6 +165,8 @@ export function createState(_ctx: {
     navigate: null,
     // eslint-disable-next-line unicorn/no-null -- `updateUrl` is bound by the kernel at init
     updateUrl: null,
+    // eslint-disable-next-line unicorn/no-null -- `require` is bound by initSpa at init
+    require: null,
     // eslint-disable-next-line unicorn/no-null -- `kernel` is `SpaKernel | null` until onInit builds it
     kernel: null,
     // eslint-disable-next-line unicorn/no-null -- `prefetch` is `Prefetcher | null` until kernel.boot() builds it
