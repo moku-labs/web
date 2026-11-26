@@ -106,6 +106,26 @@ describe("build/phases/bundle", () => {
     expect(ctx.state.buildCache.get("js")).toEqual({ "spa-ab12.js": "assets/spa-ab12.js" });
   });
 
+  // Bug (2.4.25): the stylesheet Bun builds from the CSS an entry imports is also kind "asset", so
+  // the entry-points-only filter dropped it and no page had its <link>. Bun tells the two apart by
+  // loader: the entry's loader for the entry CSS, "file" for an import `with { type: "file" }`.
+  it('tags the entry\'s own stylesheet, not a file imported with { type: "file" }', async () => {
+    const runner = vi.fn(async () => ({
+      success: true,
+      outputs: [
+        { path: "dist/assets/main-ab12.js", kind: "entry-point", loader: "ts" },
+        { path: "dist/assets/main-cd34.css", kind: "asset", loader: "ts" },
+        { path: "dist/assets/fonts-9f8e.css", kind: "asset", loader: "file" }
+      ]
+    }));
+    const ctx = makeCtx({ config: { outDir: "./dist", minify: true } });
+    await bundle(ctx, { runner, cssEntrypoints: [], jsEntrypoints: ["main.ts"] });
+    expect(ctx.state.buildCache.get("js")).toEqual({
+      "main-ab12.js": "assets/main-ab12.js",
+      "main-cd34.css": "assets/main-cd34.css"
+    });
+  });
+
   it("requests content-hashed naming for EVERY output kind (entry points included)", async () => {
     // Bun's default naming only hashes chunks/assets — entry points keep stable
     // names ("main.css"), which a CDN/browser can cache stale across deploys.
