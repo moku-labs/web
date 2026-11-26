@@ -57,7 +57,7 @@ function replayTap(tap: { x: number; y: number } | undefined): void {
  * calls it on teardown, so a stopped app never replays a tap.
  *
  * @example
- * resetTransitionTracking(); // kernel.dispose()
+ * resetTransitionTracking(); // swallowed tap forgotten, click listener removed
  */
 export function resetTransitionTracking(): void {
   if (activeTransition) document.removeEventListener("click", rememberSwallowedTap, true);
