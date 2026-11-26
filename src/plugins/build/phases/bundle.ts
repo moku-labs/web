@@ -57,7 +57,31 @@ export type BuildArtifact = {
   readonly path: string;
   /** The artifact kind reported by the bundler. */
   readonly kind?: string;
+  /** The loader that produced the artifact: `"file"` for an import `with { type: "file" }`. */
+  readonly loader?: string;
 };
+
+/**
+ * Whether an artifact gets a `<link>` or `<script>` tag on every page: an entry point, or the
+ * stylesheet Bun builds from the CSS an entry imports (kind `"asset"`, the entry's loader). A file
+ * imported `with { type: "file" }` or an emitted font (loader `"file"`), a chunk and a source map get
+ * none: a tag would fetch them at once on every page. An output with no kind counts as an entry point;
+ * an asset with no loader gets no tag.
+ *
+ * @param output - One `Bun.build` artifact.
+ * @returns True when the pages phase tags it.
+ * @example
+ * ```ts
+ * isTagged({ path: "out/main-ab12.css", kind: "asset", loader: "ts" }); // true
+ * isTagged({ path: "out/fonts-9f8e.css", kind: "asset", loader: "file" }); // false
+ * ```
+ */
+function isTagged(output: BuildArtifact): boolean {
+  if (output.kind === undefined || output.kind === "entry-point") return true;
+  const builtByEntry = output.loader !== undefined && output.loader !== "file";
+  const entryCss = output.kind === "asset" && builtByEntry;
+  return entryCss && output.path.endsWith(".css");
+}
 
 /**
  * Structural view of the `Bun.build` metafile (only the output import graph the
@@ -443,12 +467,10 @@ async function runOne(
   // chunks (kind "chunk") are deliberately NOT recorded: this manifest feeds the
   // pages phase's <link>/<script> injection, and script-tagging a chunk would
   // eagerly load it on every page — the entry's rewritten `import("./chunk-…")`
-  // already fetches it on demand. Only entry points get a tag: an "asset" (a file imported
-  // `with { type: "file" }`, an emitted font) or a "sourcemap" injected as a module script would
-  // be fetched at once by every page. An output with no kind counts as an entry point.
+  // already fetches it on demand. `isTagged` says which outputs get a tag.
   const hashed: BuildCacheEntry = {};
   for (const output of result.outputs) {
-    if (output.kind !== undefined && output.kind !== "entry-point") continue;
+    if (!isTagged(output)) continue;
     hashed[path.basename(output.path)] = normalizeAssetPath(output.path, outDir);
   }
 
